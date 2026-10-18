@@ -112,3 +112,7 @@ footer { margin-top: 0; }
   background: #b91c1c; color: #fff; font-size: 13.5px; }
 .example-banner span { font-size: 12px; opacity: 0.92; }
 .example-banner:empty { display: none; }
+
+/* ===== Tool cost (stage 4) ===== */
+.btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.cost-table td.how { font-size: 12px; color: var(--grey); }

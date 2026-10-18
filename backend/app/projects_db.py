@@ -94,6 +94,12 @@ parts = Table(
     # latest RM cost version (kept here too for fast search, filters and dashboards)
     Column("rm_cost_id", Integer),
     Column("rm_cost_inr", Float),
+    # tool cost (stage 4): tool country (blank = producing country), typed tool features, latest version
+    Column("tool_country", String(10), default=""),
+    Column("tool_inputs", JSON),
+    Column("tool_cost_id", Integer),
+    Column("tool_cost_inr", Float),      # per tool
+    Column("tool_capex_inr", Float),     # per tool × tools over the programme
     Column("created_by", String(100), default=""),
     Column("created_at", DateTime, default=now),
     Column("updated_at", DateTime, default=now, onupdate=now),
@@ -169,6 +175,35 @@ rm_costs = Table(
     Column("created_at", DateTime, default=now),
     UniqueConstraint("part_id", "version"),
     Index("ix_rm_costs_part", "part_id"),
+)
+
+# Tool cost versions (stage 4): never overwritten, like the RM cost versions.
+tool_costs = Table(
+    "tool_costs", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("revision_id", ForeignKey("revisions.id")),
+    Column("rev", String(20), default=""),
+    Column("part_type", String(30), nullable=False),   # plastic, die_casting
+    Column("country", String(10), nullable=False),     # tool country
+    Column("currency", String(10), nullable=False),
+    Column("as_of", String(7), nullable=False),        # costing month
+    Column("inputs", JSON),                            # tool features used (cavities, slides, ...)
+    Column("key", JSON),                               # what the result depends on, to skip identical recalculations
+    Column("cavities", Integer),
+    Column("tools_count", Integer),
+    Column("tool_cost", Float),                        # per tool, in the tool country's currency
+    Column("tool_cost_inr", Float),
+    Column("tool_capex_inr", Float),
+    Column("rates_used", JSON),
+    Column("example", JSON),                           # EXAMPLE rates and master-data rows used
+    Column("trace", JSON),
+    Column("reason", String(300), default=""),
+    Column("created_by", String(100), default=""),
+    Column("created_at", DateTime, default=now),
+    UniqueConstraint("part_id", "version"),
+    Index("ix_tool_costs_part", "part_id"),
 )
 
 history = Table(

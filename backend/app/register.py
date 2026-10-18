@@ -27,7 +27,8 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 from sqlalchemy import and_, func, or_, select
 
-from . import cad_import, costing_setup, file_store, formula, master_data, rates, register_setup, rm_cost
+from . import (cad_import, capacity, costing_setup, file_store, formula, master_data, mould_db, rates, register_setup,
+               rm_cost, tool_cost)
 from . import projects_db as db
 from .table_set import EXAMPLE_FILL, HEADER_FILL
 from .trace import EXAMPLE_WARNING
@@ -205,7 +206,7 @@ def update_variant(vid: int, data: dict) -> dict:
 
 PART_FIELDS = ("name", "material", "process", "sourcing", "status", "annual_volume", "programme_life_years",
                "target_piece_cost_inr", "notes", "unit_price", "price_currency", "price_source", "price_month",
-               "price_is_example", "dimensions", "country", "costing_month", "rm_inputs")
+               "price_is_example", "dimensions", "country", "costing_month", "rm_inputs", "tool_country", "tool_inputs")
 
 
 def next_part_code(conn, project_code: str) -> str:
@@ -302,7 +303,7 @@ def _part_values(data, where="Part"):
             out[k] = _num(v, f"{where}: annual volume", int)
         elif k in ("programme_life_years", "target_piece_cost_inr", "unit_price"):
             out[k] = _num(v, f"{where}: {k.replace('_', ' ')}")
-        elif k == "country":
+        elif k in ("country", "tool_country"):
             code = str(v or "").strip().upper()
             if code and code not in costing_setup.countries():
                 raise RegisterError(f"{where}: country '{code}' is not in Master data → Countries.")
@@ -314,6 +315,8 @@ def _part_values(data, where="Part"):
             out[k] = m
         elif k == "rm_inputs":
             out[k] = _rm_inputs(v, where)
+        elif k == "tool_inputs":
+            out[k] = _tool_inputs(v, where)
         elif k == "price_is_example":
             out[k] = v is True or str(v).strip().lower() in ("1", "true", "yes", "on", "example")
         elif k == "dimensions":
@@ -431,8 +434,9 @@ def update_part(part_id: int, data: dict, refresh: bool = True) -> dict:
         if changes:
             conn.execute(db.parts.update().where(db.parts.c.id == part_id).values(**vals))
             _log(conn, "part", part_id, "updated", changes)
-    if refresh and {"material", "process", "sourcing", "country", "costing_month", "rm_inputs"} & set(changes):
-        refresh_rm([part_id], "part details changed")
+    if refresh and {"material", "process", "sourcing", "country", "costing_month", "rm_inputs", "tool_country",
+                    "tool_inputs", "annual_volume", "programme_life_years"} & set(changes):
+        refresh_costs([part_id], "part details changed")
     return part_detail(part_id)
 
 
@@ -449,7 +453,7 @@ def new_revision_from_upload(part_id: int, content: bytes, file_name: str, rev: 
     with db.engine().begin() as conn:
         add_revision(conn, part_id, rev, step=content, file_name=file_name, thumbnail=root.get("thumbnail"),
                      geometry=geometry, change_note=change_note, source=f"upload {file_name}")
-    refresh_rm([part_id], "new revision")
+    refresh_costs([part_id], "new revision")
     return part_detail(part_id)
 
 
@@ -464,8 +468,8 @@ def _part_query():
 
 
 def search(q="", project_id=None, process="", status="", sourcing="", rev="", file_missing=None,
-           target_min=None, target_max=None, rm_min=None, rm_max=None, rm_missing=None, sort="part_code", limit=50,
-           offset=0) -> dict:
+           target_min=None, target_max=None, rm_min=None, rm_max=None, rm_missing=None, tool_min=None, tool_max=None,
+           tool_missing=None, sort="part_code", limit=50, offset=0) -> dict:
     query, r = _part_query()
     conds = []
     if q:
@@ -492,17 +496,27 @@ def search(q="", project_id=None, process="", status="", sourcing="", rev="", fi
         conds.append(db.parts.c.rm_cost_inr <= rm_max)
     if rm_missing is True:
         conds.append(and_(db.parts.c.rm_cost_inr.is_(None), db.parts.c.is_assembly.is_(False)))
+    if tool_min is not None:
+        conds.append(db.parts.c.tool_cost_inr >= tool_min)
+    if tool_max is not None:
+        conds.append(db.parts.c.tool_cost_inr <= tool_max)
+    if tool_missing is True:  # a part whose process has a tool cost (moulding, die casting) but none stored yet
+        tool_procs = [c for c, p in register_setup.processes().items() if p["part_type"] in tool_cost.PART_TYPES]
+        made = [c for c, x in register_setup.sourcing().items() if x["is_costed"]]
+        conds.append(and_(db.parts.c.tool_cost_inr.is_(None), db.parts.c.is_assembly.is_(False),
+                          db.parts.c.process.in_(tool_procs), db.parts.c.sourcing.in_(made)))
     if conds:
         query = query.where(and_(*conds))
-    sort_cols = {"rm_cost": db.parts.c.rm_cost_inr.desc(), "part_code": db.parts.c.part_code, "name": db.parts.c.name, "updated": db.parts.c.updated_at.desc(),
+    sort_cols = {"rm_cost": db.parts.c.rm_cost_inr.desc(), "tool_cost": db.parts.c.tool_cost_inr.desc(), "part_code": db.parts.c.part_code, "name": db.parts.c.name, "updated": db.parts.c.updated_at.desc(),
                  "status": db.parts.c.status, "process": db.parts.c.process}
     with db.engine().connect() as conn:
         total = conn.execute(select(func.count()).select_from(query.subquery())).scalar()
         rows = conn.execute(query.order_by(sort_cols.get(sort, db.parts.c.part_code))
                             .limit(min(int(limit), 500)).offset(int(offset))).mappings().all()
         example = _rm_example_parts(conn, [x["id"] for x in rows])
-    return {"total": total, "rows": [_plain(x) | {"rm_is_example": x["id"] in example} for x in rows],
-            "example_warning": EXAMPLE_WARNING}
+        tool_example = _tool_example_parts(conn, [x["id"] for x in rows])
+    return {"total": total, "rows": [_plain(x) | {"rm_is_example": x["id"] in example, "tool_is_example": x["id"] in tool_example}
+                                     for x in rows], "example_warning": EXAMPLE_WARNING}
 
 
 def _rm_example_parts(conn, part_ids) -> set:
@@ -512,6 +526,15 @@ def _rm_example_parts(conn, part_ids) -> set:
     q = (select(db.parts.c.id, db.rm_costs.c.rates_used).join(db.rm_costs, db.rm_costs.c.id == db.parts.c.rm_cost_id)
          .where(db.parts.c.id.in_(list(part_ids))))
     return {r["id"] for r in conn.execute(q).mappings() if any(x.get("is_example") for x in r["rates_used"] or [])}
+
+
+def _tool_example_parts(conn, part_ids) -> set:
+    """Parts whose stored (latest) tool cost used an EXAMPLE rate or master-data row."""
+    if not part_ids:
+        return set()
+    q = (select(db.parts.c.id, db.tool_costs.c.example).join(db.tool_costs, db.tool_costs.c.id == db.parts.c.tool_cost_id)
+         .where(db.parts.c.id.in_(list(part_ids))))
+    return {r["id"] for r in conn.execute(q).mappings() if (r["example"] or {}).get("any")}
 
 
 def part_detail(part_id: int, with_rm: bool = True) -> dict:
@@ -550,6 +573,8 @@ def part_detail(part_id: int, with_rm: bool = True) -> dict:
     if with_rm:
         out["rm"] = rm_summary(out)
         out["effective_country"] = (out["country"] or register_setup.settings()["default_country"]).upper()
+        out["tool"] = tool_summary(out)
+        out["effective_tool_country"] = (out["tool_country"] or out["effective_country"]).upper()
     return out
 
 
@@ -763,7 +788,7 @@ def link_insert(part_id: int, data: dict) -> dict:
             vals = {k: v for k, v in vals.items() if v not in (None, "")}
             insert_id, _ = upsert_part(conn, body["project_id"], code, vals)
         _set_insert_link(conn, part_id, insert_id, qty, notes=str(data.get("link_notes") or "").strip())
-    refresh_rm([part_id], "insert linked")
+    refresh_costs([part_id], "insert linked")
     return part_detail(part_id)
 
 
@@ -777,7 +802,7 @@ def unlink_insert(part_id: int, link_id: int) -> dict:
         conn.execute(db.part_inserts.delete().where(db.part_inserts.c.id == link_id))
         _log(conn, "part", part_id, "insert_removed", {"insert": row["part_code"], "quantity": row["quantity"]})
         _log(conn, "part", row["insert_part_id"], "removed_from", {"part_id": part_id})
-    refresh_rm([part_id], "insert removed")
+    refresh_costs([part_id], "insert removed")
     return part_detail(part_id)
 
 
@@ -1102,6 +1127,396 @@ def export_rm_pdf(part_id: int, version: int | None = None) -> bytes:
     return rm_cost_pdf(part_detail(part_id, with_rm=False), rm_trace(part_id, version))
 
 
+def refresh_costs(part_ids, reason: str) -> None:
+    """RM and tool cost after a change; a part that cannot be costed yet is skipped."""
+    ids = list(dict.fromkeys(part_ids))
+    refresh_rm(ids, reason)
+    refresh_tool(ids, reason)
+
+
+# ---------- tool cost versions (stage 4) ----------
+# The tool cost engine (tool_cost.py) prices the mould / die of a part from the BOM rules, tool processes and
+# formulas in master data with the approved rates of the tool country. Here its result is stored as a numbered,
+# never-overwritten version, exactly like the RM cost: recalculated when the revision, process, material, tool
+# country, month, tool features, volume or programme life change; newer approved rates never change a stored cost.
+
+class ToolNotApplicable(Exception):
+    """No tool cost for this part (the message says why and what to do)."""
+
+
+TOOL_COLUMNS = ("id", "part_id", "version", "revision_id", "rev", "part_type", "country", "currency", "as_of", "inputs",
+                "key", "cavities", "tools_count", "tool_cost", "tool_cost_inr", "tool_capex_inr", "rates_used", "example",
+                "reason", "created_by", "created_at")
+TOOL_INPUTS = {"cavities": "Cavities per tool", "hot_runner": "Hot runner", "slides_per_cavity": "Slides per cavity",
+               "lifters_per_cavity": "Lifters per cavity", "inserts_per_cavity": "Small inserts per cavity",
+               "warranty": "Warranty / spares included"}
+TOOL_FLAGS = ("hot_runner", "warranty")
+
+
+def _tool_inputs(v, where):
+    """Tool features typed per part: {cavities, hot_runner, slides_per_cavity, ..., warranty}."""
+    if v in (None, "", {}):
+        return None
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except ValueError:
+            raise RegisterError(f"{where}: tool inputs are not readable.") from None
+    out = {}
+    for k, val in v.items():
+        if val in (None, ""):
+            continue
+        if k not in TOOL_INPUTS:
+            raise RegisterError(f"{where}: '{k}' is not a tool input ({', '.join(TOOL_INPUTS)}).")
+        if k in TOOL_FLAGS:
+            out[k] = val is True or str(val).strip().lower() in ("1", "true", "yes", "on")
+            continue
+        n = _num(val, f"{where}: {TOOL_INPUTS[k].lower()}", int, required=True)
+        if n < (1 if k == "cavities" else 0) or n > 256:
+            raise RegisterError(f"{where}: {TOOL_INPUTS[k].lower()} must be between {1 if k == 'cavities' else 0} and 256.")
+        out[k] = n
+    return out or None
+
+
+def tool_eligibility(p: dict) -> str:
+    """Why there is no tool cost for this part, or "" when there is."""
+    if p["is_assembly"]:
+        return "An assembly has no tool of its own; its parts do."
+    src = register_setup.sourcing().get(p["sourcing"])
+    if src and not src["is_costed"]:
+        return f"{src['name']} parts are bought ready-made, so there is no tool to cost here."
+    proc = register_setup.processes().get(p["process"])
+    if not proc:
+        return "Set the process first."
+    if proc["part_type"] not in tool_cost.PART_TYPES:
+        return tool_cost.LATER.get(proc["part_type"], f"Tool cost for {proc['name']} parts comes in a later stage.")
+    return ""
+
+
+def _annual_volume(part: dict) -> tuple[float | None, str]:
+    """The part's own annual volume, else Σ variant annual volume × quantity of the part in that variant."""
+    if part["annual_volume"]:
+        return part["annual_volume"], "annual volume of the part"
+    total, used = 0.0, []
+    for v in get_project(part["project_id"])["variants"]:
+        if not v["annual_volume"]:
+            continue
+        qty = sum(b["total_quantity"] for b in variant_bom(v["id"]) if b["child_part_id"] == part["id"] and b["kind"] == "bom")
+        if qty:
+            total += v["annual_volume"] * qty
+            used.append(f"{v['code']} {v['annual_volume']:,} × {qty:g}")
+    if used:
+        return total, "Σ variant annual volume × quantity (" + ", ".join(used) + ")"
+    return None, "master data default (no annual volume on the part or its variants)"
+
+
+def _tool_master_hash(part_type: str) -> str:
+    """Fingerprint of every master-data row the tool cost depends on, to tell when it changed."""
+    setup = costing_setup.tables()
+    mdb = mould_db.tables()
+    data = {
+        "formulas": [r for k in ("cost_formulas", "formula_inputs") for r in setup[k]
+                     if r["scope"] in costing_setup.TOOL_SCOPES + ("mhr", "labour")],
+        "machines": setup["machines"], "grades": setup["labour_grades"],
+        "mould": {k: [r for r in mdb[k] if r.get("part_type", part_type) == part_type]
+                  for k in ("mould_bases", "bom_elements", "sizing_rules", "time_parameters", "tool_processes", "tool_materials")},
+        "parameters": master_data.parameters(part_type),
+    }
+    return hashlib.sha1(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()[:12]
+
+
+def _tool_compute(part_id: int) -> dict:
+    """Dry run: the traced tool cost of the part's current revision. Raises ToolNotApplicable / ToolCostError."""
+    d = part_detail(part_id, with_rm=False)
+    why = tool_eligibility(d)
+    if why:
+        raise ToolNotApplicable(why)
+    part_type = register_setup.processes()[d["process"]]["part_type"]
+    try:
+        t, _, _, d, rev = _geometry_trace(part_id)
+    except RegisterError:
+        raise ToolNotApplicable("This part has no 3D file yet, so the mould cannot be sized. Upload a revision.") from None
+    if "weight" not in t.nodes:
+        raise ToolNotApplicable("Set the part's material (with a density in Master data → Materials) to cost its tool.")
+    g = rev["geometry"]
+    pull = g["pull_direction"]
+    across = sorted((v for a, v in g["bbox_axes_mm"].items() if a != pull), reverse=True)
+    cad = {"type": "cad", "file": rev["original_name"], "rev": rev["rev"], "sha256": rev["sha256"]}
+    volume, volume_note = _annual_volume(d)
+    cap_in = {"part_type": part_type, "footprint_length_mm": across[0], "footprint_width_mm": across[1]}
+    if volume:
+        cap_in["annual_volume"] = max(1, round(volume))
+    if d["programme_life_years"]:
+        cap_in["programme_years"] = max(1, round(d["programme_life_years"]))
+    if part_type == "plastic" and g.get("wall_mm"):
+        cap_in["cycle_time_s"] = capacity.plastic_cycle_estimate(g["wall_mm"])
+    try:
+        cap = capacity.calculate(capacity.CapacityInput(**cap_in))
+    except ValueError as exc:
+        raise ToolNotApplicable(f"Stage C (cavities and tools) cannot be worked out: {exc}") from None
+    typed = d["tool_inputs"] or {}
+    country = (d["tool_country"] or d["country"] or register_setup.settings()["default_country"]).upper()
+    as_of = d["costing_month"] or rates.current_month()
+    inp = tool_cost.ToolInput(
+        part_type=part_type, cavities=typed.get("cavities") or cap["cavities_per_tool"],
+        part_length_mm=across[0], part_width_mm=across[1], part_height_mm=g["bbox_axes_mm"][pull],
+        projected_area_cm2=g["projected_area_mm2"][pull] / 100, part_weight_g=t.value("weight"),
+        part_volume_cm3=g["volume_cm3"], part_surface_cm2=g["surface_area_mm2"] / 100,
+        hot_runner=bool(typed.get("hot_runner")) and part_type == "plastic",
+        slides_per_cavity=typed.get("slides_per_cavity", 0),
+        lifters_per_cavity=typed.get("lifters_per_cavity", 0) if part_type == "plastic" else 0,
+        inserts_per_cavity=typed.get("inserts_per_cavity", 0), warranty=typed.get("warranty", True),
+        tools_count=cap["tool_sets_over_programme"], country=country, as_of=as_of, material=d["material"])
+    stage_c = (f"Stage C for {cap['inputs']['annual_volume']:,} parts/yr ({volume_note}), cycle "
+               f"{cap['inputs']['cycle_time_s']:g} s, OEE {cap['inputs']['oee_pct']:g} %, "
+               f"{cap['inputs']['programme_years']} programme years")
+    you = {"type": "user", "note": f"Typed in the part register for {d['part_code']}"}
+    sources = {k: cad | {"note": n} for k, n in (
+        ("part_l", f"Bounding box across the parting plane (opening direction {pull.upper()})"),
+        ("part_w", f"Bounding box across the parting plane (opening direction {pull.upper()})"),
+        ("part_h", f"Bounding box along the opening direction {pull.upper()}"),
+        ("projected_area_cm2", f"Shadow area along {pull.upper()}, through-holes removed"),
+        ("part_volume_cm3", "Measured from the STEP file"), ("part_surface_cm2", "Measured from the STEP file"))}
+    sources["part_weight_g"] = {"type": "register", "note": "Net (body) weight = CAD volume × material density (Materials)"}
+    sources["cavities"] = you if typed.get("cavities") else {
+        "type": "register", "note": f"{stage_c}: {cap['cavities_needed']:g} needed → {cap['cavities_per_tool']} per tool"}
+    sources["tools_count"] = {"type": "register", "note": f"{stage_c}: max(tools for capacity {cap['tools_for_capacity']}, "
+                                                          f"tools for tool life {cap['tools_for_life']})"}
+    for k in ("hot_runner", "slides_per_cavity", "lifters_per_cavity", "inserts_per_cavity"):
+        sources[k] = you if k in typed else {"type": "register", "note": "Default (none); set it under Tool features"}
+    sources["warranty_on"] = you if "warranty" in typed else {"type": "register", "note": "Default: included"}
+    r = tool_cost.run(inp, sources)
+    r["key"] = {"revision_id": rev["id"], "part_type": part_type, "material": d["material"], "country": country,
+                "as_of": as_of, "inputs": typed, "cavities": inp.cavities, "tools_count": inp.tools_count,
+                "weight_g": round(t.value("weight"), 6), "rates": sorted(x["id"] for x in r["rates_used"]),
+                "master": _tool_master_hash(part_type)}
+    r["revision"] = {"id": rev["id"], "rev": rev["rev"]}
+    r["process"] = d["process"]
+    r["stage_c"] = {k: cap[k] for k in ("cavities_needed", "cavities_per_tool", "tools_for_capacity", "tools_for_life",
+                                        "tool_sets_over_programme", "limited_by")} | {"note": stage_c}
+    return r
+
+
+def _tool_row(row) -> dict:
+    d = _plain({k: row[k] for k in TOOL_COLUMNS})
+    d["is_example"] = bool((d["example"] or {}).get("any"))
+    return d
+
+
+def tool_versions(part_id: int) -> list[dict]:
+    with db.engine().connect() as conn:
+        rows = conn.execute(select(db.tool_costs).where(db.tool_costs.c.part_id == part_id)
+                            .order_by(db.tool_costs.c.version.desc())).mappings().all()
+    return [_tool_row(r) for r in rows]
+
+
+def tool_summary(d: dict) -> dict:
+    """What the part panel shows about the tool: latest version, whether it is out of date, or why there is none."""
+    versions = tool_versions(d["id"])
+    latest = versions[0] if versions else None
+    out = {"applicable": False, "problem": "", "outdated": "", "rate_changes": [], "latest": latest,
+           "versions": len(versions), "inputs": TOOL_INPUTS, "live": None}
+    why = tool_eligibility(d)
+    if why:
+        out["problem"] = why
+        return out
+    out["applicable"] = True
+    try:
+        r = _tool_compute(d["id"])
+    except (ToolNotApplicable, RegisterError, tool_cost.ToolCostError) as exc:
+        out["problem"] = str(exc)
+        return out
+    out["live"] = {"cavities": r["cavities"], "tools_count": r["tools_count"], "stage_c": r["stage_c"],
+                   "country": r["country"], "currency": r["currency"], "part_type": r["part_type"]}
+    if r["missing"]:
+        out["problem"] = " ".join(r["missing"])
+    elif latest is None:
+        out["outdated"] = "The tool cost has not been calculated yet."
+    elif latest["key"] != r["key"]:
+        strip = lambda k: {a: b for a, b in k.items() if a not in ("rates", "as_of")}
+        changes = _rate_changes(latest["rates_used"] or [], _rates_used(r))
+        if strip(latest["key"]) == strip(r["key"]) and (changes or latest["key"]["as_of"] != r["key"]["as_of"]):
+            out["outdated"] = f"Newer approved rates exist than the ones used in tool cost version {latest['version']}."
+            out["rate_changes"] = changes
+        else:
+            out["outdated"] = f"Inputs, volume, master data or formulas changed since tool cost version {latest['version']}."
+    return out
+
+
+def compute_tool(part_id: int, reason: str = "calculated") -> dict:
+    """Work out the tool cost and store it as a new version unless nothing changed."""
+    try:
+        r = _tool_compute(part_id)
+    except (ToolNotApplicable, tool_cost.ToolCostError) as exc:
+        raise RegisterError(str(exc)) from None
+    if r["missing"]:
+        raise RegisterError("Tool cost not stored: " + " ".join(r["missing"]))
+    with db.engine().begin() as conn:
+        last = conn.execute(select(db.tool_costs).where(db.tool_costs.c.part_id == part_id)
+                            .order_by(db.tool_costs.c.version.desc()).limit(1)).mappings().first()
+        if last and last["key"] == r["key"]:
+            return {"stored": False, "version": last["version"],
+                    "message": f"Tool cost already up to date (version {last['version']})."}
+        version = (last["version"] if last else 0) + 1
+        tid = conn.execute(db.tool_costs.insert().values(
+            part_id=part_id, version=version, revision_id=r["revision"]["id"], rev=r["revision"]["rev"],
+            part_type=r["part_type"], country=r["country"], currency=r["currency"], as_of=r["as_of"],
+            inputs=r["key"]["inputs"], key=r["key"], cavities=r["cavities"], tools_count=r["tools_count"],
+            tool_cost=r["value"], tool_cost_inr=r["value_inr"], tool_capex_inr=r["capex_inr"],
+            rates_used=_rates_used(r), example=r["example"], trace=r, reason=reason,
+            created_by=user())).inserted_primary_key[0]
+        conn.execute(db.parts.update().where(db.parts.c.id == part_id).values(
+            tool_cost_id=tid, tool_cost_inr=r["value_inr"], tool_capex_inr=r["capex_inr"]))
+        _log(conn, "part", part_id, "tool_cost_calculated", {
+            "version": version, "tool cost per tool (INR)": round(r["value_inr"], 2),
+            "tool CAPEX (INR)": round(r["capex_inr"], 2) if r["capex_inr"] is not None else None,
+            "cavities": r["cavities"], "tools": r["tools_count"], "tool country": r["country"],
+            "costing month": r["as_of"], "reason": reason,
+            "rate versions": ", ".join(f"#{x['id']}" for x in r["rates_used"])})
+    return {"stored": True, "version": version, "message": f"Tool cost version {version} stored."}
+
+
+def refresh_tool(part_ids, reason: str) -> None:
+    for pid in dict.fromkeys(part_ids):
+        try:
+            compute_tool(pid, reason)
+        except (RegisterError, tool_cost.ToolCostError, ToolNotApplicable):
+            pass
+
+
+def recalculate_project_tools(project_id: int, reason: str = "recalculated with the latest approved rates") -> dict:
+    with db.engine().connect() as conn:
+        ids = [r for (r,) in conn.execute(select(db.parts.c.id).where(and_(db.parts.c.project_id == project_id,
+                                                                         db.parts.c.is_assembly.is_(False))))]
+    done = same = 0
+    skipped = []
+    for pid in ids:
+        try:
+            res = compute_tool(pid, reason)
+        except RegisterError as exc:
+            if tool_eligibility(part_detail(pid, with_rm=False)) == "":
+                skipped.append({"part_id": pid, "why": str(exc)})
+            continue
+        done += res["stored"]
+        same += not res["stored"]
+    return {"new_versions": done, "unchanged": same, "problems": skipped}
+
+
+def set_tool_inputs(part_id: int, tool_inputs: dict | None, tool_country: str | None = None,
+                    reason: str = "tool inputs saved") -> dict:
+    data = {"tool_inputs": tool_inputs or {}}
+    if tool_country is not None:
+        data["tool_country"] = tool_country
+    update_part(part_id, data, refresh=False)
+    try:
+        res = compute_tool(part_id, reason)
+    except RegisterError as exc:
+        res = {"stored": False, "version": None, "message": str(exc)}
+    return res | {"part": part_detail(part_id)}
+
+
+def tool_trace(part_id: int, version: int | None = None) -> dict:
+    """The stored trace of a tool cost version, or (no version given and none stored) a live dry run."""
+    if version is not None or tool_versions(part_id):
+        with db.engine().connect() as conn:
+            q = select(db.tool_costs).where(db.tool_costs.c.part_id == part_id)
+            q = q.where(db.tool_costs.c.version == version) if version is not None else q.order_by(db.tool_costs.c.version.desc())
+            row = conn.execute(q.limit(1)).mappings().first()
+        if not row:
+            raise RegisterError(f"Part {part_id} has no tool cost version {version}.")
+        return row["trace"] | {"version": row["version"], "stored": True, "created_by": row["created_by"],
+                               "created_at": row["created_at"].isoformat(timespec="seconds")}
+    try:
+        return _tool_compute(part_id) | {"version": None, "stored": False}
+    except (ToolNotApplicable, tool_cost.ToolCostError) as exc:
+        raise RegisterError(str(exc)) from None
+
+
+def export_tool_excel(part_id: int, version: int | None = None) -> bytes:
+    d = part_detail(part_id, with_rm=False)
+    return tool_cost_excel(tool_trace(part_id, version), d)
+
+
+def export_tool_pdf(part_id: int, version: int | None = None) -> bytes:
+    from .pdf_report import tool_cost_pdf
+    return tool_cost_pdf(tool_trace(part_id, version), part_detail(part_id, with_rm=False))
+
+
+def tool_cost_excel(tr: dict, part: dict | None = None) -> bytes:
+    """Tool cost sheet: Summary, BOM & processes, Steps, Inputs, Rates used, Example values. Also used by the Estimate page."""
+    from .trace import source_text
+    nodes, cur = tr["nodes"], tr["currency"]
+    ex = tr.get("example") or tool_cost.examples(tr)
+    wb = Workbook()
+    title = part["part_code"] if part else "Estimate"
+    wb.properties.title = f"Design to Cost — Tool cost {title}"
+    wb.properties.creator = "Design to Cost"
+
+    def sheet(name, head, rows, first=False):
+        ws = wb.active if first else wb.create_sheet()
+        ws.title = name
+        if ex["any"]:
+            _excel_banner(ws, len(head))
+        ws.append(head)
+        top = ws.max_row
+        for c in ws[top]:
+            c.font = Font(bold=True, color="FFFFFF")
+            c.fill = HEADER_FILL
+        for r in rows:
+            ws.append(r)
+            if len(r) and r[-1] == "EXAMPLE":
+                for c in ws[ws.max_row]:
+                    c.fill = EXAMPLE_FILL
+        for i, h in enumerate(head, start=1):
+            ws.column_dimensions[ws.cell(top, i).column_letter].width = min(
+                max([len(str(h))] + [len(str(r[i - 1])) for r in rows]) + 2, 70)
+        ws.freeze_panes = f"A{top + 1}"
+
+    v = lambda nid: nodes[nid]["value"] if nid and nid in nodes else None
+    b = tr["base"]
+    summary = []
+    if part:
+        summary += [["Part code", part["part_code"]], ["Part name", part["name"]],
+                    ["Revision", tr.get("revision", {}).get("rev", "")], ["Process", tr.get("process", part["process"])]]
+    summary += [["Part type", tr["part_type"]], ["Part material", tr.get("material") or "—"], ["Tool country", tr["country"]],
+                ["Costing month", tr["as_of"]],
+                ["Tool cost version", tr.get("version") or "not stored (live preview)"],
+                ["Cavities per tool", tr["cavities"]], ["Mould base", f"{b['series']} {b['size_code']}"],
+                ["Try-out machine", (tr["trial"]["machine"] or {}).get("machine_id", "— (missing)")],
+                [f"Tool cost per tool ({cur})", tr["value"]], ["Tool cost per tool (INR)", tr["value_inr"]],
+                ["Tools over the programme", tr["tools_count"]], [f"Tool CAPEX ({cur})", tr.get("capex")],
+                ["Tool CAPEX (INR)", tr.get("capex_inr")],
+                ["Rate versions used", ", ".join(f"#{x['id']}" for x in tr["rates_used"])],
+                ["Includes EXAMPLE values", f"yes - {EXAMPLE_WARNING}. {ex['detail']}" if ex["any"] else "no"],
+                ["Calculated by / when", f"{tr.get('created_by', '')} {tr.get('created_at', '')}".strip()]]
+    sheet("Summary", ["Item", "Value"], summary, first=True)
+    sheet("Cost build-up", ["Step", "Formula", "Value", "Unit"],
+          [[nodes[g["node"]]["label"], "Σ BOM lines of the group", v(g["node"]), cur] for g in tr["groups"]] +
+          [[nodes[s["node"]]["label"], nodes[s["node"]]["formula"], v(s["node"]), nodes[s["node"]]["unit"]] for s in tr["steps"]])
+    sheet("BOM & processes", ["Element", "Category", "Qty", "Material", "Steel weight each (kg)", f"Steel ({cur})",
+                              f"Bought-out ({cur})", "Process", "Priced by", "Hours", "Amount", f"Process ({cur})",
+                              f"Line total ({cur})", ""],
+          [[l["element"], l["category"], l["quantity"], l["material"], l["weight_each_kg"], l["material_cost"],
+            l["bought_out_cost"], l["process"], l["pricing"].replace("_", " "), l["hours"], l["amount"], l["process_cost"],
+            l["total"], "EXAMPLE" if l["is_example"] else ""] for l in tr["lines"]])
+    sheet("Steps", ["Step", "Formula", "Value", "Unit"],
+          [[n["label"], n["formula"], n["value"], n["unit"]] for n in nodes.values() if n["kind"] == "calculated"])
+    sheet("Inputs", ["Input", "Value", "Unit", "Comes from", ""],
+          [[n["label"], n["value"], n["unit"], source_text(n),
+            "EXAMPLE" if ((n.get("source") or {}).get("rate") or {}).get("is_example")
+            or (n.get("source") or {}).get("is_example") else ""]
+           for n in nodes.values() if n["kind"] == "input"])
+    sheet("Rates used", ["Version id", "Category", "Item", "Country", "Month", "Value", "Unit", "Status", "Approved by", ""],
+          [[x["id"], x["category"], x["item"], x["country"], x["month"], x["value"], x["unit"], x["status"],
+            x["approved_by"], "EXAMPLE" if x["is_example"] else ""] for x in tr["rates_used"]])
+    sheet("Example values", ["Still an EXAMPLE value", "Where to replace it", ""],
+          [[f"Rate library #{i}", "Rates page → Rate library", "EXAMPLE"] for i in ex["rate_ids"]] +
+          [[r, "Master data", "EXAMPLE"] for r in ex["rows"]])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 # ---------- BOM ----------
 
 def set_bom_line(conn, variant_id: int, parent_id: int | None, child_id: int, qty: float) -> None:
@@ -1289,7 +1704,7 @@ def import_commit(token: str, project_id: int, variant_id: int | None, items: di
                                        "insert surface is covered by the body")
                 linked += 1
     shutil.rmtree(folder, ignore_errors=True)
-    refresh_rm([i for i in ids.values() if i], "imported from a 3D file")
+    refresh_costs([i for i in ids.values() if i], "imported from a 3D file")
     return {"created": len(created), "new_revisions": len(revised), "unchanged": len(set(unchanged)),
             "inserts_linked": linked, "part_ids": [i for i in ids.values() if i]}
 
@@ -1534,7 +1949,7 @@ def bulk_upload(project_id: int, excel: bytes, uploads: list[tuple[str, bytes]])
                     _set_insert_link(conn, body, rec["pid"], rec["insert_quantity"], notes=f"Excel row {rec['row']}")
                 except RegisterError as exc:
                     raise RegisterError(f"Nothing was saved. Parts row {rec['row']}: {exc}") from None
-    refresh_rm([r["pid"] for r in records], "imported from Excel")
+    refresh_costs([r["pid"] for r in records], "imported from Excel")
     return {"rows": report, "inserts_linked": sum(1 for r in records if r["insert_of"]), "created": sum(r["result"] == "created" for r in report),
             "new_revisions": sum(r["result"] == "new revision" for r in report),
             "file_missing": sum(r["file"] == "File missing" for r in report)}
@@ -1580,6 +1995,11 @@ def dashboard(project_id: int) -> dict:
         targets = conn.execute(select(func.count(), func.sum(db.parts.c.target_piece_cost_inr))
                                .where(and_(db.parts.c.project_id == project_id,
                                            db.parts.c.target_piece_cost_inr.is_not(None)))).one()
+        tool_rows = conn.execute(select(db.parts.c.id, db.parts.c.process, db.parts.c.sourcing, db.parts.c.tool_cost_inr,
+                                        db.parts.c.tool_capex_inr)
+                                 .where(and_(db.parts.c.project_id == project_id, db.parts.c.is_assembly.is_(False)))
+                                 ).mappings().all()
+        tool_example = _tool_example_parts(conn, [r["id"] for r in tool_rows if r["tool_capex_inr"] is not None])
     variants = []
     for v in project["variants"]:
         bom = variant_bom(v["id"])
@@ -1587,6 +2007,12 @@ def dashboard(project_id: int) -> dict:
                              "bom_cost_inr": None} | _rm_rollup(bom))
     procs, srcs = register_setup.processes(), register_setup.sourcing()
     corrections = sum(by_status.get(s["code"], 0) for s in statuses if s.get("is_open_correction"))
+    costed_tools = [r for r in tool_rows if r["tool_capex_inr"] is not None]
+    tools_missing = sum(1 for r in tool_rows if r["tool_capex_inr"] is None
+                        and procs.get(r["process"], {}).get("part_type") in tool_cost.PART_TYPES
+                        and srcs.get(r["sourcing"], {}).get("is_costed"))
+    tool_capex = sum(r["tool_capex_inr"] for r in costed_tools) if costed_tools else None
+    budget = project["capex_budget_inr"]
     return {
         "project": project,
         "parts_total": total,
@@ -1596,14 +2022,20 @@ def dashboard(project_id: int) -> dict:
         "sourcing": [{"code": c, "name": srcs[c]["name"] if c in srcs else c or "—", "count": n} for c, n in by_sourcing.items()],
         "variants": variants,
         "parts_with_target": targets[0], "target_piece_cost_sum_inr": targets[1],
-        "capex": {"budget_inr": project["capex_budget_inr"], "tool_cost_inr": None, "machine_cost_inr": None},
+        "capex": {"budget_inr": budget, "tool_cost_inr": tool_capex, "machine_cost_inr": None,
+                  "tool_parts_costed": len(costed_tools), "tool_parts_missing": tools_missing,
+                  "tool_is_example": bool(tool_example),
+                  "tool_share_of_budget_pct": round(100 * tool_capex / budget, 1) if tool_capex and budget else None,
+                  "tool_note": "Tool CAPEX = Σ over the project's parts of tool cost per tool × tools over the programme "
+                               "(latest stored tool cost version; moulds and dies of plastic and die-cast parts)."},
         "open_corrections": corrections,
         "parts_rm_costed": rm_costed,
         "rm_is_example": any(v.get("rm_is_example") for v in variants),
+        "tool_is_example": bool(tool_example),
         "example_warning": EXAMPLE_WARNING,
         "not_costed_note": "RM cost is the raw-material cost only (quantity × net RM cost per part, from the latest stored "
-                           "version). Process cost, tools and the full BOM cost come from the part-costing and "
-                           "tool-costing stages (roadmap stages 4 and 8).",
+                           "version). Process cost and the full BOM cost come from the part-costing stage (roadmap "
+                           "stage 8). Tool CAPEX covers the moulds and dies costed so far (stage 4).",
     }
 
 
@@ -1632,8 +2064,9 @@ def export_parts_excel(**filters) -> bytes:
     wb.properties.creator = "Design to Cost"
     cols = ["part_code", "name", "project_code", "rev", "material", "process", "sourcing", "status", "annual_volume",
             "programme_life_years", "target_piece_cost_inr", "unit_price", "price_currency", "price_source", "price_month",
-            "volume_cm3", "bbox_mm", "file", "country", "net_rm_cost_inr", "updated_at"]
-    if any(r["rm_is_example"] for r in rows):
+            "volume_cm3", "bbox_mm", "file", "country", "net_rm_cost_inr", "tool_country", "tool_cost_per_tool_inr",
+            "tool_capex_inr", "updated_at"]
+    if any(r["rm_is_example"] or r["tool_is_example"] for r in rows):
         _excel_banner(ws, len(cols))
     ws.append(cols)
     head = ws.max_row
@@ -1646,8 +2079,9 @@ def export_parts_excel(**filters) -> bytes:
         ws.append([r["part_code"], r["name"], r["project_code"], r["rev"], r["material"], r["process"], r["sourcing"],
                    r["status"], r["annual_volume"], r["programme_life_years"], r["target_piece_cost_inr"],
                    r["unit_price"], r["price_currency"], r["price_source"], r["price_month"], g.get("volume_cm3"), f"{b.get('length')} x {b.get('width')} x {b.get('height')}" if b else "",
-                   "yes" if r["file_id"] else "File missing", r["country"], r["rm_cost_inr"], r["updated_at"]])
-        if r["rm_is_example"]:
+                   "yes" if r["file_id"] else "File missing", r["country"], r["rm_cost_inr"], r["tool_country"],
+                   r["tool_cost_inr"], r["tool_capex_inr"], r["updated_at"]])
+        if r["rm_is_example"] or r["tool_is_example"]:
             for cell in ws[ws.max_row]:
                 cell.fill = EXAMPLE_FILL
     ws.freeze_panes = f"A{head + 1}"

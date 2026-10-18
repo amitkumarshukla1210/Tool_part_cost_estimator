@@ -400,8 +400,18 @@ $("savePartBtn").addEventListener("click", async () => {
         costing_month: $("asOf").value.trim(), reason: "saved from the Estimate page" }) });
     const data = await res.json();
     if (!res.ok) throw new Error(errorText(data.detail));
+    let message = data.message;
+    if (!$("stageM").hidden) {
+      const tres = await fetch(`/api/parts/${registered.id}/tool-cost`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool_inputs: toolInputsToSave(), tool_country: formM.elements.tool_country.value,
+          reason: "saved from the Estimate page" }) });
+      const tdata = await tres.json();
+      if (!tres.ok) throw new Error(errorText(tdata.detail));
+      message += " " + tdata.message;
+    }
     status.className = "status ok";
-    status.innerHTML = `${data.message} <a class="link" href="/parts?part=${registered.id}">Open the part</a>`;
+    status.innerHTML = `${message} <a class="link" href="/parts?part=${registered.id}">Open the part</a>`;
   } catch (err) {
     status.className = "status error";
     status.textContent = err.message;
@@ -523,10 +533,13 @@ function showResultsC(r) {
   $("c-util").textContent = `${fmt(r.machine_utilisation_pct, 1)} %` + (r.tools_for_capacity > 1 ? ` across ${r.tools_for_capacity} machines` : "");
 }
 
-// ---------- Mould / die size & BOM (from the mould database) ----------
+// ---------- Tool cost: mould / die size, BOM and process-wise cost (roadmap stage 4) ----------
 const formM = $("formM");
 let timerM = null;
 let lastCavities = null;
+let lastStageC = null;
+let lastTool = null; // last tool cost result (its trace opens in the traceability panel)
+let toolMeta = null;
 
 // A new part starts from its own Stage C cavities and no side actions.
 function resetMould() {
@@ -537,17 +550,25 @@ function resetMould() {
   $("bomBlock").hidden = true;
 }
 
-function startMould(stageC) {
+async function startMould(stageC) {
   const type = analysis.metrics.part_type;
-  if (!["plastic", "die_casting"].includes(type)) {
+  lastStageC = stageC;
+  if (!toolMeta) {
+    toolMeta = await (await fetch("/api/tool-cost/meta")).json();
+    $("toolCountry").innerHTML = '<option value="">Same as producing country</option>' +
+      toolMeta.countries.map((c) => `<option value="${c.code}">${c.name} (${c.currency})</option>`).join("");
+  }
+  if (!toolMeta.part_types.includes(type)) {
     $("stageM").hidden = true;
     return;
   }
   // Follow Stage C until the user types their own cavity count.
-  if (formM.elements.cavities.value === "" || Number(formM.elements.cavities.value) === lastCavities) {
+  const first = formM.elements.cavities.value === "";
+  if (first || Number(formM.elements.cavities.value) === lastCavities) {
     formM.elements.cavities.value = stageC.cavities_per_tool;
   }
   lastCavities = stageC.cavities_per_tool;
+  if (first) applyRegisteredTool();
   formM.elements.hot_runner.closest("label").hidden = type !== "plastic";
   formM.elements.lifters_per_cavity.closest("label").hidden = type !== "plastic";
   $("stageM").hidden = false;
@@ -559,8 +580,9 @@ formM.addEventListener("input", () => {
   clearTimeout(timerM);
   timerM = setTimeout(calculateMould, 300);
 });
+for (const id of ["country", "asOf", "material"]) $(id).addEventListener("change", () => !$("stageM").hidden && calculateMould());
 
-async function calculateMould() {
+function toolBody() {
   const m = analysis.metrics;
   const f = analysis.process.footprint_mm;
   const body = {
@@ -571,24 +593,37 @@ async function calculateMould() {
     part_height_mm: m.bbox_axes_mm[m.pull_direction],
     projected_area_cm2: m.projected_area_cm2,
     part_weight_g: m.net_weight_g,
+    part_volume_cm3: m.volume_cm3,
+    part_surface_cm2: m.surface_area_mm2 / 100,
     hot_runner: formM.elements.hot_runner.checked && m.part_type === "plastic",
+    warranty: formM.elements.warranty.checked,
+    tools_count: lastStageC?.tool_sets_over_programme || 1,
+    country: formM.elements.tool_country.value || $("country").value,
+    material: chosenMaterial()?.material ?? registered?.material ?? "",
   };
+  if ($("asOf").value.trim()) body.as_of = $("asOf").value.trim();
   for (const k of ["slides_per_cavity", "lifters_per_cavity", "inserts_per_cavity"]) {
     body[k] = formM.elements[k].closest("label").hidden ? 0 : Number(formM.elements[k].value || 0);
   }
+  return body;
+}
+
+async function calculateMould() {
   try {
-    const res = await fetch("/api/mould/estimate", {
+    const res = await fetch("/api/tool-cost", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(toolBody()),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(errorText(data.detail));
-    $("statusM").textContent = "";
+    lastTool = data;
+    $("statusM").textContent = data.missing.length ? "Not fully priced: " + data.missing.join(" ") : "";
     $("resultsM").hidden = false;
     $("bomBlock").hidden = false;
     showMould(data);
   } catch (err) {
+    lastTool = null;
     $("statusM").textContent = err.message;
     $("resultsM").hidden = true;
     $("bomBlock").hidden = true;
@@ -596,35 +631,116 @@ async function calculateMould() {
 }
 
 function showMould(r) {
-  const cur = lastCurrency;
+  const n = r.nodes;
+  const cur = r.currency;
   const money = (v) => `${cur} ${int(v)}`;
+  const tv = (node, text) => (node && n[node] ? traced(node, text) : text);
   const L = r.layout;
   const b = r.base;
-  const examples = r.example_lines + (r.sizing_rules_are_examples ? 1 : 0);
-  $("m-examples").innerHTML = examples
-    ? window.exampleBanner(`${r.example_lines} of ${r.lines.length} BOM lines` + (r.sizing_rules_are_examples ? " and the sizing rules" : "") +
-      " use EXAMPLE placeholder values (marked •). Replace them in Master data → Mould &amp; die database.") : "";
-  $("m-layout").textContent = `${L.rows} × ${L.cols}` + (L.empty ? ` (${L.empty} empty position)` : "");
+  // Every cost on this page carries the warning while any rate or master-data row used is an EXAMPLE value.
+  const banner = r.example.any ? window.exampleBanner(r.example.detail) : "";
+  $("m-examples").innerHTML = banner;
+  $("m-examples-bom").innerHTML = banner;
+  $("m-layout").innerHTML = tv("v:layout_rows", `${L.rows} × ${L.cols}`) + (L.empty ? ` (${L.empty} empty position)` : "");
   $("m-insert").textContent = `${fmt(L.each_l, 0)} × ${fmt(L.each_w, 0)} × ${fmt(L.half_h, 0)} mm`;
   $("m-pocket").textContent = `${fmt(L.pocket_l, 0)} × ${fmt(L.pocket_w, 0)} mm`;
   $("m-base").textContent =
     `${b.series} ${b.size_code} · ${b.width_mm} × ${b.length_mm} mm` + (r.base_turned ? " (layout turned 90°)" : "");
   $("m-plates").textContent = `${b.a_plate_mm} / ${b.b_plate_mm} mm · ${b.stack_height_mm} mm`;
-  $("m-weight").textContent = `${fmt(b.weight_kg, 0)} kg`;
+  $("m-weight").innerHTML = tv(r.totals.tool_weight_kg, `${fmt(n[r.totals.tool_weight_kg].value, 0)} kg`);
+  const t = r.trial;
+  $("m-trial").innerHTML = tv(t.force_node, `${fmt(t.force_t, 0)} t`) + " · " +
+    (t.machine ? tv(t.machine_node, t.machine.machine_id) : '<span class="warn">no machine large enough</span>');
+  $("m-currency").textContent = `(${cur}${cur !== "INR" ? ", with INR" : ""} · ${r.country} rates of ${r.as_of})`;
+
+  const row = (label, how, node, cls = "") =>
+    `<tr class="${cls}"><td>${label}</td><td class="how">${how}</td><td class="calc num">${tv(node, money(n[node].value))}</td></tr>`;
+  const steps = r.steps.map((s) => n[s.node]);
+  const isMoney = (x) => x.unit.startsWith(cur);
+  $("m-build").innerHTML =
+    r.groups.map((g) => row(g.label, "Σ BOM lines", g.node)).join("") +
+    row("Tool steel", "Σ quantity × weight × steel rate", r.totals.material_cost) +
+    row("Mould base &amp; standard parts", "Σ catalogue prices (INR → " + cur + ")", r.totals.bought_out_cost) +
+    r.steps.filter((s, i) => isMoney(steps[i])).map((s) => {
+      const x = n[s.node];
+      return s.is_result
+        ? `<tr class="total"><td>${x.label}</td><td class="how">${x.formula}</td><td class="num">${traced(s.node, money(x.value))}` +
+          (cur !== "INR" ? `<br><span class="note">${traced("result:inr", `INR ${int(r.value_inr)}`)}</span>` : "") + "</td></tr>"
+        : row(x.label, x.formula, s.node, s.name === "tool_capex" ? "total" : "");
+    }).join("") +
+    (r.capex_inr !== null && cur !== "INR" ? row("Tool CAPEX in INR", "CAPEX × forex", "capex:inr") : "");
+
   const CATEGORY = { made: "Made", bought_out: "Bought-out", process: "Process" };
-  const blank = (v, f) => (v ? f(v) : "");
+  const cell = (v, node) => (v ? tv(node, money(v)) : "");
   $("m-bom").innerHTML = r.lines
-    .map((l) => `<tr><td>${l.element}${l.is_example ? '<span class="example-mark" title="Example value">•</span>' : ""}</td>` +
-      `<td>${CATEGORY[l.category] ?? l.category}</td>` +
-      `<td class="calc num">${fmt(l.quantity, l.quantity % 1 ? 2 : 0)}</td><td>${l.material || ""}</td>` +
-      `<td class="calc num">${blank(l.material_cost, money)}</td><td class="calc num">${blank(l.bought_out_cost, money)}</td>` +
-      `<td class="calc num">${blank(l.hours, (h) => fmt(h, 1))}</td><td class="calc num">${blank(l.process_cost, money)}</td>` +
-      `<td class="calc num">${money(l.total)}</td></tr>`)
+    .map((l) => {
+      const work = l.hours ? tv(l.nodes.hours, `${fmt(l.hours, 1)} h`)
+        : l.amount ? tv(l.nodes.amount, `${fmt(l.amount, 2)} ${n[l.nodes.amount]?.unit || ""} each`) : "";
+      return `<tr><td>${l.element}${l.is_example ? '<span class="example-mark" title="Example value">•</span>' : ""}</td>` +
+        `<td>${CATEGORY[l.category] ?? l.category}</td>` +
+        `<td class="calc num">${tv(l.nodes.qty, fmt(l.quantity, l.quantity % 1 ? 2 : 0))}</td><td>${l.material || ""}</td>` +
+        `<td class="calc num">${cell(l.material_cost, l.nodes.mat)}</td><td class="calc num">${cell(l.bought_out_cost, l.nodes.bo)}</td>` +
+        `<td>${l.process || ""}</td><td class="calc num">${work}</td>` +
+        `<td class="calc num">${cell(l.process_cost, l.nodes.proc)}</td>` +
+        `<td class="calc num">${tv(l.nodes.total, money(l.total))}</td></tr>`;
+    })
     .join("");
-  const t = r.totals;
+  const T = r.totals;
+  const hours = r.lines.reduce((a, l) => a + (l.hours || 0), 0);
   $("m-total").innerHTML =
-    `<tr class="total"><td>Total mould cost</td><td></td><td></td><td></td><td class="num">${money(t.material_cost)}</td>` +
-    `<td class="num">${money(t.bought_out_cost)}</td><td class="num">${fmt(t.hours, 0)}</td>` +
-    `<td class="num">${money(t.process_cost)}</td><td class="num">${money(t.total)}</td></tr>`;
+    `<tr class="total"><td>BOM total (before try-out, overhead and profit)</td><td></td><td></td><td></td>` +
+    `<td class="num">${tv(T.material_cost, money(n[T.material_cost].value))}</td>` +
+    `<td class="num">${tv(T.bought_out_cost, money(n[T.bought_out_cost].value))}</td><td></td>` +
+    `<td class="num">${fmt(hours, 0)} h</td>` +
+    `<td class="num">${money(n[T.process_cost].value + n[T.design_cost].value)}</td>` +
+    `<td class="num">${money(r.lines.reduce((a, l) => a + l.total, 0))}</td></tr>`;
   $("m-warnings").textContent = r.warnings.join(" ");
+}
+
+$("stageM").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-node]");
+  if (b && lastTool) window.TracePanel.open(lastTool, b.dataset.node);
+});
+
+async function downloadTool(kind) {
+  const status = $("statusM");
+  try {
+    const res = await fetch(`/api/tool-cost/export.${kind}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(toolBody()) });
+    if (!res.ok) throw new Error(errorText((await res.json()).detail));
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(await res.blob());
+    a.download = `tool_cost${registered ? "_" + registered.part_code : ""}.${kind}`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (err) {
+    status.textContent = err.message;
+  }
+}
+$("toolXlsx").addEventListener("click", () => downloadTool("xlsx"));
+$("toolPdf").addEventListener("click", () => downloadTool("pdf"));
+
+// Stored tool features of a registered part go into the form the first time.
+function applyRegisteredTool() {
+  if (!registered) return;
+  const t = registered.tool_inputs || {};
+  for (const [k, v] of Object.entries(t)) {
+    const el = formM.elements[k];
+    if (!el) continue;
+    if (el.type === "checkbox") el.checked = !!v;
+    else el.value = v;
+  }
+  formM.elements.tool_country.value = registered.tool_country || "";
+}
+
+// What "Save to part" stores as the part's tool features (only what differs from the defaults).
+function toolInputsToSave() {
+  const out = {};
+  if (Number(formM.elements.cavities.value) !== lastCavities) out.cavities = Number(formM.elements.cavities.value);
+  if (formM.elements.hot_runner.checked) out.hot_runner = true;
+  if (!formM.elements.warranty.checked) out.warranty = false;
+  for (const k of ["slides_per_cavity", "lifters_per_cavity", "inserts_per_cavity"]) {
+    if (Number(formM.elements[k].value || 0)) out[k] = Number(formM.elements[k].value);
+  }
+  return out;
 }

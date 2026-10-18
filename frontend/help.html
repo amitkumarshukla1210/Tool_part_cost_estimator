@@ -188,21 +188,34 @@
     <section class="bg-grey">
       <div class="container">
         <div class="section-head">
-          <p class="kicker">Mould / die</p>
-          <h2>Mould size &amp; BOM</h2>
+          <p class="kicker">Tool cost</p>
+          <h2>Mould / die size &amp; tool cost</h2>
         </div>
         <div class="table-wrap">
           <table class="cost-table">
-            <thead><tr><th>Step</th><th>Rule (from the mould &amp; die database)</th></tr></thead>
+            <thead><tr><th>Step</th><th>Rule (all from master data and the rate library)</th></tr></thead>
             <tbody>
               <tr><td>Insert per cavity</td><td class="calc">Part L × W + 2 × insert wall; height per half = part H ÷ 2 + backing</td></tr>
               <tr><td>Cavity layout</td><td class="calc">Every rows × columns grid is tried; the one needing the smallest standard base wins</td></tr>
               <tr><td>Mould base</td><td class="calc">Smallest base whose insert pocket takes all inserts (either way round)</td></tr>
-              <tr class="total"><td>BOM line cost</td><td class="calc">Quantity × (bought-out cost + weight × steel rate/kg + hours × process rate/h)</td></tr>
+              <tr><td>Steel</td><td class="calc">Quantity × weight (BOM rule) × approved steel rate of the tool country</td></tr>
+              <tr><td>Bought-out</td><td class="calc">Quantity × catalogue price (BOM rule, INR) converted to the tool country's currency</td></tr>
+              <tr><td>Machine hours</td><td class="calc">Hours (BOM rule with Process time parameters) × (MHR of the machine + operators × labour rate) —
+                <i>Tool processes</i> names the machine, labour grade and operators</td></tr>
+              <tr><td>Per-unit processes</td><td class="calc">Amount (kg, cm², …) × rate by unit, at least the minimum charge per job (cutting, heat
+                treatment, nitriding, texture, …)</td></tr>
+              <tr><td>Try-out</td><td class="calc">Clamp force picks the smallest moulding / die-casting machine; trials × hours × (MHR + crew) + trial shots × material rate</td></tr>
+              <tr class="total"><td>Tool cost per tool</td><td class="calc">Manufacturing cost + overhead % + profit % + packing % + transport per kg
+                + warranty / spares % (formulas of scope <code>tool</code>)</td></tr>
+              <tr class="total"><td>Tool CAPEX</td><td class="calc">Tool cost × tools over the programme (Stage C)</td></tr>
             </tbody>
           </table>
         </div>
-        <p class="note">Lines marked • still use EXAMPLE placeholder values. Replace them under Master data → Mould &amp; die database.</p>
+        <p class="note">Click any value for its formula and sources: an hour opens to the MHR, which opens to depreciation, power, labour and the rest.
+          The red <b>Uses example rates – not for negotiation</b> warning is on every tool cost (screen, Excel, PDF) while any rate or master-data row it
+          uses is still an EXAMPLE; it says how many of each are left. On the Parts page each part keeps numbered tool cost versions (tool country,
+          cavities and features per part); newer rates never change a stored version — use <b>Recalculate</b>, or <b>Recalculate tools</b> on the
+          Dashboard, which also shows the tool CAPEX against the budget.</p>
       </div>
     </section>
 
@@ -220,8 +233,9 @@
           </div>
           <div class="card">
             <h3>Mould &amp; die database · SQLite</h3>
-            <p><code>master_data/costing_db.sqlite</code> has mould bases, tool steels, BOM elements with rules, process rates and
-              sizing rules. Export it to Excel, edit it, and import it back.</p>
+            <p><code>master_data/costing_db.sqlite</code> has mould bases, tool steels, BOM elements with rules, process rates,
+              sizing rules, tool processes (machine, labour grade, operators per process) and process time parameters. Export it to
+              Excel, edit it, and import it back.</p>
           </div>
           <div class="card">
             <h3>Saving is checked</h3>

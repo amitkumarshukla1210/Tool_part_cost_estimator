@@ -39,7 +39,9 @@ const DATASETS = {
     api: "/api/mould-db",
     file: "master_data/costing_db.sqlite",
     intro:
-      "Data that sizes a mould or die and builds its BOM: cavities + part size → insert size → standard mould base → BOM. " +
+      "Data that sizes a mould or die and prices it: cavities + part size → insert size → standard mould base → BOM. " +
+      "Tool processes say how each process is priced (machine hours = MHR + operators × labour rate, labour hours, or a rate " +
+      "per unit); Process time parameters are the removal rates and set-up hours the BOM rules use. " +
       "Rows marked Example are placeholders. Replace them with your catalogue and supplier values; editing a row clears its " +
       "Example flag. Export to Excel and import it back to edit in bulk.",
     schemaApi: "/api/mould-db/schema",
@@ -51,7 +53,8 @@ const DATASETS = {
     intro:
       "The calculation logic of the rate engine: countries and currencies, machines (technical data; prices and consumables " +
       "are country rates in the Rate library), labour grades, every MHR and labour-rate step as a formula, and where each " +
-      "formula variable comes from. Change a formula here and every MHR changes with it. Saves are checked first.",
+      "formula variable comes from (MHR, labour rate, RM cost and tool cost: scopes tool_clamp and tool). Change a formula " +
+      "here and every result changes with it. Saves are checked first.",
     schemaApi: "/api/costing-setup/schema",
     tables: null,
   },
@@ -95,7 +98,8 @@ function renderHelp() {
   let vars = conf().formulaVars;
   if (!vars && data?.formula_inputs) {
     vars = {};
-    for (const r of data.formula_inputs) vars[`${r.variable} (${r.scope})`] = `${r.label}: ${{ machine: "machine field ", parameter: "Parameters row ", part: "part value " }[r.source] ? { machine: "machine field ", parameter: "Parameters row ", part: "part value " }[r.source] + r.item : "rate " + r.category + " / " + r.item}`;
+    const FROM = { machine: "machine field ", parameter: "Parameters row ", part: "part value ", tool: "tool engine value " };
+    for (const r of data.formula_inputs) vars[`${r.variable} (${r.scope})`] = `${r.label}: ${FROM[r.source] ? FROM[r.source] + r.item : "rate " + r.category + " / " + r.item}`;
     for (const r of data.cost_formulas || []) vars[`${r.name} (${r.scope})`] = `${r.label}: result of another formula`;
   }
   $("variables").innerHTML = Object.entries(vars || {}).map(([k, v]) => `<dt><code>${escapeHtml(k)}</code></dt><dd>${escapeHtml(v)}</dd>`).join("");
@@ -168,7 +172,7 @@ function cell(col, row, i) {
     case "category":
       return `<select ${attrs}>${options(["made", "bought_out", "process"], v)}</select>`;
     case "process":
-      return `<select ${attrs}>${options(data.process_rates.map((p) => p.code), v, true)}</select>`;
+      return `<select ${attrs}>${options(data.tool_processes.filter((p) => p.cost_group !== "trial").map((p) => p.code), v, true)}</select>`;
     case "bool":
       return `<label class="flag"><input type="checkbox" ${attrs} ${v ? "checked" : ""} />${v ? (col.key === "is_example" ? "Example" : "Yes") : ""}</label>`;
     case "number":

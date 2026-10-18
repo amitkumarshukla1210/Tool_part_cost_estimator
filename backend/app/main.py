@@ -19,14 +19,14 @@ from typing import Optional
 
 from .geometry import PART_TYPES, analyze, blank_estimate, load_step, sheet_thickness, tessellate
 from . import (capacity, costing_setup, country_rates, file_store, gross_weight, master_data, mould, mould_db, rate_engine, rates,
-               register, register_setup, rm_cost)
+               register, register_setup, rm_cost, tool_cost)
 from . import projects_db
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 THEME_DIR = Path(__file__).resolve().parents[2] / "theme"
 MAX_UPLOAD_MB = 100
 
-app = FastAPI(title="Design to Cost — Part Cost Estimator", version="0.7.0 (RM cost on the register)")
+app = FastAPI(title="Design to Cost — Part Cost Estimator", version="0.9.0 (tool cost engine)")
 
 
 @app.get("/api/part-types")
@@ -194,10 +194,37 @@ async def mould_db_upload(file: UploadFile = File(...)):
 
 @app.post("/api/mould/estimate")
 def mould_estimate(inp: mould.MouldInput):
+    """Mould size only (layout, inserts, base). The priced BOM is POST /api/tool-cost."""
     try:
-        return mould.estimate(inp)
+        return mould.size(inp)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/tool-cost/meta")
+def tool_cost_meta():
+    return {"default_country": tool_cost.default_country(), "part_types": list(tool_cost.PART_TYPES),
+            "later": tool_cost.LATER, "month": rates.current_month(),
+            "countries": [{"code": c["code"], "name": c["name"], "currency": c["currency"]}
+                          for c in costing_setup.tables()["countries"]]}
+
+
+@app.post("/api/tool-cost")
+def tool_cost_calc(inp: tool_cost.ToolInput):
+    """Traced tool cost of a mould / die (Estimate page): BOM, processes with MHR + labour, trial, overhead, profit, ..."""
+    return tool_cost.run(inp)
+
+
+@app.post("/api/tool-cost/export.xlsx")
+def tool_cost_excel(inp: tool_cost.ToolInput):
+    return _xlsx(register.tool_cost_excel(tool_cost.run(inp)), "tool_cost.xlsx")
+
+
+@app.post("/api/tool-cost/export.pdf")
+def tool_cost_pdf(inp: tool_cost.ToolInput):
+    from .pdf_report import tool_cost_pdf as pdf
+    return Response(pdf(tool_cost.run(inp)), media_type="application/pdf",
+                    headers={"Content-Disposition": 'attachment; filename="tool_cost.pdf"'})
 
 
 # ---------- costing setup: countries, machines, labour grades, formulas ----------
@@ -453,29 +480,34 @@ def projects_dashboard_pdf(project_id: int):
 # ---------- part register: parts ----------
 
 def _filters(q, project_id, process, status, sourcing, rev, file_missing, target_min, target_max,
-             rm_min=None, rm_max=None, rm_missing=None):
+             rm_min=None, rm_max=None, rm_missing=None, tool_min=None, tool_max=None, tool_missing=None):
     flag = lambda v: None if v in (None, "") else v.lower() in ("1", "true", "yes")
     return dict(q=q, project_id=project_id, process=process, status=status, sourcing=sourcing, rev=rev,
                 file_missing=flag(file_missing), target_min=target_min, target_max=target_max,
-                rm_min=rm_min, rm_max=rm_max, rm_missing=flag(rm_missing))
+                rm_min=rm_min, rm_max=rm_max, rm_missing=flag(rm_missing), tool_min=tool_min, tool_max=tool_max,
+                tool_missing=flag(tool_missing))
 
 
 @app.get("/api/parts")
 def parts_search(q: str = "", project_id: Optional[int] = None, process: str = "", status: str = "", sourcing: str = "",
                  rev: str = "", file_missing: Optional[str] = None, target_min: Optional[float] = None,
                  target_max: Optional[float] = None, rm_min: Optional[float] = None, rm_max: Optional[float] = None,
-                 rm_missing: Optional[str] = None, sort: str = "part_code", limit: int = 50, offset: int = 0):
+                 rm_missing: Optional[str] = None, tool_min: Optional[float] = None, tool_max: Optional[float] = None,
+                 tool_missing: Optional[str] = None, sort: str = "part_code", limit: int = 50, offset: int = 0):
     return register.search(**_filters(q, project_id, process, status, sourcing, rev, file_missing, target_min, target_max,
-                                      rm_min, rm_max, rm_missing), sort=sort, limit=limit, offset=offset)
+                                      rm_min, rm_max, rm_missing, tool_min, tool_max, tool_missing),
+                           sort=sort, limit=limit, offset=offset)
 
 
 @app.get("/api/parts/export.xlsx")
 def parts_export(q: str = "", project_id: Optional[int] = None, process: str = "", status: str = "", sourcing: str = "",
                  rev: str = "", file_missing: Optional[str] = None, target_min: Optional[float] = None,
                  target_max: Optional[float] = None, rm_min: Optional[float] = None, rm_max: Optional[float] = None,
-                 rm_missing: Optional[str] = None):
+                 rm_missing: Optional[str] = None, tool_min: Optional[float] = None, tool_max: Optional[float] = None,
+                 tool_missing: Optional[str] = None):
     return _xlsx(register.export_parts_excel(**_filters(q, project_id, process, status, sourcing, rev, file_missing,
-                                                         target_min, target_max, rm_min, rm_max, rm_missing)),
+                                                         target_min, target_max, rm_min, rm_max, rm_missing,
+                                                         tool_min, tool_max, tool_missing)),
                  "part_register.xlsx")
 
 
@@ -539,6 +571,42 @@ def parts_rm_pdf(part_id: int, version: Optional[int] = None):
 @app.post("/api/projects/{project_id}/rm-cost/recalculate")
 def projects_rm_recalculate(project_id: int):
     return register.recalculate_project(project_id)
+
+
+@app.get("/api/parts/{part_id}/tool-cost")
+def parts_tool_versions(part_id: int):
+    return register.tool_versions(part_id)
+
+
+@app.post("/api/parts/{part_id}/tool-cost")
+def parts_tool_calculate(part_id: int, data: dict):
+    """Calculate (or recalculate with the latest approved rates). With `tool_inputs` or `tool_country` they are saved
+    on the part first (the part panel's Tool features and the Estimate page's "Save to part")."""
+    reason = str(data.get("reason") or "recalculated by you").strip()
+    if any(k in data for k in ("tool_inputs", "tool_country")):
+        return register.set_tool_inputs(part_id, data.get("tool_inputs"), data.get("tool_country"), reason)
+    return register.compute_tool(part_id, reason) | {"part": register.part_detail(part_id)}
+
+
+@app.get("/api/parts/{part_id}/tool-cost/trace")
+def parts_tool_trace(part_id: int, version: Optional[int] = None):
+    return register.tool_trace(part_id, version)
+
+
+@app.get("/api/parts/{part_id}/tool-cost/export.xlsx")
+def parts_tool_excel(part_id: int, version: Optional[int] = None):
+    return _xlsx(register.export_tool_excel(part_id, version), f"tool_cost_part_{part_id}.xlsx")
+
+
+@app.get("/api/parts/{part_id}/tool-cost/export.pdf")
+def parts_tool_pdf(part_id: int, version: Optional[int] = None):
+    return Response(register.export_tool_pdf(part_id, version), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="tool_cost_part_{part_id}.pdf"'})
+
+
+@app.post("/api/projects/{project_id}/tool-cost/recalculate")
+def projects_tool_recalculate(project_id: int):
+    return register.recalculate_project_tools(project_id)
 
 
 @app.post("/api/parts/{part_id}/revisions")
@@ -617,6 +685,7 @@ def _require_xlsx(file: UploadFile) -> None:
 
 
 @app.exception_handler(rm_cost.RMError)
+@app.exception_handler(tool_cost.ToolCostError)
 @app.exception_handler(master_data.MasterDataError)
 @app.exception_handler(mould_db.MouldDbError)
 @app.exception_handler(costing_setup.SetupError)

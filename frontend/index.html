@@ -276,15 +276,18 @@
       </div>
     </section>
 
-    <!-- Mould / die size & BOM -->
+    <!-- Tool cost: mould / die size, BOM and process-wise cost (roadmap stage 4) -->
     <section id="stageM" hidden>
       <div class="container">
         <div class="section-head">
-          <p class="kicker">Mould / die <span class="tag">preview</span></p>
-          <h2>Mould size &amp; BOM</h2>
+          <p class="kicker">Tool cost</p>
+          <h2>Mould / die size &amp; tool cost</h2>
           <p>
-            Cavities + part size → insert size → standard mould base → BOM, all from the
-            <a class="link" href="/master-data?set=mould">mould &amp; die database</a>.
+            Cavities + part size → standard mould base → BOM → process-wise cost with the MHR and labour rate of the tool
+            country → try-out, overhead, profit, packing, transport and warranty. Rules come from the
+            <a class="link" href="/master-data?set=mould">mould &amp; die database</a>, formulas and machines from
+            <a class="link" href="/master-data?set=setup">Countries, machines &amp; formulas</a>, rates from the
+            <a class="link" href="/rates">rate library</a>. Click any value to see how it is made.
           </p>
         </div>
         <div class="stage-grid">
@@ -300,7 +303,16 @@
                 <input type="number" name="lifters_per_cavity" step="1" min="0" value="0" /></label>
               <label>Small inserts per cavity
                 <input type="number" name="inserts_per_cavity" step="1" min="0" value="0" /></label>
+              <label class="check"><input type="checkbox" name="warranty" checked /> Warranty / spares</label>
+              <label>Tool country
+                <select name="tool_country" id="toolCountry"><option value="">Same as producing country</option></select></label>
             </form>
+            <p class="note">Tools over the programme come from Stage C. The try-out machine is the smallest moulding / die-casting
+              machine whose tonnage takes the clamp force.</p>
+            <div class="btn-row">
+              <button type="button" class="btn btn-outline" id="toolXlsx">Tool cost sheet (Excel)</button>
+              <button type="button" class="btn btn-outline" id="toolPdf">Tool cost sheet (PDF)</button>
+            </div>
           </div>
           <div>
             <p id="statusM" class="status error" role="status"></p>
@@ -315,29 +327,40 @@
                     <tr><td>Insert pocket</td><td class="calc num" id="m-pocket"></td></tr>
                     <tr class="total"><td>Mould base</td><td class="calc num" id="m-base"></td></tr>
                     <tr><td>Base plates A / B · stack height</td><td class="calc num" id="m-plates"></td></tr>
-                    <tr><td>Base weight</td><td class="calc num" id="m-weight"></td></tr>
+                    <tr><td>Tool weight</td><td class="calc num" id="m-weight"></td></tr>
+                    <tr><td>Clamp force · try-out machine</td><td class="calc num" id="m-trial"></td></tr>
                   </tbody>
                 </table>
               </div>
               <p class="note" id="m-warnings"></p>
+              <h3 class="block-title">Cost build-up <span class="note" id="m-currency"></span></h3>
+              <div class="table-wrap">
+                <table class="cost-table">
+                  <thead><tr><th>Step</th><th>How</th><th class="num">Value</th></tr></thead>
+                  <tbody id="m-build"></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
 
         <div id="bomBlock" hidden>
-          <h3 class="block-title">Mould BOM</h3>
+          <h3 class="block-title">Tool BOM &amp; processes</h3>
+          <div id="m-examples-bom"></div>
           <div class="table-wrap">
             <table class="cost-table">
               <thead>
-                <tr><th>Element</th><th>Category</th><th class="num">Qty</th><th>Material</th>
-                  <th class="num">Material cost</th><th class="num">Bought-out</th><th class="num">Hours</th>
+                <tr><th>Element</th><th>Category</th><th class="num">Qty</th><th>Steel</th>
+                  <th class="num">Steel cost</th><th class="num">Bought-out</th><th>Process</th><th class="num">Hours / amount</th>
                   <th class="num">Process cost</th><th class="num">Line total</th></tr>
               </thead>
               <tbody id="m-bom"></tbody>
               <tfoot id="m-total"></tfoot>
             </table>
           </div>
-          <p class="note">• = still an EXAMPLE placeholder value in the mould &amp; die database.</p>
+          <p class="note">• = still an EXAMPLE value in master data. Hours are priced at MHR + operators × labour rate of the tool
+            country; per-unit processes (cutting, heat treatment, nitriding, …) at their rate per kg / cm², at least the minimum
+            charge per job.</p>
         </div>
       </div>
     </section>

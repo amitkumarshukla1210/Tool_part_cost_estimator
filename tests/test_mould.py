@@ -4,8 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
-from backend.app import formula, mould_db
-from backend.app.mould import MouldInput, estimate
+from backend.app import formula, mould_db, tool_cost
+from backend.app.mould import MouldInput, size as estimate
 from backend.app.main import app
 
 client = TestClient(app)
@@ -43,7 +43,6 @@ def test_insert_and_base_follow_cavities_and_part_size():
     assert (lay["pocket_l"], lay["pocket_w"]) == (170, 2 * 130 + 10)
     # Smallest example base with a pocket ≥ 270 × 170 is 3040 (pocket 290 × 190), turned.
     assert r["base"]["size_code"] == "3040" and r["base_turned"]
-    assert r["lines"][0]["total"] == r["base"]["cost"]
 
     four = estimate(MouldInput(cavities=4, **COVER))
     assert (four["layout"]["rows"], four["layout"]["cols"]) == (2, 2)  # not a long 1 × 4 strip
@@ -56,22 +55,30 @@ def test_no_base_large_enough():
         estimate(MouldInput(cavities=8, **COVER))
 
 
+def priced(**kw):
+    return tool_cost.run(tool_cost.ToolInput(**COVER, part_surface_cm2=420, part_volume_cm3=46, material="ABS", **kw))
+
+
 def test_bom_quantities_follow_rules():
-    cold = estimate(MouldInput(cavities=2, **COVER))
-    hot = estimate(MouldInput(cavities=2, hot_runner=True, slides_per_cavity=1, **COVER))
+    cold = priced(cavities=2)
+    hot = priced(cavities=2, hot_runner=True, slides_per_cavity=1)
     assert line(cold, "Sprue bush")["quantity"] == 1
     assert "Hot runner nozzle (drop)" not in [l["element"] for l in cold["lines"]]
     assert line(hot, "Hot runner nozzle (drop)")["quantity"] == 2
     assert "Sprue bush" not in [l["element"] for l in hot["lines"]]
     assert line(hot, "Slide block")["quantity"] == 2
     assert line(cold, "Ejector pin")["quantity"] == 24  # ceil(2 × 95.78 / 8)
-    # Insert weight = 170 × 130 × 45 mm × 7.85 g/cm³
+    # Insert weight = 170 × 130 × 45 mm × 7.85 g/cm³, priced with the approved India rate of 2738 (420 INR/kg)
     ins = line(cold, "Cavity insert (steel)")
-    assert ins["weight_each_kg"] == pytest.approx(170 * 130 * 45 * 7.85 / 1e6, abs=1e-3)
-    assert ins["material_cost"] == pytest.approx(2 * ins["weight_each_kg"] * 420, rel=1e-3)
-    assert hot["totals"]["total"] > cold["totals"]["total"]
-    # Every seeded line is a placeholder.
-    assert cold["example_lines"] == len(cold["lines"]) and cold["sizing_rules_are_examples"]
+    assert ins["weight_each_kg"] == pytest.approx(170 * 130 * 45 * 7.85 / 1e6, abs=1e-6)
+    assert ins["material_cost"] == pytest.approx(2 * ins["weight_each_kg"] * 420, rel=1e-9)
+    assert line(cold, "Mould base Standard 2-plate 3040")["total"] == cold["base"]["cost"]  # INR catalogue price
+    assert hot["value"] > cold["value"]
+    # The try-out is costed by the tool formulas, not as a BOM line.
+    assert "Tryout" not in [l["element"] for l in cold["lines"]]
+    # Every seeded line is a placeholder, so the result carries the example warning.
+    assert cold["example"]["any"] and cold["sizing_rules_are_examples"]
+    assert {f"BOM elements · {l['element']}" for l in cold["lines"][1:]} <= set(cold["example"]["rows"])
 
 
 # ---------- editing the database ----------
@@ -95,6 +102,14 @@ def test_edits_change_the_result():
     (lambda d: d["bom_elements"][0].update(quantity_rule="cavites"), "BOM elements row 2, quantity_rule: unknown name"),
     (lambda d: d["bom_elements"][0].update(material_code="Unobtainium"), "not in Tool materials"),
     (lambda d: d["bom_elements"][0].update(category="misc"), "category"),
+    (lambda d: d["bom_elements"][2].update(process_code="Milling by hand"), "not in Tool processes"),
+    (lambda d: d["bom_elements"][2].update(process_code="Tryout"), "costed by the tool formulas"),
+    (lambda d: d["bom_elements"][2].update(hours_rule="cnc_slow_rate * 2"), "unknown name 'cnc_slow_rate'"),
+    (lambda d: d["tool_processes"][0].update(machine_id="NO-SUCH"), "is not in Countries, machines & formulas"),
+    (lambda d: d["tool_processes"][0].update(pricing="unit"), "Process rates by unit"),
+    (lambda d: d["tool_processes"][0].update(labour_grade=""), "labour grade"),
+    (lambda d: d["time_parameters"][0].update(parameter="cavities"), "already a rule variable"),
+    (lambda d: d["time_parameters"][0].update(parameter="cnc setup"), "must be one word"),
     (lambda d: d["tool_materials"][0].update(rate_per_kg="abc"), "Tool materials row 2"),
     (lambda d: d["mould_bases"].append(dict(d["mould_bases"][0])), "listed twice"),
     (lambda d: d["mould_bases"][0].update(max_insert_length_mm=9999), "insert pocket is larger"),
@@ -111,7 +126,8 @@ def test_bad_edits_are_rejected(change, message):
 def test_excel_round_trip():
     xlsx = client.get("/api/mould-db/download")
     wb = load_workbook(io.BytesIO(xlsx.content))
-    assert set(wb.sheetnames) >= {"Mould bases", "Tool materials", "BOM elements", "Process rates", "Sizing rules", "Formula help"}
+    assert set(wb.sheetnames) >= {"Mould bases", "Tool materials", "BOM elements", "Process rates", "Sizing rules",
+                                  "Tool processes", "Process time parameters", "Formula help"}
     ws = wb["Process rates"]
     for row in ws.iter_rows(min_row=2):
         if row[0].value == "CNC milling":
@@ -131,3 +147,6 @@ def test_api_estimate():
     r = client.post("/api/mould/estimate", json={**COVER, "cavities": 2})
     assert r.status_code == 200 and r.json()["base"]["size_code"] == "3040"
     assert client.post("/api/mould/estimate", json={**COVER, "cavities": 8}).status_code == 400
+    r = client.post("/api/tool-cost", json={**COVER, "cavities": 2, "material": "ABS"})
+    assert r.status_code == 200 and r.json()["base"]["size_code"] == "3040" and r.json()["value"] > 0
+    assert client.post("/api/tool-cost", json={**COVER, "cavities": 8}).status_code == 400
