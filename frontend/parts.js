@@ -52,19 +52,22 @@ async function search() {
   $("count").textContent = res.total ? `${offset + 1}–${Math.min(offset + PAGE, res.total)} of ${fmt(res.total)} parts` : "No parts";
   $("prev").disabled = offset === 0;
   $("next").disabled = offset + PAGE >= res.total;
-  $("exampleBanner").innerHTML = res.rows.some((r) => r.rm_is_example)
-    ? window.exampleBanner("Rows marked • have an RM cost that uses EXAMPLE rates.") : "";
+  $("exampleBanner").innerHTML = res.rows.some((r) => r.rm_is_example || r.tool_is_example)
+    ? window.exampleBanner("Costs marked • use EXAMPLE rates or master-data values.") : "";
+  const mark = (on) => (on ? ' <span class="example-mark" title="Uses example values">•</span>' : "");
   $("table").innerHTML = `<thead><tr><th></th><th>Part code</th><th>Name</th><th>Rev</th><th>Project</th><th>Process</th>
-    <th>Material</th><th>Status</th><th>Sourcing</th><th class="num">Volume (cm³)</th><th class="num">Net RM cost (INR)</th><th>File</th></tr></thead><tbody>` +
+    <th>Material</th><th>Status</th><th>Sourcing</th><th class="num">Volume (cm³)</th><th class="num">Net RM cost (INR)</th>
+    <th class="num">Tool cost (INR)</th><th>File</th></tr></thead><tbody>` +
     (res.rows.length ? res.rows.map((r) => `<tr class="clickable" data-id="${r.id}"><td>${thumb(r.thumbnail_file_id)}</td>
       <td><b>${esc(r.part_code)}</b></td><td>${esc(r.name)}${r.is_assembly ? ' <span class="badge assy">assembly</span>' : ""}</td>
       <td>${esc(r.rev ?? "")}</td><td>${esc(r.project_code)}</td><td>${esc(nameOf(meta.processes, r.process))}</td>
       <td>${esc(r.material)}</td><td><span class="badge status">${esc(nameOf(meta.statuses, r.status))}</span></td>
       <td>${esc(nameOf(meta.sourcing, r.sourcing))}</td>
       <td class="calc num">${r.geometry?.volume_cm3 != null ? fmt(r.geometry.volume_cm3, 2) : "—"}</td>
-      <td class="calc num">${r.rm_cost_inr != null ? fmt(r.rm_cost_inr, 2) : "—"}${r.rm_is_example ? ' <span class="example-mark" title="Uses example rates">•</span>' : ""}</td>
+      <td class="calc num">${r.rm_cost_inr != null ? fmt(r.rm_cost_inr, 2) : "—"}${mark(r.rm_is_example)}</td>
+      <td class="calc num" title="${r.tool_capex_inr != null ? `Tool CAPEX ${fmt(r.tool_capex_inr, 0)} INR` : ""}">${r.tool_cost_inr != null ? fmt(r.tool_cost_inr, 0) : "—"}${mark(r.tool_is_example)}</td>
       <td>${r.file_id ? "STEP" : '<span class="badge missing">File missing</span>'}</td></tr>`).join("")
-      : '<tr><td colspan="12" class="empty">No parts match. Import parts on the Import page.</td></tr>') + "</tbody>";
+      : '<tr><td colspan="13" class="empty">No parts match. Import parts on the Import page.</td></tr>') + "</tbody>";
 }
 $("table").addEventListener("click", (e) => {
   const row = e.target.closest("tr[data-id]");
@@ -88,6 +91,9 @@ async function openPart(id) {
   if (part.file_id && !part.is_assembly) part.trace = await api(`/api/parts/${id}/trace`).catch(() => null);
   part.rmTrace = part.rm?.applicable && !part.rm.problem ? await api(`/api/parts/${id}/rm-cost/trace`).catch(() => null) : null;
   part.rmVersions = part.rm?.versions ? await api(`/api/parts/${id}/rm-cost`).catch(() => []) : [];
+  part.toolTrace = part.tool?.versions || (part.tool?.applicable && !part.tool.problem)
+    ? await api(`/api/parts/${id}/tool-cost/trace`).catch(() => null) : null;
+  part.toolVersions = part.tool?.versions ? await api(`/api/parts/${id}/tool-cost`).catch(() => []) : [];
   renderPart();
   $("panel").hidden = false;
 }
@@ -213,6 +219,85 @@ function rmBlock(p) {
   return html;
 }
 
+// ---------- tool cost (stage 4) ----------
+function toolBlock(p) {
+  if (p.is_assembly || !p.tool) return "";
+  const t = p.tool, v = t.latest, tr = p.toolTrace;
+  const stored = v && tr?.stored;
+  const tv = (id, text) => (tr?.nodes[id] ? `<button type="button" class="tv" data-tooltrace="${id}">${text}</button>` : text);
+  const money = (id, cur) => (tr?.nodes[id] ? tv(id, `${fmt(tr.nodes[id].value, 0)} ${esc(cur)}`) : "—");
+  let html = `<h3 class="block-title">Tool cost (mould / die)</h3>`;
+  if (!t.applicable) return html + `<p class="note">${esc(t.problem)}</p>`;
+  // The warning goes with every tool cost shown that uses an EXAMPLE rate or master-data row.
+  if (tr?.example?.any) html += window.exampleBanner(esc(tr.example.detail));
+  if (t.problem) html += `<p class="warn">${esc(t.problem)}</p>`;
+  if (t.outdated) {
+    html += `<p class="warn">${esc(t.outdated)}
+      ${t.rate_changes.map((c) => `<br/>${esc(c.rate)}: ${fmt(c.old_value, 2)} (${esc(c.old_month)}) → <b>${fmt(c.new_value, 2)}</b> (${esc(c.new_month)})`).join("")}
+      <br/><button type="button" class="btn btn-primary small" id="toolRecalc">${v ? "Recalculate with latest rates" : "Calculate tool cost"}</button></p>`;
+  }
+  if (tr) {
+    const cur = tr.currency;
+    const b = tr.base;
+    const steps = tr.steps.map((s) => ({ ...s, n: tr.nodes[s.node] })).filter((s) => s.n.unit.startsWith(cur));
+    const result = steps.find((s) => s.is_result);
+    const capex = steps.find((s) => s.name === "tool_capex");
+    const inrNote = (v) => (cur !== "INR" && v != null ? `<div class="note">${fmt(v, 0)} INR</div>` : "");
+    html += `<div class="table-wrap"><table class="cost-table"><tbody>
+      ${result ? `<tr class="total"><td>${esc(result.n.label)}${stored ? ` · version ${v.version}` : ""}${tr.example?.any ? ' <span class="badge badge-example">EXAMPLE values</span>' : ""}</td>
+        <td class="calc num">${money(result.node, cur)}${inrNote(tr.value_inr)}</td></tr>` : ""}
+      ${capex ? `<tr class="total"><td>${esc(capex.n.label)} (× ${tr.tools_count} tool${tr.tools_count === 1 ? "" : "s"} over the programme)</td>
+        <td class="calc num">${money(capex.node, cur)}${inrNote(tr.capex_inr)}</td></tr>` : ""}
+    </tbody></table></div>
+    <h4 class="block-title">Cost build-up</h4>
+    <div class="table-wrap"><table class="cost-table"><tbody>
+      <tr><td>Cavities · tools over the programme</td><td class="calc num">${tv("v:cavities", tr.cavities)} · ${tv("tools_count", tr.tools_count)}</td></tr>
+      <tr><td>Mould base · tool weight</td><td class="calc num">${esc(b.series)} ${esc(b.size_code)} · ${tv("tool_weight", `${fmt(tr.nodes.tool_weight.value, 0)} kg`)}</td></tr>
+      <tr><td>Try-out machine (clamp force)</td><td class="calc num">${tr.trial.machine ? tv("trial:machine", esc(tr.trial.machine.machine_id)) : "—"}
+        (${tv(tr.trial.force_node, `${fmt(tr.trial.force_t, 0)} t`)})</td></tr>
+      ${tr.groups.map((g) => `<tr><td>${esc(g.label)}</td><td class="calc num">${money(g.node, cur)}</td></tr>`).join("")}
+      <tr><td>Tool steel</td><td class="calc num">${money(tr.totals.material_cost, cur)}</td></tr>
+      <tr><td>Mould base &amp; standard parts</td><td class="calc num">${money(tr.totals.bought_out_cost, cur)}</td></tr>
+      ${steps.map((s) => `<tr class="${s.is_result || s.name === "tool_capex" ? "total" : ""}"><td>${esc(s.n.label)}</td>
+        <td class="calc num">${money(s.node, cur)}${s.is_result ? inrNote(tr.value_inr) : ""}${s.name === "tool_capex" ? inrNote(tr.capex_inr) : ""}</td></tr>`).join("")}
+    </tbody></table></div>
+    <p class="note">${stored ? "" : "<b>Live preview, not stored yet.</b> "}Tool country ${esc(tr.country)} · rates of ${esc(tr.as_of)}. Click any value for its formula,
+      inputs, sources and rate versions.${stored ? ` Stored ${esc(v.created_at.slice(0, 16).replace("T", " "))} by ${esc(v.created_by)} · ${esc(v.reason)}.` : ""}
+      ${stored ? `<a class="link" href="/api/parts/${p.id}/tool-cost/export.xlsx">Excel</a> · <a class="link" href="/api/parts/${p.id}/tool-cost/export.pdf">PDF</a>` : ""}
+      ${p.file_id ? ` · <a class="link" href="/?part=${p.id}">Open in Estimate (full BOM)</a>` : ""}</p>`;
+  }
+  const typed = p.tool_inputs || {};
+  const live = t.live || {};
+  html += `<details class="card add-insert" ${Object.keys(typed).length || p.tool_country ? "open" : ""}>
+    <summary class="btn btn-outline small">Tool features and tool country</summary>
+    <form id="toolForm" class="grid2">
+      <label>Tool country <select name="tool_country"><option value="">Same as producing country (${esc(p.effective_country)})</option>
+        ${rmMeta.countries.map((c) => `<option value="${esc(c.code)}" ${c.code === p.tool_country ? "selected" : ""}>${esc(c.name)} (${esc(c.currency)})</option>`).join("")}</select></label>
+      <label>Cavities per tool <input type="number" min="1" step="1" name="cavities" value="${typed.cavities ?? ""}"
+        placeholder="Stage C: ${esc(live.stage_c?.cavities_per_tool ?? "")}" /></label>
+      ${live.part_type === "plastic" ? `<label class="check"><input type="checkbox" name="hot_runner" ${typed.hot_runner ? "checked" : ""} /> Hot runner</label>` : ""}
+      <label>Slides per cavity <input type="number" min="0" step="1" name="slides_per_cavity" value="${typed.slides_per_cavity ?? ""}" placeholder="0" /></label>
+      ${live.part_type === "plastic" ? `<label>Lifters per cavity <input type="number" min="0" step="1" name="lifters_per_cavity" value="${typed.lifters_per_cavity ?? ""}" placeholder="0" /></label>` : ""}
+      <label>Small inserts per cavity <input type="number" min="0" step="1" name="inserts_per_cavity" value="${typed.inserts_per_cavity ?? ""}" placeholder="0" /></label>
+      <label class="check"><input type="checkbox" name="warranty" ${typed.warranty === false ? "" : "checked"} /> Warranty / spares</label>
+      <p class="note span2">${esc(live.stage_c?.note ?? "")}. Leave cavities empty to follow Stage C.</p>
+      <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary">Save and calculate</button></div>
+      <p class="status span2" id="toolStatus"></p>
+    </form></details>`;
+  if (t.versions) {
+    html += `<details class="card add-insert"><summary class="btn btn-outline small">Tool cost versions (${t.versions})</summary>
+      <div class="table-wrap"><table class="cost-table"><thead><tr><th>Ver</th><th>Rev</th><th>Country</th><th>Month</th><th class="num">Cavities</th>
+        <th class="num">Per tool</th><th class="num">INR</th><th class="num">CAPEX (INR)</th><th>Why</th><th>By / when</th></tr></thead><tbody>
+        ${p.toolVersions.map((x) => `<tr class="clickable" data-toolversion="${x.version}"><td><b>${x.version}</b></td><td>${esc(x.rev)}</td>
+          <td>${esc(x.country)}</td><td>${esc(x.as_of)}</td><td class="calc num">${x.cavities}</td>
+          <td class="calc num">${fmt(x.tool_cost, 0)} ${esc(x.currency)}</td><td class="calc num">${fmt(x.tool_cost_inr, 0)}${x.is_example ? ' <span class="example-mark" title="Uses example values">•</span>' : ""}</td>
+          <td class="calc num">${x.tool_capex_inr != null ? fmt(x.tool_capex_inr, 0) : "—"}</td>
+          <td>${esc(x.reason)}</td><td>${esc(x.created_by)} · ${esc(x.created_at.slice(0, 16).replace("T", " "))}</td></tr>`).join("")}</tbody></table></div>
+      <p class="note">Old versions are never changed. Click a version to see its full trace. • = uses EXAMPLE values.</p></details>`;
+  }
+  return html;
+}
+
 function suggestionBox(p) {
   const s = p.suggestion;
   if (!s?.process && !s?.steps?.length) return "";
@@ -298,6 +383,7 @@ function renderPart() {
     <div class="table-wrap"><table class="cost-table"><tbody>${geometryRows(cur?.geometry) || '<tr><td class="empty">No 3D file for this revision.</td></tr>'}</tbody></table></div>
 
     ${rmBlock(p)}
+    ${toolBlock(p)}
     ${insertsBlock(p)}
     ${mouldedIntoBlock(p)}
 
@@ -368,6 +454,23 @@ $("panelBody").addEventListener("submit", async (e) => {
       status($("rmStatus"), err.message, "error");
     }
   }
+  if (e.target.id === "toolForm") {
+    const f = new FormData(e.target);
+    const inputs = { warranty: f.has("warranty"), hot_runner: f.has("hot_runner") };
+    for (const k of ["cavities", "slides_per_cavity", "lifters_per_cavity", "inserts_per_cavity"]) if (f.get(k)) inputs[k] = Number(f.get(k));
+    if (inputs.warranty) delete inputs.warranty; // the default
+    if (!inputs.hot_runner) delete inputs.hot_runner;
+    status($("toolStatus"), "Calculating…");
+    try {
+      const res = await api(`/api/parts/${part.id}/tool-cost`, { method: "POST", body: JSON.stringify({
+        tool_inputs: inputs, tool_country: f.get("tool_country"), reason: "changed in the part panel" }) });
+      await openPart(part.id);
+      search();
+      status($("toolStatus"), res.message, res.stored === false && res.version === null ? "error" : "ok");
+    } catch (err) {
+      status($("toolStatus"), err.message, "error");
+    }
+  }
   if (e.target.id === "insertForm") {
     const f = new FormData(e.target);
     const data = { insert_part_code: f.get("insert_part_code"), quantity: f.get("quantity"), name: f.get("name"),
@@ -411,6 +514,25 @@ $("panelBody").addEventListener("click", async (e) => {
   if (rv) {
     const tr = await api(`/api/parts/${part.id}/rm-cost/trace?version=${rv.dataset.rmversion}`);
     window.TracePanel.open(tr, tr.root);
+  }
+  const tt = e.target.closest("[data-tooltrace]");
+  if (tt && part.toolTrace) window.TracePanel.open(part.toolTrace, tt.dataset.tooltrace);
+  const tvn = e.target.closest("[data-toolversion]");
+  if (tvn) {
+    const tr = await api(`/api/parts/${part.id}/tool-cost/trace?version=${tvn.dataset.toolversion}`);
+    window.TracePanel.open(tr, tr.root);
+  }
+  if (e.target.id === "toolRecalc") {
+    e.target.disabled = true;
+    try {
+      const res = await api(`/api/parts/${part.id}/tool-cost`, { method: "POST", body: JSON.stringify({ reason: "recalculated with the latest approved rates" }) });
+      await openPart(part.id);
+      search();
+      status($("partStatus"), res.message, "ok");
+    } catch (err) {
+      e.target.disabled = false;
+      status($("partStatus"), err.message, "error");
+    }
   }
   if (e.target.id === "rmRecalc") {
     e.target.disabled = true;

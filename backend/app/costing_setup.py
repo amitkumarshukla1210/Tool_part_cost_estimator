@@ -6,9 +6,10 @@
     machines         technical data per machine (power, area, life, residual,
                      maintenance); prices and consumables are country rates
     labour_grades    skill levels (operator, toolmaker, ...)
-    cost_formulas    every step of the MHR, labour-rate and raw-material (RM) cost
+    cost_formulas    every step of the MHR, labour-rate, raw-material (RM) and tool cost
                      calculation as a formula, per scope ("mhr", "labour",
-                     "rm_plastic", "rm_die_casting", "rm_foundry", "rm_sheet_metal")
+                     "rm_plastic", "rm_die_casting", "rm_foundry", "rm_sheet_metal",
+                     "tool_clamp", "tool")
     formula_inputs   where each formula variable comes from: a country rate
                      (category + item, "{machine}" / "{grade}" / "{material}" filled
                      in), a machine field, a Parameters row of the part's family, or
@@ -23,11 +24,28 @@ from . import formula
 from .table_set import TableSet, col
 
 RM_FAMILIES = ("plastic", "die_casting", "foundry", "sheet_metal")
-SCOPES = ("mhr", "labour") + tuple(f"rm_{f}" for f in RM_FAMILIES)
-SOURCES = ("rate", "machine", "parameter", "part")
+TOOL_SCOPES = ("tool_clamp", "tool")
+SCOPES = ("mhr", "labour") + tuple(f"rm_{f}" for f in RM_FAMILIES) + TOOL_SCOPES
+SOURCES = ("rate", "machine", "parameter", "part", "tool")
 MACHINE_FIELDS = ("power_kw", "load_factor_pct", "floor_area_m2", "life_years", "residual_pct",
                   "maintenance_pct", "tonnage_t", "length_mm", "width_mm")
-RESULT_OF = {"mhr": "Machine hour rate", "labour": "Labour rate"} | {f"rm_{f}": "Net RM cost per part" for f in RM_FAMILIES}
+RESULT_OF = ({"mhr": "Machine hour rate", "labour": "Labour rate"} | {f"rm_{f}": "Net RM cost per part" for f in RM_FAMILIES}
+             | {"tool_clamp": "Clamp force for the try-out machine", "tool": "Tool cost per tool"})
+# Values worked out by the tool cost engine that the tool formulas can use (source = tool).
+TOOL_ITEMS = {
+    "cavities": "Cavities per tool",
+    "projected_area_cm2": "Projected area of one part (cm²)",
+    "shot_weight_kg": "Net weight of one shot = cavities × part weight (kg)",
+    "material_cost": "Tool steel: Σ BOM quantity × weight × steel rate of the tool country",
+    "bought_out_cost": "Mould base and standard parts: Σ BOM quantity × catalogue price, converted to the tool country's currency",
+    "process_cost": "Processes: Σ BOM quantity × hours × (MHR + operators × labour rate), or amount × rate per unit (design excluded)",
+    "design_cost": "Design: Σ design hours × designers × designer labour rate",
+    "tool_weight_kg": "Tool weight = mould base + made BOM elements (kg)",
+    "trial_mhr": "MHR of the try-out machine (smallest machine whose tonnage takes the clamp force)",
+    "trial_labour_per_h": "Try-out crew per hour = operators × labour rate (Tool processes → try-out row)",
+    "warranty_on": "1 if warranty / spares are included for this tool, else 0",
+    "tools_count": "Tools over the programme (Stage C), for the tool CAPEX",
+}
 # Values of the part itself an RM formula can use (source = part).
 PART_ITEMS = {
     "net_weight_g": "Net part weight (g): CAD volume × material density (body only for insert-moulded parts)",
@@ -156,8 +174,14 @@ def _check(clean: dict) -> None:
             raise SetupError(f"Formula inputs row {i}: a rate input needs a rate category and item.")
         if r["source"] == "machine" and r["item"] not in MACHINE_FIELDS:
             raise SetupError(f"Formula inputs row {i}: machine field must be one of {', '.join(MACHINE_FIELDS)}.")
-        if r["source"] in ("parameter", "part") and not r["scope"].startswith("rm_"):
-            raise SetupError(f"Formula inputs row {i}: source '{r['source']}' is only for the RM scopes (rm_...).")
+        if r["source"] == "part" and not r["scope"].startswith("rm_"):
+            raise SetupError(f"Formula inputs row {i}: source 'part' is only for the RM scopes (rm_...).")
+        if r["source"] == "parameter" and not (r["scope"].startswith("rm_") or r["scope"] in TOOL_SCOPES):
+            raise SetupError(f"Formula inputs row {i}: source 'parameter' is only for the RM and tool scopes.")
+        if r["source"] == "tool" and r["scope"] not in TOOL_SCOPES:
+            raise SetupError(f"Formula inputs row {i}: source 'tool' is only for the tool scopes ({', '.join(TOOL_SCOPES)}).")
+        if r["source"] == "tool" and r["item"] not in TOOL_ITEMS:
+            raise SetupError(f"Formula inputs row {i}: tool value must be one of {', '.join(TOOL_ITEMS)}.")
         if r["source"] == "parameter" and not r["item"]:
             raise SetupError(f"Formula inputs row {i}: a parameter input needs the parameter name in 'item' "
                              "(a row of Master data → Parameters).")
@@ -207,6 +231,10 @@ def _help() -> list:
         ["source = part", "RM scopes only: a value of the part: " + "; ".join(f"{k} = {v}" for k, v in PART_ITEMS.items())],
         ["RM scopes", "rm_plastic, rm_die_casting, rm_foundry, rm_sheet_metal: gross weight, yield, RM cost and scrap "
                       "credit. Units written with {cur} are money in the producing country's currency."],
+        ["Tool scopes", "tool_clamp: clamp force that picks the try-out machine. tool: trial, design, overhead, profit, "
+                        "packing, transport, warranty and the tool cost per tool, in the tool country's currency. "
+                        "{material} is the part material (trial shots)."],
+        ["source = tool", "Tool scopes only: a value of the tool cost engine: " + "; ".join(f"{k} = {v}" for k, v in TOOL_ITEMS.items())],
         ["functions", "ceil, floor, round, min, max, abs, sqrt; 'a if condition else b'; and, or, not"],
     ]
 
@@ -215,7 +243,7 @@ SET = TableSet("Countries, machines & formulas", TABLES, error=SetupError, check
 
 
 def schema() -> dict:
-    return SET.schema() | {"machine_fields": list(MACHINE_FIELDS), "part_items": PART_ITEMS}
+    return SET.schema() | {"machine_fields": list(MACHINE_FIELDS), "part_items": PART_ITEMS, "tool_items": TOOL_ITEMS}
 
 
 def tables() -> dict:

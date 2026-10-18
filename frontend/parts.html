@@ -52,9 +52,12 @@
           <label>RM cost from (INR) <input type="number" name="rm_min" min="0" step="any" style="width:100px" /></label>
           <label>to <input type="number" name="rm_max" min="0" step="any" style="width:100px" /></label>
           <label class="check"><input type="checkbox" name="rm_missing" value="true" /> No RM cost yet</label>
+          <label>Tool cost from (INR) <input type="number" name="tool_min" min="0" step="any" style="width:100px" /></label>
+          <label>to <input type="number" name="tool_max" min="0" step="any" style="width:100px" /></label>
+          <label class="check"><input type="checkbox" name="tool_missing" value="true" /> No tool cost yet</label>
           <label>Sort <select name="sort">
             <option value="part_code">Part code</option><option value="name">Name</option>
-            <option value="rm_cost">Highest RM cost</option><option value="updated">Last changed</option><option value="status">Status</option><option value="process">Process</option>
+            <option value="rm_cost">Highest RM cost</option><option value="tool_cost">Highest tool cost</option><option value="updated">Last changed</option><option value="status">Status</option><option value="process">Process</option>
           </select></label>
           <a class="btn btn-outline" id="export">Export Excel</a>
           <a class="btn btn-primary" href="/import">+ Import parts</a>

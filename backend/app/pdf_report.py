@@ -81,8 +81,10 @@ def dashboard_pdf(d: dict) -> bytes:
     story = [head, Spacer(1, 4 * mm), Paragraph("PROJECT SUMMARY", kicker),
              Paragraph(f"{p['code']} · {p['name']}", h1),
              Paragraph(f"Customer: {p.get('customer') or '—'} · CAPEX budget: {_money(p.get('capex_budget_inr'))}", note)]
-    if any(v.get("rm_is_example") for v in d["variants"]):
-        story += [Spacer(1, 2 * mm), _example_banner(ss, "The RM cost of at least one variant includes EXAMPLE rates.")]
+    if any(v.get("rm_is_example") for v in d["variants"]) or d["capex"].get("tool_is_example"):
+        what = [w for w, on in (("the RM cost of at least one variant", any(v.get("rm_is_example") for v in d["variants"])),
+                                ("the tool CAPEX", d["capex"].get("tool_is_example"))) if on]
+        story += [Spacer(1, 2 * mm), _example_banner(ss, " and ".join(what).capitalize() + " includes EXAMPLE values.")]
 
     story += [Paragraph("Parts", h2), _table([
         ["Parts", "File missing", "With target cost", "Open corrections"],
@@ -96,8 +98,14 @@ def dashboard_pdf(d: dict) -> bytes:
           _money(v["target_bom_cost_inr"]), _money(v.get("rm_cost_inr")), v.get("rm_parts_missing", 0),
           _money(v["bom_cost_inr"])] for v in d["variants"]], theme)]
     story += [Paragraph("CAPEX", h2), _table(
-        [["", "INR"], ["Budget", _money(d["capex"]["budget_inr"])], ["Tools & moulds (costed)", _money(d["capex"]["tool_cost_inr"])],
-         ["Machines (costed)", _money(d["capex"]["machine_cost_inr"])]], theme, [80 * mm, 50 * mm])]
+        [["", "INR"], ["Budget", _money(d["capex"]["budget_inr"])],
+         [f"Tools & moulds ({d['capex'].get('tool_parts_costed', 0)} parts costed, "
+          f"{d['capex'].get('tool_parts_missing', 0)} without tool cost)", _money(d["capex"]["tool_cost_inr"])],
+         ["Tools as % of budget", "—" if d["capex"].get("tool_share_of_budget_pct") is None
+          else f"{d['capex']['tool_share_of_budget_pct']} %"],
+         ["Machines (costed)", _money(d["capex"]["machine_cost_inr"])]], theme, [110 * mm, 50 * mm])]
+    if d["capex"].get("tool_note"):
+        story += [Paragraph(d["capex"]["tool_note"], note)]
     story += [Spacer(1, 4 * mm), Paragraph(d["not_costed_note"], note), Spacer(1, 2 * mm),
               Paragraph("© Design to Cost", note)]
     doc.build(story)
@@ -147,6 +155,75 @@ def rm_cost_pdf(part: dict, tr: dict) -> bytes:
              x["approved_by"], "EXAMPLE" if x.get("is_example") else ""] for x in tr["rates_used"]]
     story += [Paragraph("Rate versions used (the report can be reproduced with these)", h2), _table(
         [["Id", "Rate", "Country", "Month", "Value", "Unit", "Status", "Approved by", ""]] + used, theme)]
+    story += [Spacer(1, 4 * mm), Paragraph("© Design to Cost", note)]
+    doc.build(story)
+    return buf.getvalue()
+
+
+def tool_cost_pdf(tr: dict, part: dict | None = None) -> bytes:
+    """Tool cost sheet of one mould / die: result, cost build-up, BOM & processes, steps, inputs with sources, rates."""
+    from .tool_cost import examples
+    from .trace import source_text
+    theme = _theme()
+    buf = io.BytesIO()
+    title = part["part_code"] if part else "Estimate"
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=14 * mm, rightMargin=14 * mm,
+                            topMargin=12 * mm, bottomMargin=12 * mm,
+                            title=f"Design to Cost — Tool cost {title}", author="Design to Cost")
+    ss = getSampleStyleSheet()
+    h1 = ParagraphStyle("h1", parent=ss["Title"], textColor=theme["ink"], fontSize=18, alignment=0, spaceAfter=2)
+    kicker = ParagraphStyle("k", parent=ss["Normal"], textColor=theme["brand"], fontSize=8, leading=10)
+    h2 = ParagraphStyle("h2", parent=ss["Heading2"], textColor=theme["ink"], fontSize=11, spaceBefore=10, spaceAfter=4)
+    note = ParagraphStyle("n", parent=ss["Normal"], textColor=theme["grey"], fontSize=7.5)
+    cell = ParagraphStyle("c", parent=ss["Normal"], fontSize=7.5, leading=9)
+    wrap = lambda t: Paragraph(str(t).replace("&", "&amp;").replace("<", "&lt;"), cell)
+    num = lambda v: "—" if v is None else (f"{v:,.4f}".rstrip("0").rstrip(".") if abs(v) < 1000 else f"{v:,.0f}")
+    cur, nodes = tr["currency"], tr["nodes"]
+    ex = tr.get("example") or examples(tr)
+    logo = ROOT / "theme" / "logo.png"
+    head = Table([[Image(str(logo), 11 * mm, 11 * mm) if logo.exists() else "",
+                   Paragraph("<b>Design to Cost</b><br/><font size=7 color='#6b7683'>PART COST ESTIMATOR</font>", ss["Normal"]),
+                   Paragraph(f"<font size=7 color='#6b7683'>{date.today().isoformat()}</font>", ss["Normal"])]],
+                 colWidths=[14 * mm, 120 * mm, None])
+    b = tr["base"]
+    machine = (tr["trial"]["machine"] or {}).get("machine_id", "missing")
+    story = [head, Spacer(1, 4 * mm), Paragraph("TOOL COST SHEET", kicker),
+             Paragraph(f"{part['part_code']} · {part['name']}" if part else "Tool cost estimate", h1),
+             Paragraph((f"Rev {tr.get('revision', {}).get('rev', '—')} · " if part else "")
+                       + f"{tr['part_type'].replace('_', ' ')} · {tr['cavities']} cavities · base {b['series']} {b['size_code']} · "
+                       f"try-out on {machine} · tool country {tr['country']} · costing month {tr['as_of']} · "
+                       + (f"version {tr['version']}" if tr.get("version") else "live preview, not stored"), note)]
+    if ex["any"]:
+        story += [Spacer(1, 2 * mm), _example_banner(ss, ex["detail"])]
+    story += [Paragraph("Result", h2), _table([
+        ["", cur, "INR"], ["Tool cost per tool", num(tr["value"]), num(tr["value_inr"])],
+        [f"Tool CAPEX ({tr['tools_count']} tools over the programme)", num(tr.get("capex")), num(tr.get("capex_inr"))]],
+        theme, [110 * mm, 40 * mm, 40 * mm], [1])]
+    build = [[wrap(nodes[g["node"]]["label"]), "Σ BOM lines of the group", num(nodes[g["node"]]["value"]), cur] for g in tr["groups"]]
+    build += [[wrap(nodes[s["node"]]["label"]), wrap(nodes[s["node"]]["formula"]), num(nodes[s["node"]]["value"]),
+               nodes[s["node"]]["unit"]] for s in tr["steps"]]
+    story += [Paragraph("Cost build-up (process-wise, then trial, overhead, profit, packing, transport, warranty)", h2),
+              _table([["Step", "Formula", "Value", "Unit"]] + build, theme, [70 * mm, 110 * mm, 30 * mm, 25 * mm],
+                     [1 + len(tr["groups"]) + i for i, s in enumerate(tr["steps"]) if s["is_result"]])]
+    bom = [[wrap(l["element"] + (" •" if l["is_example"] else "")), l["category"].replace("_", " "), num(l["quantity"]),
+            wrap(l["material"]), num(l["material_cost"]) if l["material_cost"] else "", num(l["bought_out_cost"]) if l["bought_out_cost"] else "",
+            wrap(l["process"]), num(l["hours"]) if l["hours"] else (num(l["amount"]) if l["amount"] else ""),
+            num(l["process_cost"]) if l["process_cost"] else "", num(l["total"])] for l in tr["lines"]]
+    story += [Paragraph(f"BOM & processes ({cur}; • = EXAMPLE master-data row)", h2), _table(
+        [["Element", "Category", "Qty", "Steel", "Steel cost", "Bought-out", "Process", "Hours / amount", "Process cost",
+          "Line total"]] + bom, theme, [52 * mm, 20 * mm, 14 * mm, 28 * mm, 22 * mm, 22 * mm, 38 * mm, 22 * mm, 22 * mm, 24 * mm])]
+    steps = [[wrap(n["label"]), wrap(n["formula"]), num(n["value"]), n["unit"]] for n in nodes.values() if n["kind"] == "calculated"]
+    story += [Paragraph("Every step and formula", h2), _table([["Step", "Formula", "Value", "Unit"]] + steps, theme,
+                                                              [70 * mm, 110 * mm, 30 * mm, 25 * mm])]
+    inputs = [[wrap(n["label"]), num(n["value"]), n["unit"], wrap(source_text(n))] for n in nodes.values() if n["kind"] == "input"]
+    story += [Paragraph("Inputs and where each comes from", h2), _table([["Input", "Value", "Unit", "Comes from"]] + inputs,
+                                                                          theme, [70 * mm, 25 * mm, 22 * mm, 118 * mm])]
+    used = [[x["id"], f"{x['category']} / {x['item']}", x["country"], x["month"], num(x["value"]), x["unit"], x["status"],
+             x["approved_by"], "EXAMPLE" if x.get("is_example") else ""] for x in tr["rates_used"]]
+    story += [Paragraph("Rate versions used (the report can be reproduced with these)", h2), _table(
+        [["Id", "Rate", "Country", "Month", "Value", "Unit", "Status", "Approved by", ""]] + used, theme)]
+    if ex["rows"]:
+        story += [Paragraph("Master-data rows still marked EXAMPLE", h2), Paragraph(", ".join(ex["rows"]), note)]
     story += [Spacer(1, 4 * mm), Paragraph("© Design to Cost", note)]
     doc.build(story)
     return buf.getvalue()

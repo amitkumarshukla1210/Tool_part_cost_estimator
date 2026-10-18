@@ -84,10 +84,10 @@ def run(scope: str, country: str, as_of: str | None = None, machine: dict | None
     return out
 
 
-def evaluate_scope(trace: Trace, setup: dict, scope: str, names: dict, cur: str, as_of: str):
+def evaluate_scope(trace: Trace, setup: dict, scope: str, names: dict, cur: str, as_of: str, inr: bool = True):
     """Run the cost formulas of a scope in order on the inputs in `names` (variable -> node id).
 
-    Adds one node per formula plus the result in INR ("result:inr").
+    Adds one node per formula plus, when `inr`, the result in INR ("result:inr").
     Returns (result node, component nodes in sheet order, formula rows in calculation order).
     """
     rows = [(i, r) for i, r in enumerate(setup["cost_formulas"], start=2) if r["scope"] == scope]
@@ -104,6 +104,8 @@ def evaluate_scope(trace: Trace, setup: dict, scope: str, names: dict, cur: str,
         if r["is_result"]:
             result, result_unit = nid, r["unit"]
 
+    if not inr:
+        return result, [names[r["name"]] for _, r in rows if not r["is_result"]], order
     # The result in INR as well (always shown next to the local currency).
     fx = fx_to_inr(trace, cur, as_of)
     trace.compute("result:inr", f"{trace.nodes[result]['label']} in INR", "value * fx",

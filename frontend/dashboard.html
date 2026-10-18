@@ -36,7 +36,7 @@
         <div class="section-head">
           <p class="kicker">Project leader view</p>
           <h2>Project dashboard</h2>
-          <p>Status of every part, BOM cost and CAPEX against target, per project and variant.</p>
+          <p>Status of every part, RM cost and tool &amp; mould CAPEX against target and budget, per project and variant.</p>
         </div>
         <div class="card toolbar">
           <label>Project <select id="project"></select></label>
@@ -47,6 +47,7 @@
           <a class="btn btn-outline" id="openParts" href="/parts">Open parts</a>
           <a class="btn btn-outline" id="importLink" href="/import">Import parts</a>
           <button type="button" class="btn btn-outline" id="rmRecalc" title="Recalculate the RM cost of every part with the latest approved rates">Recalculate RM</button>
+          <button type="button" class="btn btn-outline" id="toolRecalc" title="Recalculate the tool cost of every part with the latest approved rates">Recalculate tools</button>
           <a class="btn btn-outline" id="xlsx">Export Excel</a>
           <a class="btn btn-primary" id="pdf">Export PDF</a>
         </div>
@@ -65,6 +66,7 @@
           <div id="exampleBanner"></div>
           <div class="tiles" id="tiles"></div>
           <p class="warn" id="notCosted"></p>
+          <p class="note" id="toolNote"></p>
 
           <h3 class="block-title">Variants · RM cost vs target</h3>
           <div class="table-wrap"><table class="cost-table" id="variants"></table></div>

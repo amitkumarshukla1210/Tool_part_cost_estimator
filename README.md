@@ -15,9 +15,9 @@ It covers four manufacturing routes:
 
 It's built in stages. **Stage A** reads the 3D model and works out the geometry and net weight.
 **Stage B** turns net weight into gross weight, material yield and raw-material (RM) cost per part.
-**Stage C** works out cavities per tool and the number of tools. A **mould / die preview** then sizes the mould and
-builds its BOM from the mould & die database.
-Later stages build on these numbers to produce the product BOM, tool cost and press tonnage.
+**Stage C** works out cavities per tool and the number of tools. The **tool cost engine** (roadmap stage 4) then sizes the
+mould or die, builds its BOM and prices it process by process with the MHR and labour rate of the tool country.
+Later stages build on these numbers to produce the product BOM, part cost and press tonnage.
 
 **No rates or rules are written in the code.** They all live in two editable data files, which you change on the
 **Master data** page (see [Master data](#master-data)).
@@ -108,21 +108,69 @@ utilisation × machines × cavities must equal cavities needed.
 
 ---
 
-## Mould / die size & BOM (preview)
+## Tool cost: moulds and dies (roadmap stage 4)
 
-For plastic and die-cast parts, a section under Stage C sizes the mould and builds its BOM. It uses only the
-**mould & die database**:
+For plastic moulds and die-casting dies, the section under Stage C on the Estimate page, and the **Tool cost** block of
+every registered part, work out what the tool costs, process by process. Nothing is typed into the code: rules, machines,
+formulas and rates all come from master data and the approved rate library of the **tool country**.
 
-1. **Insert per cavity** = part L × W + 2 × `insert_wall_mm`. Height per half = part height ÷ 2 + `insert_backing_mm`.
-2. **Cavity layout:** every rows × columns grid is tried. The winner needs the smallest standard mould base; ties go to
-   fewer empty positions, then the squarer layout. Pocket = inserts + `insert_gap_mm` between them.
-3. **Mould base** = the smallest base in *Mould bases* whose insert pocket takes the inserts (either way round). A warning
-   shows if the insert is deeper than the A/B plate allows.
-4. **BOM:** every *BOM element* row for that part type is evaluated with its rules:
-   `line cost = quantity × (bought-out cost + weight × material rate/kg + hours × process rate/h)`.
+1. **Mould size** (mould & die database):
+   - **Insert per cavity** = part L × W + 2 × `insert_wall_mm`. Height per half = part height ÷ 2 + `insert_backing_mm`.
+   - **Cavity layout:** every rows × columns grid is tried. The winner needs the smallest standard mould base; ties go to
+     fewer empty positions, then the squarer layout. Pocket = inserts + `insert_gap_mm` between them.
+   - **Mould base** = the smallest base in *Mould bases* whose insert pocket takes the inserts (either way round). A warning
+     shows if the insert is deeper than the A/B plate allows.
+2. **BOM:** every *BOM element* row of the part type is evaluated with its rules (quantity, catalogue price each, steel weight
+   each, hours each, amount each). Hour rules use the part's size, volume, surface area and the **Process time parameters**
+   (removal rate in cm³/h, finishing and EDM rate in cm²/h, set-up hours, polished share …), for example
+   CNC hours = `cnc_setup_h + part_box_cm3 / 2 / cnc_rough_cm3_per_h + part_surface_cm2 / 2 / cnc_finish_cm2_per_h`.
+3. **Each line is priced** with the tool country's approved rates:
 
-You can set a hot runner, slides, lifters and small inserts per cavity. Lines that still use placeholder values are
-marked • and counted in a yellow warning.
+   | Part of a line | Cost |
+   |---|---|
+   | Steel | quantity × weight × steel rate (`tool_material`) |
+   | Mould base, standard parts | quantity × catalogue price. Prices are kept in INR in master data and converted with that month's forex |
+   | Machine hours (*Tool processes*: `machine_hour`) | hours × (**MHR** of the machine + operators × **labour rate** of their grade) |
+   | Labour hours (`labour_hour`, e.g. design) | hours × designers × designer labour rate |
+   | Per-unit processes (`unit`) | amount × rate per kg / cm² / mm / m², at least the **minimum charge per job** (cutting, heat treatment, nitriding, texture, …) |
+
+   *Tool processes* (mould & die database) names, for each process, how it is priced, its machine, the labour grade and
+   the operators per machine. Operators can be a fraction: 0.5 means one operator runs two machines. The MHR and labour
+   rate are the rate engine's own traced results, so every hour opens to depreciation, interest, power, maintenance,
+   floor space, consumables, overhead and labour.
+4. **Try-out:** the clamp force (formula scope `tool_clamp`: projected area × cavities × cavity pressure × safety factor ÷ 1000)
+   picks the **smallest machine** of the process named in Parameters → `trial_machine_process` whose tonnage takes it.
+   Trial cost = trials × hours per trial × (its MHR + try-out crew) + trials × shots × shot weight × part material rate.
+5. **Tool cost per tool** (formula scope `tool`, all editable):
+   - manufacturing cost = steel + mould base & standard parts + processes + design + try-out
+   - \+ toolmaker overhead % and profit % (on cost + overhead)
+   - \+ packing % and warranty / spares % of the tool price (warranty can be switched off per tool)
+   - \+ transport = tool weight × transport rate per kg
+   - **Tool CAPEX** = tool cost × tools over the programme (Stage C).
+
+   Overhead, profit, packing and warranty % are per-country library rates (category `tool_commercial`, seeded as EXAMPLE values).
+
+**Tool country.** Each part has a *tool country*. Blank means its producing country. A mould for an Indian part can be costed
+with China's rates, for example. Results are shown in that country's currency and in INR.
+
+**On the part register.** A part you make by moulding or die casting gets a numbered **tool cost version**, just like the RM cost:
+- **Cavities** follow Stage C, using the part's annual volume. Blank means Σ variant annual volume × quantity in that variant.
+- **Tools over the programme** come from Stage C (capacity and tool life).
+- In **Tool features and tool country** you can type over cavities, hot runner, slides, lifters, small inserts and warranty.
+- A new version is made when the revision, material, process, tool country, month, features, volume or programme life change.
+- Newer approved rates never change a stored version. The part says *Newer approved rates exist*: recalculate the part,
+  or use **Recalculate tools** on the Dashboard for the whole project.
+- The Parts list has a *Tool cost (INR)* column, filters (*Tool cost from / to*, *No tool cost yet*) and a sort.
+- The **Dashboard** shows the tool & mould CAPEX against the CAPEX budget.
+- The **tool cost sheet** (Excel: Summary, Cost build-up, BOM & processes, Steps, Inputs, Rates used, Example values; and PDF) is on
+  the part and on the Estimate page.
+
+Sheet-metal dies come with stages 9 and 10, and foundry patterns later. Those parts say so instead of showing a cost.
+
+**Example warning.** Every tool cost shown carries the red **"Uses example rates – not for negotiation"** warning while any
+rate **or** master-data row it uses (machine, BOM element, tool process, time parameter, mould base, sizing rule) is still an
+EXAMPLE. The warning says how many of each are left. It is on the Estimate page, the part panel, the Parts list, the
+Dashboard, the first row of every sheet of the Excel exports, and a red box on the PDFs.
 
 ---
 
@@ -136,7 +184,7 @@ stays unchanged.
 ### 1. General master data: `master_data/master_data.xlsx`
 | Sheet | Contents |
 |---|---|
-| Parameters | All Stage B / C defaults and rules per part type (`all` = every type): runner %, yields, melt/process loss, sheet size, working days, shifts, OEE, cycle time, max cavities, plate size, spacing, tool life, `standard_cavities`, plastic cycle rule, and the Stage F tonnage factors (cavity pressure, safety factors) |
+| Parameters | All Stage B / C defaults and rules per part type (`all` = every type): runner %, yields, melt/process loss, sheet size, working days, shifts, OEE, cycle time, max cavities, plate size, spacing, tool life, `standard_cavities`, plastic cycle rule, the tonnage factors (cavity pressure, safety factors) and the try-out (`trial_machine_process`, `trials`, `trial_hours_each`, `trial_shots_each`) |
 | Materials | Part materials with their density and part type (family). These are the presets on the estimator and the choices on the register. **Material rates are approved rates in the rate library** (see Part RM cost) |
 
 You can also edit this file directly in Excel while the server runs. It is re-read when it changes.
@@ -151,9 +199,11 @@ page edits the first two; country rates are edited on the **Rates** page (see be
 |---|---|
 | Mould bases | Standard sizes: L × W, insert pocket L × W, A / B / clamp / support / spacer / ejector plate thicknesses, stack height, weight, cost |
 | Tool materials | Core/cavity and plate steels (P20, 2738, S136, H13, 1.2343 ESR, C45, D2, BeCu): density, rate/kg, hardness |
-| BOM elements | Guide pillars, bushes, ejector/return pins, sprue bush, locating ring, hot runner, cooling, slides, lifters, inserts, machining, design, assembly, tryout. Each has a **category** (made / bought_out / process), a **material** and **process**, and four **rules**: quantity, bought-out cost each, weight each (kg) and hours each |
-| Process rates | CNC milling, EDM, wire cut, grinding, deep-hole drilling, polishing, heat treatment, fitting & assembly, design, tryout: rate/hour |
+| BOM elements | Guide pillars, bushes, ejector/return pins, sprue bush, locating ring, hot runner, cooling, slides, lifters, inserts, steel cutting, machining, grinding, polishing, heat treatment, nitriding, design, assembly. Each has a **category** (made / bought_out / process), a **material** and a **tool process**, and five **rules**: quantity, bought-out cost each (INR), weight each (kg), hours each and amount each (in the process unit, e.g. kg for heat treatment) |
+| Process rates | CNC milling, EDM, wire cut, grinding, deep-hole drilling, polishing, heat treatment, fitting & assembly, design, tryout: India rate/hour (the all-in rates of the library grid) |
 | Sizing rules | `insert_wall_mm`, `insert_gap_mm`, `insert_backing_mm`, `plate_floor_mm` per part type |
+| Tool processes | How each tool process is priced: `machine_hour` (machine + labour grade + operators), `labour_hour` (design) or `unit` (a *Process rates by unit* row), and its cost group (cutting, machining, polishing, treatment, assembly, design, trial). The `trial` row's machine is `by tonnage` |
+| Process time parameters | Per part type: CNC set-up and removal rates, EDM share and rate, grinding and polishing rates, steel density. The BOM rules use them by name |
 
 **Every seeded row is an EXAMPLE placeholder** (`is_example` = yes, shaded yellow in Excel). Replace them with your
 catalogue, supplier and toolroom values. Editing a row on the page clears its Example flag, and the *Examples only*
@@ -162,9 +212,10 @@ filter shows what is still left to replace.
 **Rules** are one-line formulas, for example `max(4, ceil(cavities * projected_area_cm2 / 8))` or
 `cavities if hot_runner else 0`. Allowed: numbers, + − * / ( ), comparisons, `a if condition else b`, `and / or / not`,
 `ceil, floor, round, min, max, abs, sqrt`, and these variables: `cavities`, `layout_rows`, `layout_cols`, `part_l`,
-`part_w`, `part_h`, `projected_area_cm2`, `part_weight_g`, `insert_each_l`, `insert_each_w`, `insert_half_h`,
-`pocket_l`, `pocket_w`, `base_l`, `base_w`, `base_stack_h`, `base_weight_kg`, `hot_runner`, `slides_per_cavity`,
-`lifters_per_cavity`, `inserts_per_cavity`, `density`. The exported Excel file has a *Formula help* sheet listing them.
+`part_w`, `part_h`, `projected_area_cm2`, `part_weight_g`, `part_volume_cm3`, `part_surface_cm2`, `part_box_cm3`,
+`insert_each_l`, `insert_each_w`, `insert_half_h`, `pocket_l`, `pocket_w`, `base_l`, `base_w`, `base_stack_h`,
+`base_weight_kg`, `hot_runner`, `slides_per_cavity`, `lifters_per_cavity`, `inserts_per_cavity`, `density`, plus every
+name in *Process time parameters* of the part type. The exported Excel file has a *Formula help* sheet listing them.
 Rules are checked when you save, and they cannot run any other code.
 
 #### Countries, machines & formulas (the rate engine's logic)
@@ -173,8 +224,8 @@ Rules are checked when you save, and they cannot run any other code.
 | Countries | Code, name and currency. India, China, Korea, Japan, Taiwan, Thailand, Vietnam, Germany and USA to start with; add more as rows |
 | Machines | Technical data only: connected kW, power load factor, floor area, life, residual %, maintenance % per year, plus tonnage and tie-bar/bed size for presses. **Prices and consumables are country rates** |
 | Labour grades | Operator, skilled machinist, toolmaker, designer |
-| Cost formulas | Every step of the MHR and the labour rate as a formula, e.g. `depreciation = depreciation_per_year / annual_hours`. Exactly one row per scope is the final result |
-| Formula inputs | Where each variable comes from: a country rate (category + item; `{machine}` / `{grade}` are filled in) or a machine field. Money inputs are converted to the producing country's currency with that month's forex rates |
+| Cost formulas | Every step of the MHR, labour rate, RM cost and tool cost as a formula, e.g. `depreciation = depreciation_per_year / annual_hours`. Exactly one row per scope is the final result. Tool scopes: `tool_clamp` (clamp force for the try-out machine) and `tool` (try-out, overhead, profit, packing, transport, warranty, tool cost, CAPEX) |
+| Formula inputs | Where each variable comes from: a country rate (category + item; `{machine}` / `{grade}` / `{material}` are filled in), a machine field, a Parameters row, a part value (RM) or a tool engine value (`source = tool`: steel, bought-out, process and design cost, tool weight, shot weight, try-out MHR and crew, …). Money inputs are converted to the costing country's currency with that month's forex rates |
 
 Change a formula here and every MHR changes with it. Saves are checked first: unknown names, a formula that depends on
 itself, or a missing final result are refused with the row number.
@@ -255,7 +306,7 @@ The mould concept (stage 5), simulation (stage 6) and part costing (stage 8) wil
 - parts by status, process and sourcing
 - **Export PDF** (project summary) and **Export Excel** (part register)
 
-Costs appear on the dashboard from the costing stages.
+The RM cost (stage 2) and the tool & mould CAPEX against the budget (stage 4) are on the dashboard; the full BOM cost comes with part costing (stage 8).
 
 **Where your data lives:**
 - `data/projects.sqlite` holds projects, parts, revisions, BOM and history.
@@ -347,13 +398,12 @@ Thailand, Vietnam, Germany, USA) for the costing month. Choose what to see, in t
   Replace them with supplier quotes or market rates (**New version** in the Rate library, or Excel import as drafts).
 - **Example-rate warning.** Any cost that uses a rate still marked EXAMPLE shows a red banner
   **"Uses example rates – not for negotiation"**: on the Parts list and part panel, the Dashboard, the Estimate page
-  (RM cost and mould preview) and the Rates page (machine & labour rates). The same banner is the first row of every sheet
+  (RM cost and tool cost) and the Rates page (machine & labour rates). The same banner is the first row of every sheet
   of the Excel exports (RM cost sheet, part register) and a red box on the PDFs (RM cost sheet, project summary). It goes
   away when every rate used has been replaced by a real approved rate.
 - Because part-material rates now exist for every country, **a part set to another producing country gets its RM cost
   straight away** (stage 2), in that country's currency and in INR.
-- The mould preview and its BOM still read the India steel and process prices of the Master data tables. They move to
-  the traced country rates with the tool cost engine (stage 4).
+- The tool cost engine (stage 4, see *Tool cost* above) prices moulds and dies with these country rates.
 
 ---
 
@@ -399,7 +449,7 @@ Use *Examples only* in the Rate library to work through them.
 
 ## Full roadmap
 
-Stages A–C, the rate library and MHR engine, the part register (stages 1 and 1b), the RM cost on the register (stage 2) and the material & process rates by country (stage 3) are done.
+Stages A–C, the rate library and MHR engine, the part register (stages 1 and 1b), the RM cost on the register (stage 2), the material & process rates by country (stage 3) and the tool cost engine (stage 4) are done.
 Next come five requirement sets, built one PR at a time:
 **A** sheet-metal tools, **B** tool / mould / die cost, **C** country rate library,
 **D** country comparison for parts, and **E** dynamic rate library with monthly update and approval.
@@ -523,7 +573,8 @@ backend/app/rm_cost.py        RM engine: gross weight, yield, RM cost, scrap cre
 backend/app/capacity.py       Stage C: cavities, tools, tool life, machine hours
 backend/app/master_data.py    Reads, checks and saves master_data.xlsx
 backend/app/mould_db.py       Mould & die tables in the costing database
-backend/app/mould.py          Mould sizing (layout, insert, base) and BOM from the database
+backend/app/mould.py          Mould sizing (layout, insert, base) from the database
+backend/app/tool_cost.py      Tool cost engine: BOM, process-wise cost with MHR + labour, try-out, overhead, profit, ... fully traced
 backend/app/formula.py        Safe evaluation of the BOM rules and cost formulas
 backend/app/costing_db.py     The shared SQLite file (costing_db.sqlite)
 backend/app/table_set.py      Editable table sets: validation, Excel import/export
@@ -570,7 +621,10 @@ the default values and `GET /api/rm/meta` the countries and inputs.
 RM cost of registered parts: `GET /api/parts/{id}/rm-cost` (versions), `POST /api/parts/{id}/rm-cost` (calculate; with `rm_inputs`,
 `country`, `costing_month` it saves them first), `GET /api/parts/{id}/rm-cost/trace?version=`, `…/export.xlsx`, `…/export.pdf`
 and `POST /api/projects/{id}/rm-cost/recalculate`.
-`POST /api/capacity` (Stage C) and `POST /api/mould/estimate` (mould size & BOM) work the same way.
+`POST /api/capacity` (Stage C) and `POST /api/mould/estimate` (mould size) work the same way.
+Tool cost: `POST /api/tool-cost` (Estimate page; `…/export.xlsx` and `…/export.pdf` give the tool cost sheet), `GET /api/tool-cost/meta`,
+and for registered parts `GET/POST /api/parts/{id}/tool-cost` (versions / calculate; with `tool_inputs` or `tool_country` it saves
+them first), `GET /api/parts/{id}/tool-cost/trace?version=`, `…/export.xlsx`, `…/export.pdf` and `POST /api/projects/{id}/tool-cost/recalculate`.
 `GET/PUT /api/master-data` and `GET/PUT /api/mould-db` read and save the data sets.
 `…/download` and `…/upload` move them to and from Excel.
 Interactive API docs are at http://127.0.0.1:8000/docs while the server runs.

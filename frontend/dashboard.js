@@ -15,7 +15,7 @@ async function loadProjects(select) {
   if (want && projects.some((p) => p.id === want)) $("project").value = want;
   $("empty").hidden = projects.length > 0;
   $("content").hidden = projects.length === 0;
-  ["editProject", "newVariant", "openParts", "importLink", "xlsx", "pdf", "rmRecalc"].forEach((id) => ($(id).hidden = !projects.length));
+  ["editProject", "newVariant", "openParts", "importLink", "xlsx", "pdf", "rmRecalc", "toolRecalc"].forEach((id) => ($(id).hidden = !projects.length));
   if (projects.length) load();
 }
 
@@ -57,11 +57,18 @@ function render() {
     tile("File missing", fmt(d.file_missing), "parts without a 3D file", d.file_missing > 0) +
     tile("Open corrections", fmt(d.open_corrections), "from the design loop", d.open_corrections > 0) +
     tile("CAPEX budget", inr(d.capex.budget_inr), "tools, moulds & machines") +
-    tile("Tool & mould CAPEX", inr(d.capex.tool_cost_inr), "costed so far") +
+    tile("Tool & mould CAPEX" + (d.capex.tool_is_example ? " •" : ""), inr(d.capex.tool_cost_inr),
+      `${d.capex.tool_parts_costed} part${d.capex.tool_parts_costed === 1 ? "" : "s"} costed` +
+      (d.capex.tool_share_of_budget_pct != null ? ` · ${fmt(d.capex.tool_share_of_budget_pct, 1)} % of budget` : "") +
+      (d.capex.tool_parts_missing ? ` · ${d.capex.tool_parts_missing} without tool cost` : ""),
+      d.capex.tool_share_of_budget_pct > 100 || d.capex.tool_parts_missing > 0) +
     tile("Parts with RM cost", fmt(d.parts_rm_costed), "raw material only") +
     tile("Parts with target", fmt(d.parts_with_target), d.target_piece_cost_sum_inr != null ? `sum of targets ${inr(d.target_piece_cost_sum_inr)}` : "");
   $("notCosted").textContent = d.not_costed_note;
-  $("exampleBanner").innerHTML = d.rm_is_example ? window.exampleBanner("The RM cost of at least one variant uses EXAMPLE rates (marked •).") : "";
+  const examples = [d.rm_is_example && "the RM cost of at least one variant", d.tool_is_example && "the tool & mould CAPEX"].filter(Boolean);
+  $("exampleBanner").innerHTML = examples.length
+    ? window.exampleBanner(`${examples.join(" and ").replace(/^./, (c) => c.toUpperCase())} uses EXAMPLE values (marked •).`) : "";
+  $("toolNote").textContent = d.capex.tool_note || "";
 
   $("variants").innerHTML = `<thead><tr><th>Variant</th><th>Name</th><th class="num">Annual volume</th><th class="num">BOM lines</th>
     <th class="num">Unique parts</th><th class="num">Target BOM cost</th><th class="num">RM cost (raw material only)</th><th class="num">RM vs target</th><th class="num">Parts without RM</th><th></th></tr></thead><tbody>` +
@@ -167,6 +174,20 @@ $("rmRecalc").addEventListener("click", async () => {
     status($("status"), err.message, "error");
   } finally {
     $("rmRecalc").disabled = false;
+  }
+});
+$("toolRecalc").addEventListener("click", async () => {
+  $("toolRecalc").disabled = true;
+  status($("status"), "Recalculating the tool cost of every part with the latest approved rates…");
+  try {
+    const r = await api(`/api/projects/${current()}/tool-cost/recalculate`, { method: "POST" });
+    await load();
+    status($("status"), `${r.new_versions} part${r.new_versions === 1 ? "" : "s"} got a new tool cost version, ${r.unchanged} unchanged.` +
+      (r.problems.length ? ` ${r.problems.length} could not be costed (open the part to see why).` : ""), r.problems.length ? "error" : "ok");
+  } catch (err) {
+    status($("status"), err.message, "error");
+  } finally {
+    $("toolRecalc").disabled = false;
   }
 });
 $("project").addEventListener("change", load);
