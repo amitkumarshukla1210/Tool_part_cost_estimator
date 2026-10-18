@@ -404,6 +404,12 @@ def add_revision(conn, part_id: int, rev: str, *, step: bytes | None = None, fil
     conn.execute(db.parts.update().where(db.parts.c.id == part_id).values(current_revision_id=rid))
     _log(conn, "part", part_id, "revision_added", {"rev": rev, "file": file_name if step else "(file missing)",
                                                      "change_note": change_note, "source": source})
+    if existing:  # design loop: a new revision can move the status on (Part statuses → after a new revision)
+        old = conn.execute(select(db.parts.c.status).where(db.parts.c.id == part_id)).scalar()
+        new = next((s["on_new_revision"] for s in register_setup.statuses() if s["code"] == old and s.get("on_new_revision")), "")
+        if new and new != old:
+            conn.execute(db.parts.update().where(db.parts.c.id == part_id).values(status=new))
+            _log(conn, "part", part_id, "status_changed", {"old": old, "new": new, "comment": f"new revision {rev} uploaded"})
     return rid
 
 
@@ -424,6 +430,45 @@ def _same(a, b) -> bool:
     return a == b or (empty(a) and empty(b))
 
 
+def _check_status_change(old: str, new: str, comment: str) -> None:
+    """Design loop: the move must be allowed by Part statuses (next statuses), with a comment where required."""
+    st = {s["code"]: s for s in register_setup.statuses()}
+    allowed = register_setup.next_codes(st[old]) if old in st else []
+    if allowed and new not in allowed:
+        names = ", ".join(st[c]["name"] for c in allowed if c in st)
+        raise RegisterError(f"From '{st[old]['name']}' the part can only move to: {names} (Part register setup → Part statuses).")
+    if st[new].get("comment_required") and not str(comment or "").strip():
+        raise RegisterError(f"Moving to '{st[new]['name']}' needs a comment (what has to change, or why).")
+
+
+def set_status(part_id: int, status: str, comment: str = "") -> dict:
+    return update_part(part_id, {"status": status, "status_comment": comment}, refresh=False)
+
+
+def design_loop(part_id: int) -> dict:
+    """Status flow of the part: current status, allowed next ones, and the timeline of status changes and revisions."""
+    d = part_detail(part_id, with_rm=False)
+    sts = register_setup.statuses()
+    st = {s["code"]: s for s in sts}
+    cur = st.get(d["status"], {})
+    timeline = [{"when": h["at"], "who": h["user"], "action": h["action"], **(h["detail"] or {})}
+                for h in reversed(d["history"]) if h["action"] in ("created", "status_changed", "revision_added")]
+    days, last = {}, None
+    for e in timeline + [{"when": datetime.now().isoformat(timespec="seconds"), "action": "now"}]:
+        if last:
+            dt = (datetime.fromisoformat(e["when"]) - datetime.fromisoformat(last[1])).total_seconds() / 86400
+            days[last[0]] = days.get(last[0], 0) + dt
+        if e["action"] == "status_changed":
+            last = (e["new"], e["when"])
+        elif e["action"] == "created":
+            last = (e.get("status") or register_setup.initial_status(), e["when"])
+    return {"part_id": part_id, "status": d["status"],
+            "flow": [{"code": s["code"], "name": s["name"], "comment_required": bool(s.get("comment_required")),
+                      "days": round(days.get(s["code"], 0), 2)} for s in sts],
+            "next": register_setup.next_codes(cur) or [s["code"] for s in sts if s["code"] != d["status"]],
+            "timeline": timeline}
+
+
 def update_part(part_id: int, data: dict, refresh: bool = True) -> dict:
     vals = _part_values(data)
     with db.engine().begin() as conn:
@@ -431,9 +476,14 @@ def update_part(part_id: int, data: dict, refresh: bool = True) -> dict:
         if not old:
             raise RegisterError(f"Part {part_id} does not exist.")
         changes = {k: {"old": old[k], "new": v} for k, v in vals.items() if not _same(old[k], v)}
+        if "status" in changes:
+            _check_status_change(old["status"], vals["status"], data.get("status_comment", ""))
         if changes:
             conn.execute(db.parts.update().where(db.parts.c.id == part_id).values(**vals))
             _log(conn, "part", part_id, "updated", changes)
+        if "status" in changes:
+            _log(conn, "part", part_id, "status_changed", {"old": old["status"], "new": vals["status"],
+                                                           "comment": str(data.get("status_comment") or "").strip()})
     if refresh and {"material", "process", "sourcing", "country", "costing_month", "rm_inputs", "tool_country",
                     "tool_inputs", "annual_volume", "programme_life_years"} & set(changes):
         refresh_costs([part_id], "part details changed")

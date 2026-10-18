@@ -47,6 +47,9 @@ TABLES = {
         col("sort_order", "Order", "number"),
         col("is_initial", "First status for new parts", "bool"),
         col("is_open_correction", "Counts as open correction", "bool"),
+        col("next_statuses", "Allowed next statuses (codes, comma-separated; blank = any)", required=False),
+        col("comment_required", "Comment required to enter", "bool"),
+        col("on_new_revision", "Status after a new revision upload (blank = keep)", required=False),
         col("notes", "Notes"),
     ]},
     "sourcing_types": {"title": "Sourcing", "unique": ("code",), "columns": [
@@ -164,6 +167,11 @@ def _check(clean: dict) -> None:
     if len(initial) != 1:
         raise RegisterSetupError(f"Part statuses: mark exactly one status as 'First status for new parts' "
                                  f"(found {len(initial)}).")
+    codes = {r["code"] for r in clean["part_statuses"]}
+    for i, r in enumerate(clean["part_statuses"], start=2):
+        bad = [c for c in next_codes(r) + ([r["on_new_revision"]] if r.get("on_new_revision") else []) if c not in codes]
+        if bad:
+            raise RegisterSetupError(f"Part statuses row {i}: '{', '.join(bad)}' is not a status code.")
     if not any(r["is_assembly"] for r in clean["processes"]):
         raise RegisterSetupError("Processes: one process must be marked 'Assembly' (used for split assemblies).")
 
@@ -208,6 +216,10 @@ def processes() -> dict:
 
 def statuses() -> list[dict]:
     return sorted(tables()["part_statuses"], key=lambda r: r["sort_order"])
+
+
+def next_codes(row: dict) -> list[str]:
+    return [c.strip() for c in (row.get("next_statuses") or "").split(",") if c.strip()]
 
 
 def initial_status() -> str:

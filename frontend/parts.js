@@ -94,6 +94,7 @@ async function openPart(id) {
   part.toolTrace = part.tool?.versions || (part.tool?.applicable && !part.tool.problem)
     ? await api(`/api/parts/${id}/tool-cost/trace`).catch(() => null) : null;
   part.toolVersions = part.tool?.versions ? await api(`/api/parts/${id}/tool-cost`).catch(() => []) : [];
+  part.loop = part.is_assembly ? null : await api(`/api/parts/${id}/design-loop`).catch(() => null);
   renderPart();
   $("panel").hidden = false;
 }
@@ -393,6 +394,7 @@ function renderPart() {
     <h3 class="block-title">Geometry · rev ${esc(cur?.rev ?? "—")}</h3>
     <div class="table-wrap"><table class="cost-table"><tbody>${geometryRows(cur?.geometry) || '<tr><td class="empty">No 3D file for this revision.</td></tr>'}</tbody></table></div>
 
+    ${loopBlock(p)}
     ${rmBlock(p)}
     ${toolBlock(p)}
     ${insertsBlock(p)}
@@ -558,6 +560,8 @@ $("panelBody").addEventListener("click", async (e) => {
       $("simOut").innerHTML = `${r.is_example ? '<p class="note"><b>Uses EXAMPLE simulation rules.</b></p>' : ""}
         <h4>${r.corrections.length ? "Corrections required" : "No corrections required"}</h4>
         <ul>${r.corrections.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+        ${part.loop ? `<button type="button" class="btn btn-outline small" id="simToLoop" data-status="${r.corrections.length ? "corrections_required" : "simulation_ok"}"
+          data-comment="${esc(r.corrections.join(" "))}">Put this result in the Design loop form</button>` : ""}
         <p>Opening ${esc(r.opening_axis.toUpperCase())} · wall ${fmt(r.wall_mm, 2)} mm · low draft ${fmt(m.draft_low_cm2, 1)} cm² · sink risk ${fmt(m.sink_risk_cm2, 1)} cm² ·
           thin ${fmt(m.thin_cm2, 1)} cm² · undercut ${fmt(m.undercut_cm2, 1)} cm²${r.sampled ? " (faces sampled)" : ""}<br/>
           Cycle <b>${fmt(r.results.cycle_s, 1)} s</b> · clamp <b>${fmt(r.results.clamp_t, 1)} t</b> → machine <b>${esc(mc.machine_id || "none large enough")}</b>${mc.tonnage_t ? ` (${fmt(mc.tonnage_t)} t)` : ""}</p>
@@ -566,6 +570,13 @@ $("panelBody").addEventListener("click", async (e) => {
     } catch (err) {
       status($("simStatus"), err.message, "error");
     }
+  }
+  if (e.target.id === "simToLoop") {
+    const sel = $("loopForm").elements.status;
+    if (![...sel.options].some((o) => o.value === e.target.dataset.status)) return status($("simStatus"), "That status is not an allowed next step from the current status.", "error");
+    sel.value = e.target.dataset.status;
+    $("loopComment").value = e.target.dataset.comment || "Simulation OK, no corrections";
+    $("loopForm").scrollIntoView({ block: "center" });
   }
   if (e.target.id === "conceptApply") {
     const inputs = { ...(part.tool_inputs || {}), slides_per_cavity: Number(e.target.dataset.slides), lifters_per_cavity: Number(e.target.dataset.lifters) };
@@ -624,6 +635,38 @@ $("panelBody").addEventListener("input", async (e) => {
   }
 });
 
+// design loop: status flow, allowed moves, timeline
+function loopBlock(p) {
+  const l = p.loop;
+  if (!l) return "";
+  const name = (c) => l.flow.find((f) => f.code === c)?.name ?? c;
+  return `<h3 class="block-title">Design loop</h3>
+    <p>${l.flow.map((f) => `<span class="badge ${f.code === l.status ? "status" : ""}" title="${fmt(f.days, 1)} days">${esc(f.name)}</span>`).join(" → ")}</p>
+    <form id="loopForm" class="card grid2">
+      <label>Move to <select name="status">${l.next.map((c) => `<option value="${esc(c)}">${esc(name(c))}</option>`).join("")}</select></label>
+      <label>Comment (what has to change, or why) <input name="comment" id="loopComment" /></label>
+      <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary small">Change status</button></div>
+      <p class="status span2" id="loopStatus"></p></form>
+    <details class="card add-insert"><summary class="btn btn-outline small">What changed, who, when (${l.timeline.length})</summary>
+      <div class="table-wrap"><table class="cost-table"><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead><tbody>
+      ${l.timeline.slice().reverse().map((e) => `<tr><td>${esc(e.when.slice(0, 16).replace("T", " "))}</td><td>${esc(e.who)}</td><td>${
+        e.action === "status_changed" ? `${esc(name(e.old))} → <b>${esc(name(e.new))}</b>${e.comment ? ` · ${esc(e.comment)}` : ""}`
+        : e.action === "revision_added" ? `Revision <b>${esc(e.rev)}</b> ${esc(e.change_note || "")}` : "Created"}</td></tr>`).join("")}</tbody></table></div></details>`;
+}
+
+$("panelBody").addEventListener("submit", async (e) => {
+  if (e.target.id !== "loopForm") return;
+  e.preventDefault();
+  const f = new FormData(e.target);
+  try {
+    await api(`/api/parts/${part.id}/status`, { method: "POST", body: JSON.stringify({ status: f.get("status"), comment: f.get("comment") }) });
+    await openPart(part.id);
+    search();
+  } catch (err) {
+    status($("loopStatus"), err.message, "error");
+  }
+});
+
 // side-by-side compare of two revisions
 $("panelBody").addEventListener("change", (e) => {
   if (e.target.dataset.dims != null) {
@@ -644,6 +687,9 @@ $("panelBody").addEventListener("change", (e) => {
     ["Surface (cm²)", (g) => fmt((g.surface_area_mm2 ?? 0) / 100, 2)],
     ["Bounding box (mm)", (g) => (g.bbox_mm ? `${fmt(g.bbox_mm.length, 1)} × ${fmt(g.bbox_mm.width, 1)} × ${fmt(g.bbox_mm.height, 1)}` : "—")],
     ["Main wall (mm)", (g) => fmt(g.wall_mm, 2)],
+    ["RM cost, latest (INR)", (g, r) => fmt(part.rmVersions.find((x) => x.rev === r.rev)?.net_rm_cost_inr, 2)],
+    ["Tool cost, latest (INR)", (g, r) => fmt(part.toolVersions.find((x) => x.rev === r.rev)?.tool_cost_inr, 0)],
+    ["By / when", (g, r) => `${r.created_by} · ${r.created_at.slice(0, 16).replace("T", " ")}`],
   ];
   $("compare").innerHTML = `<h3 class="block-title">Compare rev ${esc(a.rev)} and rev ${esc(b.rev)}</h3>
     <div class="table-wrap"><table class="cost-table"><thead><tr><th></th><th>Rev ${esc(a.rev)}</th><th>Rev ${esc(b.rev)}</th></tr></thead><tbody>

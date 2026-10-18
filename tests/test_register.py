@@ -202,7 +202,9 @@ def test_dashboard_and_exports():
     m = preview()
     client.post(f"/api/import/{m['token']}/commit", json={"project_id": p["id"], "variant_id": p["variants"][0]["id"]})
     pid = client.get("/api/parts", params={"q": "bracket"}).json()["rows"][0]["id"]
-    client.put(f"/api/parts/{pid}", json={"status": "corrections_required", "target_piece_cost_inr": 40})
+    client.put(f"/api/parts/{pid}", json={"target_piece_cost_inr": 40})
+    for st, c in (("concept_tool", ""), ("simulation", ""), ("corrections_required", "add draft")):   # design-loop order
+        assert client.post(f"/api/parts/{pid}/status", json={"status": st, "comment": c}).status_code == 200
     d = client.get(f"/api/projects/{p['id']}/dashboard").json()
     assert d["parts_total"] == 6 and d["open_corrections"] == 1 and d["parts_with_target"] == 1
     assert {s["code"]: s["count"] for s in d["status"]}["uploaded"] == 5

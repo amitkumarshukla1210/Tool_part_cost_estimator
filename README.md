@@ -456,6 +456,15 @@ On a part's panel (plastic or die casting), open **Simulation & analysis** and p
 Every formula is a row of **Mould & die database → Simulation rules**, evaluated in order (each may use the ones above
 it, Parameters and Insert moulding rules; `log` and `exp` are allowed). All rows are EXAMPLE values. This is an analytical estimate, not Moldflow.
 
+## Design loop (roadmap stage 7)
+
+Each part's panel has a **Design loop** card: the status flow, *Move to* (only the allowed next statuses) with a comment,
+and the timeline of status changes and revisions (who, when, why, days in each status). The rules are columns of
+**Part register setup → Part statuses**: *Allowed next statuses*, *Comment required to enter* and *Status after a new
+revision upload* (e.g. Corrections required → Revised when the corrected model is uploaded). In the Simulation card,
+*Put this result in the Design loop form* proposes Corrections required (with the corrections as the comment) or
+Simulation OK. Tick two revisions to compare them side by side, including their latest RM and tool cost.
+
 ## Rates page: country rate library, MHR & labour rates
 
 Open **Rates** in the header. Pick the **producing country** and the **costing month**.
