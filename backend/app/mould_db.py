@@ -131,6 +131,43 @@ TABLES = {
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
     ]},
+    "sheet_materials": {"title": "Sheet materials", "unique": ("material",), "columns": [
+        col("material", "Material (Materials sheet)"),
+        col("shear_mpa", "Shear strength (MPa)", "number"),
+        col("tensile_mpa", "Tensile strength (MPa)", "number"),
+        col("yield_mpa", "Yield strength (MPa)", "number"),
+        col("e_gpa", "Young's modulus (GPa)", "number"),
+        col("min_bend_r_factor", "Min inside bend radius (× thickness)", "number"),
+        col("min_hole_factor", "Min hole diameter (× thickness)", "number"),
+        col("ldr", "Limiting drawing ratio", "number"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "sheet_operations": {"title": "Sheet operations", "unique": ("code",), "columns": [
+        col("seq", "Order", "number"),
+        col("code", "Code"),
+        col("name", "Operation"),
+        col("condition", "Applies when (rule)", "formula"),
+        col("force_t", "Force, tonnes (rule)", "formula"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "sheet_rules": {"title": "Sheet rules", "unique": ("name",), "columns": [
+        col("step", "Order", "number"),
+        col("name", "Name"),
+        col("formula", "Formula", "formula"),
+        col("unit", "Unit"),
+        col("label", "Meaning"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "sheet_checks": {"title": "Sheet checks", "unique": ("name",), "columns": [
+        col("name", "Check"),
+        col("condition", "Problem when (rule)", "formula"),
+        col("message", "Message ({name} fills in a value)"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
     "tool_processes": {"title": "Tool processes", "unique": ("code",), "columns": [
         col("code", "Process"),
         col("pricing", "Priced by", "pricing", PRICING),
@@ -159,6 +196,8 @@ def _check(clean: dict) -> None:
             formula.evaluate(r["condition"], {k: 1.0 for k in concept.CONCEPT_VARS})
         except formula.FormulaError as exc:
             raise MouldDbError(f"Concept rules row {i}, condition: {exc}") from None
+    from . import sheet_tools
+    sheet_tools.validate(clean)
     from . import simulation
     for pt in PART_TYPES:
         env = simulation.sample_env(pt)

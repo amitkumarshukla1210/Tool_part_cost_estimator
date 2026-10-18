@@ -664,6 +664,15 @@ def parts_piece_pdf(part_id: int, version: Optional[int] = None):
                     headers={"Content-Disposition": f'attachment; filename="part_cost_{part_id}.pdf"'})
 
 
+@app.get("/api/parts/{part_id}/sheet-tools")
+def parts_sheet_tools(part_id: int):
+    """Sheet-metal tools I: operation sequence, die type, forces, tonnage, press, formability (roadmap stage 9)."""
+    try:
+        return register.sheet_tools_result(part_id)
+    except register.ToolNotApplicable as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
 @app.get("/api/parts/{part_id}/simulation")
 def parts_simulation(part_id: int):
     """Simulation & analysis v1: maps, cycle time, clamp force, machine, corrections required (roadmap stage 6)."""

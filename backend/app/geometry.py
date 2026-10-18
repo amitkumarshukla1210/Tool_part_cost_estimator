@@ -244,3 +244,40 @@ def blank_estimate(volume_mm3: float, bbox_mm: dict, thickness_mm: float) -> dic
         return {"length": round(length, 1), "width": round(width, 1)}
     flat_area = volume_mm3 / thickness_mm
     return {"length": round(max(flat_area / width, length), 1), "width": round(width, 1)}
+
+
+def sheet_features(shape: cq.Shape, thickness: float) -> dict:
+    """Holes and bend radii of a sheet-metal part.
+
+    Holes: inner wires of the planar faces (each through hole shows on both sides, so the total is halved).
+    Bend radii: coaxial cylinder pairs whose radii differ by the thickness (inside radius, axial length);
+    sharp-cornered models have none, so the radius is unknown (None).
+    """
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    holes = []
+    for face in shape.Faces():
+        if face.geomType() != "PLANE" or face.Area() < thickness * thickness:
+            continue
+        for w in face.innerWires():
+            area = cq.Face.makeFromWires(w).Area()
+            holes.append((w.Length(), area))
+    holes = sorted(holes, key=lambda h: h[1])
+    holes = holes[::2] if len(holes) % 2 == 0 else holes   # both sides of a through hole
+    cyl = []
+    for face in shape.Faces():
+        if face.geomType() == "CYLINDER":
+            c = BRepAdaptor_Surface(face.wrapped).Cylinder()
+            ax, loc = c.Axis().Direction(), c.Axis().Location()
+            bb = face.BoundingBox()
+            extent = abs(ax.X()) * bb.xlen + abs(ax.Y()) * bb.ylen + abs(ax.Z()) * bb.zlen
+            cyl.append(((ax.X(), ax.Y(), ax.Z()), (loc.X(), loc.Y(), loc.Z()), c.Radius(), extent))
+    bends = []
+    for i, (d1, o1, r1, e1) in enumerate(cyl):
+        for d2, o2, r2, e2 in cyl[i + 1:]:
+            if abs(sum(a * b for a, b in zip(d1, d2))) < 0.999 or abs(abs(r1 - r2) - thickness) > max(0.05 * thickness, 0.01):
+                continue
+            off = [b - a for a, b in zip(o1, o2)]
+            along = sum(a * b for a, b in zip(off, d1))
+            if sum((a - along * b) ** 2 for a, b in zip(off, d1)) ** 0.5 < 1e-3:
+                bends.append({"inner_radius_mm": min(r1, r2), "length_mm": min(e1, e2)})
+    return {"holes": [{"perimeter_mm": p, "area_mm2": a} for p, a in holes], "bends": bends}
