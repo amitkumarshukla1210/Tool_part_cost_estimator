@@ -135,6 +135,11 @@
           <button type="button" class="btn btn-outline" id="bulkReview" disabled>Mark selected reviewed</button>
           <button type="button" class="btn btn-primary" id="bulkApprove" disabled>Approve selected</button>
         </div>
+        <div class="card review-settings">
+          <button type="button" class="btn btn-outline" id="fetchNow">Fetch now</button>
+          <span class="note">Forex (ECB) and price-index proposals (World Bank) arrive below as Drafts. Nothing is approved automatically.</span>
+        </div>
+        <details class="card"><summary>Update log</summary><div class="table-wrap"><table class="cost-table" id="updateLog"></table></div></details>
         <p id="reviewStatus" class="status" role="status"></p>
         <div class="table-wrap tall">
           <table class="cost-table" id="reviewTable"></table>

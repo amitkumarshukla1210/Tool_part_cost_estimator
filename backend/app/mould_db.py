@@ -185,6 +185,13 @@ TABLES = {
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
     ]},
+    "update_rules": {"title": "Update rules", "unique": ("category",), "columns": [
+        col("category", "Rate category (rate library)"),
+        col("series", "Index series"),
+        col("enabled", "Propose each month", "bool"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
     "tool_processes": {"title": "Tool processes", "unique": ("code",), "columns": [
         col("code", "Process"),
         col("pricing", "Priced by", "pricing", PRICING),
