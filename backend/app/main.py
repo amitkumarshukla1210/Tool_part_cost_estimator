@@ -576,6 +576,80 @@ def capex_delete(item_id: int):
     return leader.delete_item(item_id)
 
 
+# ---------- harness and PCB BOM extraction (roadmap stage 14) ----------
+
+def _bom(fn, *a):
+    from . import bom_extract
+    try:
+        return fn(*a)
+    except bom_extract.ExtractError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/bom-extracts")
+def bom_extracts(project_id: Optional[int] = None):
+    from . import bom_extract
+    return bom_extract.list_all(project_id)
+
+
+@app.post("/api/bom-extracts")
+async def bom_extract_create(file: UploadFile = File(...), cpl: Optional[UploadFile] = File(None), name: str = Form(""),
+                             project_id: Optional[int] = Form(None), layers: str = Form(""), width_mm: str = Form(""),
+                             height_mm: str = Form(""), thickness_mm: str = Form("")):
+    from . import bom_extract
+    typed = {k: bom_extract._num(v) for k, v in (("layers", layers), ("width_mm", width_mm), ("height_mm", height_mm), ("thickness_mm", thickness_mm)) if v}
+    cpl_part = (await cpl.read(), cpl.filename) if cpl and cpl.filename else None
+    content = await file.read()
+    return _bom(bom_extract.create, content, file.filename or "upload", name, project_id, typed, cpl_part)
+
+
+@app.get("/api/bom-extracts/{eid}")
+def bom_extract_get(eid: int):
+    from . import bom_extract
+    return _bom(bom_extract.get, eid)
+
+
+@app.post("/api/bom-extracts/{eid}/lines")
+def bom_extract_line_add(eid: int, data: dict):
+    from . import bom_extract
+    return _bom(bom_extract.save_line, eid, None, data)
+
+
+@app.put("/api/bom-extracts/{eid}/lines/{line_id}")
+def bom_extract_line_edit(eid: int, line_id: int, data: dict):
+    from . import bom_extract
+    return _bom(bom_extract.save_line, eid, line_id, data)
+
+
+@app.delete("/api/bom-extracts/{eid}/lines/{line_id}")
+def bom_extract_line_delete(eid: int, line_id: int):
+    from . import bom_extract
+    return _bom(bom_extract.delete_line, eid, line_id)
+
+
+@app.post("/api/bom-extracts/{eid}/status")
+def bom_extract_status(eid: int, data: dict):
+    from . import bom_extract
+    return _bom(bom_extract.set_status, eid, data.get("status", ""))
+
+
+@app.delete("/api/bom-extracts/{eid}")
+def bom_extract_delete(eid: int):
+    from . import bom_extract
+    return _bom(bom_extract.delete, eid)
+
+
+@app.get("/api/bom-extracts/{eid}/export.xlsx")
+def bom_extract_xlsx(eid: int):
+    from . import bom_extract
+    return _xlsx(_bom(bom_extract.to_excel, eid), f"bom_extract_{eid}.xlsx")
+
+
+@app.get("/bom-extract")
+def bom_extract_page():
+    return FileResponse(FRONTEND_DIR / "bom.html")
+
+
 # ---------- part register: parts ----------
 
 def _filters(q, project_id, process, status, sourcing, rev, file_missing, target_min, target_max,
