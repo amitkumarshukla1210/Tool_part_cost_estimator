@@ -544,7 +544,7 @@ The project dashboard now starts with the **Project leader view**:
 Open **Harness & PCB** in the header and upload a file:
 - **Harness**: a KBL or VEC **XML** export (wires are grouped by part, colour and cross-section with their count and total length; connectors, terminals,
   seals, sleeves, tapes, clips, grommets and labels are counted), or a **text PDF** drawing with a BOM table (the header row must name a quantity or part number
-  column). Scanned PDFs are refused with a clear message (OCR is stage 16); DWG needs a DXF/STEP/XML export first.
+  column). Scanned PDFs, scan images and DWG/DXF drawings are described in the next section.
 - **PCB**: a BOM **CSV or Excel** from KiCad, Altium or any tool (designator column plus two of value, footprint, quantity, part number), an optional **pick-and-place
   (CPL) CSV** (placement count, board extents, cross-check with the BOM) and the bare-board data you type (layers, thickness, width, height). SMT / THT is
   taken from the BOM column or guessed from the package name (guesses are marked).
@@ -553,6 +553,18 @@ Open **Harness & PCB** in the header and upload a file:
 
 The XML reader follows the KBL / VEC structure by element names and was built and tested with small hand-made samples, not with your real exports:
 check the first real file and tell me what differs. Costing is in the next section.
+
+## Scanned drawings and DWG (roadmap stage 16)
+
+The Harness & PCB page also reads:
+- **Scanned PDFs and images** (`.pdf` without text, `.png`, `.jpg`, `.tif`) with **Tesseract OCR** (open source). Pages are rendered at 300 dpi, Tesseract returns word boxes,
+  the words are put into rows and cells, columns follow the header row (the same header words as a text PDF), and every cell keeps its OCR confidence: a line is as sure as its least
+  sure word, so doubtful numbers turn yellow in the review table. Use straight, dark, 300 dpi scans; check every number in the yellow lines.
+- **DXF** drawings: the text (TEXT, MTEXT, block attributes) is put into the same row / column grid.
+- **DWG** drawings: converted to DXF first with **ODA File Converter** (free, proprietary licence) or **LibreDWG** (`dwg2dxf`, GPL), then read as DXF.
+
+Nothing is bundled. Install Tesseract (Windows: the UB Mannheim installer; Linux: `apt install tesseract-ocr`) and/or a DWG converter, restart the app; the page shows what it found. If a tool is not on the PATH
+set `DTC_TESSERACT` or `DTC_DWG_CONVERTER` to its full path. Without them, text PDFs, XML, DXF and CSV / Excel work as before.
 
 ## Harness & PCB costing (roadmap stage 15)
 

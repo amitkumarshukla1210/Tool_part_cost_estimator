@@ -604,6 +604,13 @@ async def bom_extract_create(file: UploadFile = File(...), cpl: Optional[UploadF
     return _bom(bom_extract.create, content, file.filename or "upload", name, project_id, typed, cpl_part)
 
 
+@app.get("/api/bom-extract-tools")
+def bom_extract_tools():
+    """Which optional external tools are installed (Tesseract for scans, a DWG converter) and how to install the rest."""
+    from . import external
+    return external.tools_status()
+
+
 @app.get("/api/bom-extracts/{eid}")
 def bom_extract_get(eid: int):
     from . import bom_extract
