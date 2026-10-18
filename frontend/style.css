@@ -29,6 +29,16 @@ header {
 }
 header h1 { margin: 0; font-size: 1.3rem; }
 .stage { color: #9fb3c8; font-size: 0.9rem; }
+header nav { display: flex; gap: 4px; }
+header nav a {
+  color: #d9e2ec;
+  text-decoration: none;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+header nav a[aria-current="page"] { background: #243b53; color: #fff; }
+header nav a:hover { background: #334e68; }
 
 main {
   display: grid;
@@ -81,10 +91,10 @@ tr.pull td { background: var(--highlight); font-weight: 600; }
 
 .grid2 { grid-template-columns: 1fr 1fr; gap: 10px; }
 .grid2 .span2 { grid-column: span 2; }
-.grid2 label { font-size: 0.82rem; min-width: 0; }
+.grid2 label { font-size: 0.82rem; min-width: 0; align-content: space-between; }
 .grid2 input { width: 100%; min-width: 0; }
-#stageB { margin-top: 8px; padding-top: 4px; border-top: 2px solid var(--border); }
-#statusB { margin: 8px 0 0; min-height: 1.2em; font-size: 0.85rem; color: var(--error); }
+.stage-block { margin-top: 8px; padding-top: 4px; border-top: 2px solid var(--border); }
+#statusB, .status-error { margin: 8px 0 0; min-height: 1.2em; font-size: 0.85rem; color: var(--error); }
 tr.total th, tr.total td { border-top: 2px solid var(--text); font-weight: 700; color: var(--text); }
 [hidden] { display: none !important; }
 

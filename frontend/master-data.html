@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Master Data</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/master-data.css" />
+</head>
+<body>
+  <header>
+    <h1>Part Cost Estimator</h1>
+    <nav><a href="/">Estimator</a><a href="/master-data" aria-current="page">Master data</a></nav>
+  </header>
+
+  <div class="md">
+    <section class="md-intro">
+      <h2>Master data</h2>
+      <p>
+        Every rate, default and rule the estimator uses is stored in one Excel file,
+        <code>master_data/master_data.xlsx</code>. Edit it here and click <b>Save</b>, or download it,
+        change it in Excel and upload it again. New values are used by the next calculation.
+      </p>
+    </section>
+
+    <div class="md-toolbar">
+      <div class="tabs" role="tablist">
+        <button role="tab" data-sheet="Parameters" aria-selected="true">Parameters</button>
+        <button role="tab" data-sheet="Materials">Materials</button>
+        <button role="tab" data-sheet="Machines">Machines</button>
+      </div>
+      <label class="inline">Part type
+        <select id="filter">
+          <option value="">All</option>
+          <option value="all">Common (all)</option>
+          <option value="plastic">Plastic</option>
+          <option value="die_casting">Die casting</option>
+          <option value="foundry">Foundry</option>
+          <option value="sheet_metal">Sheet metal</option>
+        </select>
+      </label>
+      <label class="inline grow">Search
+        <input type="search" id="search" placeholder="parameter, material or machine" />
+      </label>
+    </div>
+
+    <div class="md-table-wrap">
+      <table class="md-table" id="table"></table>
+    </div>
+
+    <div class="md-actions">
+      <button type="button" id="addRow" class="secondary">+ Add row</button>
+      <span class="spacer"></span>
+      <a class="button secondary" href="/api/master-data/download" id="download">Download Excel</a>
+      <label class="button secondary" for="upload">Upload Excel</label>
+      <input type="file" id="upload" accept=".xlsx" hidden />
+      <button type="button" id="revert" class="secondary" disabled>Undo changes</button>
+      <button type="button" id="save" disabled>Save</button>
+    </div>
+    <p id="status" role="status"></p>
+  </div>
+
+  <script src="/static/master-data.js"></script>
+</body>
+</html>

@@ -25,13 +25,21 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-# Typical starting values. They are shown on the page and can be changed.
-DEFAULTS = {
-    "plastic": {"runner_pct": 15.0, "process_loss_pct": 2.0},
-    "die_casting": {"yield_pct": 60.0, "process_loss_pct": 3.0},
-    "foundry": {"yield_pct": 65.0, "process_loss_pct": 4.0},
-    "sheet_metal": {"sheet_length_mm": 2500.0, "sheet_width_mm": 1250.0, "gap_mm": 5.0, "edge_mm": 5.0},
+from . import master_data
+
+# Inputs that come from master data when the request leaves them out.
+DEFAULT_KEYS = {
+    "plastic": ["runner_pct", "process_loss_pct"],
+    "die_casting": ["yield_pct", "process_loss_pct"],
+    "foundry": ["yield_pct", "process_loss_pct"],
+    "sheet_metal": ["sheet_length_mm", "sheet_width_mm", "gap_mm", "edge_mm"],
 }
+
+
+def defaults(part_type: str) -> dict:
+    params = master_data.parameters(part_type)
+    keys = DEFAULT_KEYS[part_type] + ["currency"]
+    return {k: master_data.require(params, k, part_type) for k in keys}
 
 
 class GrossWeightInput(BaseModel):
@@ -40,7 +48,7 @@ class GrossWeightInput(BaseModel):
     density_g_cm3: float = Field(gt=0)
     material_rate_per_kg: float = Field(0, ge=0)
     scrap_rate_per_kg: float = Field(0, ge=0)
-    currency: str = "INR"
+    currency: Optional[str] = None
 
     # Moulding / casting
     runner_pct: Optional[float] = Field(None, ge=0, le=500)
@@ -58,7 +66,7 @@ class GrossWeightInput(BaseModel):
 
     @model_validator(mode="after")
     def fill_defaults(self):
-        for key, value in DEFAULTS[self.part_type].items():
+        for key, value in defaults(self.part_type).items():
             if getattr(self, key) is None:
                 setattr(self, key, value)
         if self.part_type == "sheet_metal":
@@ -68,23 +76,30 @@ class GrossWeightInput(BaseModel):
         return self
 
 
+def grid_fit(area_l: float, area_w: float, item_l: float, item_w: float, gap: float) -> dict:
+    """Best straight-grid layout of a rectangle in an area, trying both orientations."""
+
+    def count(il, iw):
+        # n items need n × size + (n − 1) gaps
+        return int((area_l + gap) // (il + gap)), int((area_w + gap) // (iw + gap))
+
+    options = [count(item_l, item_w), count(item_w, item_l)]
+    along, across = max(options, key=lambda o: o[0] * o[1])
+    return {"along": along, "across": across, "per_sheet": along * across, "rotated": options.index((along, across)) == 1}
+
+
 def nest_on_sheet(inp: GrossWeightInput) -> dict:
     """Rectangular grid nesting of the blank on the sheet, both orientations."""
-    usable_l = inp.sheet_length_mm - 2 * inp.edge_mm
-    usable_w = inp.sheet_width_mm - 2 * inp.edge_mm
-
-    def count(bl, bw):
-        # n blanks need n × size + (n − 1) gaps
-        along = int((usable_l + inp.gap_mm) // (bl + inp.gap_mm))
-        across = int((usable_w + inp.gap_mm) // (bw + inp.gap_mm))
-        return along, across
-
-    options = [count(inp.blank_length_mm, inp.blank_width_mm), count(inp.blank_width_mm, inp.blank_length_mm)]
-    along, across = max(options, key=lambda o: o[0] * o[1])
-    rotated = options.index((along, across)) == 1
-    if along * across == 0:
+    nest = grid_fit(
+        inp.sheet_length_mm - 2 * inp.edge_mm,
+        inp.sheet_width_mm - 2 * inp.edge_mm,
+        inp.blank_length_mm,
+        inp.blank_width_mm,
+        inp.gap_mm,
+    )
+    if nest["per_sheet"] == 0:
         raise ValueError("The blank does not fit on the sheet. Check blank and sheet sizes.")
-    return {"along": along, "across": across, "per_sheet": along * across, "rotated": rotated}
+    return nest
 
 
 def calculate(inp: GrossWeightInput) -> dict:

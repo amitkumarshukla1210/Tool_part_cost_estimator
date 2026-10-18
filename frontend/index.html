@@ -18,7 +18,8 @@
 <body>
   <header>
     <h1>Part Cost Estimator</h1>
-    <span class="stage">Stage A · Geometry &amp; net weight · Stage B · Gross weight &amp; RM cost</span>
+    <nav><a href="/" aria-current="page">Estimator</a><a href="/master-data">Master data</a></nav>
+    <span class="stage">Stage A · Geometry &amp; net weight · Stage B · Gross weight &amp; RM cost · Stage C · Cavities &amp; tools</span>
   </header>
 
   <main>
@@ -76,7 +77,7 @@
         </p>
       </div>
 
-      <div id="stageB" hidden>
+      <div id="stageB" class="stage-block" hidden>
         <h2>Stage B · Gross weight &amp; RM cost</h2>
         <form id="formB" class="grid2">
           <label class="t-plastic">Runner weight (% of net)
@@ -103,7 +104,7 @@
             <input type="number" name="edge_mm" step="0.5" min="0" /></label>
 
           <label>Currency
-            <input type="text" name="currency" value="INR" maxlength="5" /></label>
+            <input type="text" name="currency" maxlength="5" /></label>
           <label>Material rate per kg
             <input type="number" name="material_rate_per_kg" step="0.01" min="0" placeholder="e.g. 180" /></label>
           <label class="span2"><span data-label="scrap_rate_per_kg"></span>
@@ -125,6 +126,59 @@
             <tr><th>RM cost (gross)</th><td id="b-rm"></td></tr>
             <tr><th>Scrap credit</th><td id="b-credit"></td></tr>
             <tr class="total"><th>Net RM cost per part</th><td id="b-net-rm"></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div id="stageC" class="stage-block" hidden>
+        <h2>Stage C · Cavities &amp; number of tools</h2>
+        <p class="note" id="footprintNote"></p>
+        <form id="formC" class="grid2">
+          <label>Annual volume (parts / year)
+            <input type="number" name="annual_volume" step="1" min="1" /></label>
+          <label>Programme life (years)
+            <input type="number" name="programme_years" step="1" min="1" /></label>
+          <label>Working days / year
+            <input type="number" name="working_days" step="1" min="1" max="366" /></label>
+          <label>Shifts / day
+            <input type="number" name="shifts_per_day" step="1" min="1" max="4" /></label>
+          <label>Hours / shift
+            <input type="number" name="hours_per_shift" step="0.5" min="0.5" /></label>
+          <label>OEE (%)
+            <input type="number" name="oee_pct" step="1" min="1" max="100" /></label>
+          <label><span data-c="cycle"></span>
+            <input type="number" name="cycle_time_s" step="0.1" min="0.1" /></label>
+          <label><span data-c="max"></span>
+            <input type="number" name="max_cavities" step="1" min="1" /></label>
+          <label><span><span data-c="plate"></span> length (mm)</span>
+            <input type="number" name="plate_length_mm" step="10" min="1" /></label>
+          <label><span><span data-c="plate"></span> width (mm)</span>
+            <input type="number" name="plate_width_mm" step="10" min="1" /></label>
+          <label>Cavity &amp; edge spacing (mm)
+            <input type="number" name="spacing_mm" step="1" min="0" /></label>
+          <label><span data-c="life"></span>
+            <input type="number" name="tool_life_shots" step="1000" min="1" /></label>
+          <label class="t-sheet_metal">Operations (dies per set)
+            <input type="number" name="operations" step="1" min="1" /></label>
+        </form>
+        <p class="note" id="cycleNote"></p>
+        <p id="statusC" class="status-error" role="status"></p>
+
+        <table id="resultsC">
+          <tbody>
+            <tr><th>Production hours / year (after OEE)</th><td id="c-hours"></td></tr>
+            <tr><th>Output needed</th><td id="c-pph"></td></tr>
+            <tr><th><span data-c="cavity-cap"></span> needed</th><td id="c-needed"></td></tr>
+            <tr><th>Fit on <span data-c="plate-lc"></span></th><td id="c-fit"></td></tr>
+            <tr class="total"><th><span data-c="cavity-cap"></span> per tool</th><td id="c-cav"></td></tr>
+            <tr><th>Output per tool</th><td id="c-out"></td></tr>
+            <tr class="total"><th><span data-c="tool-cap"></span> running in parallel</th><td id="c-tools"></td></tr>
+            <tr><th><span data-c="shot-cap"></span> / year</th><td id="c-shots"></td></tr>
+            <tr><th><span data-c="shot-cap"></span> over programme</th><td id="c-prog"></td></tr>
+            <tr class="total"><th><span data-c="tool-cap"></span> over programme (incl. replacements)</th><td id="c-sets"></td></tr>
+            <tr class="t-sheet_metal"><th>Total dies</th><td id="c-dies"></td></tr>
+            <tr><th>Machine hours / year</th><td id="c-mh"></td></tr>
+            <tr><th>Machine utilisation</th><td id="c-util"></td></tr>
           </tbody>
         </table>
       </div>

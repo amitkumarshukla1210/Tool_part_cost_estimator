@@ -1,57 +1,42 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-// Typical densities in g/cm³ — a starting point, always check the material datasheet.
-const MATERIALS = {
-  plastic: [
-    ["PP (polypropylene)", 0.905],
-    ["ABS", 1.04],
-    ["PC (polycarbonate)", 1.2],
-    ["PC/ABS", 1.13],
-    ["PA6", 1.13],
-    ["PA66 GF30", 1.36],
-    ["PBT GF30", 1.53],
-    ["POM (acetal)", 1.41],
-  ],
-  die_casting: [
-    ["Aluminium ADC12 / A383", 2.74],
-    ["Aluminium A380", 2.71],
-    ["Zinc Zamak 3", 6.6],
-    ["Magnesium AZ91D", 1.81],
-  ],
-  foundry: [
-    ["Grey cast iron FG260", 7.2],
-    ["SG / ductile iron", 7.1],
-    ["Cast steel", 7.85],
-    ["Aluminium LM6 / A356", 2.68],
-    ["Bronze", 8.8],
-  ],
-  sheet_metal: [
-    ["Mild steel CRCA / HR", 7.85],
-    ["Galvanised steel GI", 7.85],
-    ["Stainless steel 304", 7.93],
-    ["Aluminium 5052", 2.68],
-    ["Copper", 8.96],
-  ],
-};
-
 const $ = (id) => document.getElementById(id);
 const fmt = (n, d = 2) => Number(n).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 
+// Material presets (density, RM rate, scrap value) come from the master data file.
+let materials = [];
+
+async function loadMaterials() {
+  try {
+    const res = await fetch("/api/master-data");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail);
+    materials = data.Materials;
+  } catch (err) {
+    setStatus(`Master data could not be loaded: ${err.message}`, true);
+  }
+  fillMaterials();
+}
+
 function fillMaterials() {
-  const list = MATERIALS[$("partType").value];
+  const list = materials.filter((m) => m.part_type === $("partType").value);
   $("material").innerHTML =
     '<option value="">— enter density manually —</option>' +
-    list.map(([name, rho]) => `<option value="${rho}">${name} (${rho})</option>`).join("");
-  $("material").value = String(list[0][1]);
-  $("density").value = list[0][1];
+    list.map((m) => `<option value="${materials.indexOf(m)}">${m.material} (${m.density_g_cm3})</option>`).join("");
+  if (list.length) {
+    $("material").value = String(materials.indexOf(list[0]));
+    $("density").value = list[0].density_g_cm3;
+  }
 }
+const chosenMaterial = () => ($("material").value === "" ? null : materials[Number($("material").value)]);
+
 $("partType").addEventListener("change", fillMaterials);
 $("material").addEventListener("change", () => {
-  if ($("material").value) $("density").value = $("material").value;
+  if (chosenMaterial()) $("density").value = chosenMaterial().density_g_cm3;
 });
 $("density").addEventListener("input", () => ($("material").value = ""));
-fillMaterials();
+loadMaterials();
 
 // ---------- 3D viewer ----------
 const container = $("viewer");
@@ -149,7 +134,7 @@ $("form").addEventListener("submit", async (e) => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || res.statusText);
     showResults(data.metrics);
-    startStageB(data);
+    startStageB(data, chosenMaterial());
     showMesh(data.mesh);
     setStatus(`${data.file_name} · ${data.part_type_label}`);
   } catch (err) {
@@ -203,13 +188,13 @@ const LABELS = {
 
 const formB = $("formB");
 let analysis = null; // last Stage A response
-let defaultsB = null;
 let timerB = null;
 
-async function startStageB(data) {
+async function startStageB(data, material) {
   analysis = data;
   const type = data.metrics.part_type;
-  defaultsB ??= await (await fetch("/api/gross-weight/defaults")).json();
+  // Re-read every time so changes saved on the Master data page apply at once.
+  const defaultsB = await (await fetch("/api/gross-weight/defaults")).json();
 
   // Only show the inputs and result rows that belong to this part type.
   document.querySelectorAll("#stageB [class*='t-']").forEach((el) => {
@@ -219,8 +204,13 @@ async function startStageB(data) {
     el.textContent = LABELS[el.dataset.label][type] ?? "";
   });
 
-  // Fresh defaults for each analysed part; rates and currency are kept.
+  // Fresh defaults for each analysed part. Rates come from the chosen
+  // material; with density typed by hand, the last rates entered are kept.
   for (const [key, value] of Object.entries(defaultsB[type])) formB.elements[key].value = value;
+  if (material) {
+    formB.elements.material_rate_per_kg.value = material.rate_per_kg;
+    formB.elements.scrap_rate_per_kg.value = material.scrap_rate_per_kg;
+  }
   if (data.sheet_metal) {
     formB.elements.thickness_mm.value = data.sheet_metal.thickness_mm;
     formB.elements.blank_length_mm.value = data.sheet_metal.blank_mm.length;
@@ -231,11 +221,16 @@ async function startStageB(data) {
 
   $("stageB").hidden = false;
   calculateB();
+  startStageC(data);
 }
 
 formB.addEventListener("input", () => {
   clearTimeout(timerB);
-  timerB = setTimeout(calculateB, 300);
+  timerB = setTimeout(() => {
+    calculateB();
+    // Sheet-metal cavity layout uses the blank size from Stage B.
+    if (analysis.metrics.part_type === "sheet_metal") calculateC();
+  }, 300);
 });
 
 async function calculateB() {
@@ -288,4 +283,117 @@ function showResultsB(r) {
   $("b-rm").textContent = priced ? money(r.rm_cost) : "enter material rate";
   $("b-credit").textContent = priced || r.scrap_credit ? `− ${money(r.scrap_credit)}` : "";
   $("b-net-rm").textContent = priced ? money(r.net_rm_cost) : "—";
+}
+
+// ---------- Stage C: cavities & number of tools ----------
+const LABELS_C = {
+  plastic: { cycle: "Cycle time per shot (s)", max: "Max cavities per mould", plate: "Mould plate", life: "Mould life (shots)" },
+  die_casting: { cycle: "Cycle time per shot (s)", max: "Max cavities per die", plate: "Die plate", life: "Die life (shots)" },
+  foundry: { cycle: "Moulding line cycle per mould (s)", max: "Max castings per mould", plate: "Moulding box (flask)", life: "Pattern life (moulds)" },
+  sheet_metal: { cycle: "Time per stroke (s)", max: "Max parts per stroke", plate: "Die area / press bed", life: "Die life (strokes)" },
+};
+
+const formC = $("formC");
+// Kept between parts once entered; everything else resets per part type.
+const KEEP_C = ["annual_volume", "programme_years", "working_days", "shifts_per_day", "hours_per_shift"];
+let timerC = null;
+
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+const int = (n) => Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+async function startStageC(data) {
+  const type = data.metrics.part_type;
+  const defaultsC = await (await fetch("/api/capacity/defaults")).json();
+  const terms = defaultsC.terms[type];
+
+  document.querySelectorAll("#stageC [class*='t-']").forEach((el) => {
+    el.hidden = !el.classList.contains(`t-${type}`);
+  });
+  const text = {
+    ...LABELS_C[type],
+    "cavity-cap": cap(terms.cavity),
+    "tool-cap": cap(terms.tool),
+    "shot-cap": cap(terms.shot),
+    "plate-lc": LABELS_C[type].plate.toLowerCase(),
+  };
+  document.querySelectorAll("#stageC [data-c]").forEach((el) => (el.textContent = text[el.dataset.c]));
+
+  for (const [key, value] of Object.entries(defaultsC.by_part_type[type])) {
+    if (!KEEP_C.includes(key) || formC.elements[key].value === "") formC.elements[key].value = value;
+  }
+
+  const p = data.process;
+  if (p.cycle_time_s_estimate) {
+    formC.elements.cycle_time_s.value = p.cycle_time_s_estimate;
+    $("cycleNote").textContent =
+      `Cycle time estimated from the ${fmt(p.wall_thickness_mm, 2)} mm main wall (cooling ≈ 2 × wall² s + 8 s). ` +
+      "Replace it with your process or mould-flow figure.";
+  } else {
+    $("cycleNote").textContent = "Cycle time and tool life are typical values. Replace them with your own figures.";
+  }
+
+  $("stageC").hidden = false;
+  calculateC();
+}
+
+formC.addEventListener("input", () => {
+  clearTimeout(timerC);
+  timerC = setTimeout(calculateC, 300);
+});
+
+function footprint() {
+  const m = analysis.metrics;
+  if (m.part_type === "sheet_metal") {
+    const l = Number(formB.elements.blank_length_mm.value);
+    const w = Number(formB.elements.blank_width_mm.value);
+    $("footprintNote").textContent = `Layout uses the Stage B flat blank: ${fmt(l, 1)} × ${fmt(w, 1)} mm.`;
+    return [l, w];
+  }
+  const f = analysis.process.footprint_mm;
+  $("footprintNote").textContent =
+    `Layout uses the part size across the parting plane: ${fmt(f.length, 1)} × ${fmt(f.width, 1)} mm ` +
+    `(viewed along ${m.pull_direction.toUpperCase()}).`;
+  return [f.length, f.width];
+}
+
+async function calculateC() {
+  const [l, w] = footprint();
+  const body = { part_type: analysis.metrics.part_type, footprint_length_mm: l, footprint_width_mm: w };
+  for (const input of formC.querySelectorAll("label:not([hidden]) input")) {
+    if (input.value !== "") body[input.name] = Number(input.value);
+  }
+
+  try {
+    const res = await fetch("/api/capacity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(errorText(data.detail));
+    $("statusC").textContent = "";
+    $("resultsC").hidden = false;
+    showResultsC(data);
+  } catch (err) {
+    $("statusC").textContent = err.message;
+    $("resultsC").hidden = true;
+  }
+}
+
+function showResultsC(r) {
+  const t = r.terms;
+  const lay = r.layout;
+  $("c-hours").textContent = `${int(r.available_hours_per_year)} h`;
+  $("c-pph").textContent = `${fmt(r.required_parts_per_hour, 1)} parts / h`;
+  $("c-needed").textContent = fmt(r.cavities_needed, 2);
+  $("c-fit").textContent = `${r.cavities_fit_on_plate}  (${lay.along} × ${lay.across}${lay.rotated ? ", turned 90°" : ""})`;
+  $("c-cav").textContent = r.cavities_per_tool + (r.limited_by ? `  (limited by ${r.limited_by})` : "");
+  $("c-out").textContent = `${fmt(r.output_per_tool_per_hour, 1)} parts / h`;
+  $("c-tools").textContent = r.tools_for_capacity;
+  $("c-shots").textContent = int(r.shots_per_year);
+  $("c-prog").textContent = `${int(r.programme_shots)}  (life ${int(r.inputs.tool_life_shots)} per ${t.tool.replace(/s$/, "")})`;
+  $("c-sets").textContent = r.tool_sets_over_programme;
+  $("c-dies").textContent = `${r.total_dies}  (${r.dies_per_set} per set)`;
+  $("c-mh").textContent = `${int(r.machine_hours_per_year)} h`;
+  $("c-util").textContent = `${fmt(r.machine_utilisation_pct, 1)} %` + (r.tools_for_capacity > 1 ? ` across ${r.tools_for_capacity} machines` : "");
 }
