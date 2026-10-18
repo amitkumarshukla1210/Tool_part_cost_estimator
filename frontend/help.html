@@ -53,6 +53,32 @@
     <section>
       <div class="container">
         <div class="section-head">
+          <p class="kicker">Part register</p>
+          <h2>Process suggestion &amp; moulded-in inserts</h2>
+        </div>
+        <div class="table-wrap">
+          <table class="cost-table">
+            <thead><tr><th>Step</th><th>How the process is suggested (click “why?” to see it for a part)</th></tr></thead>
+            <tbody>
+              <tr><td>1 · Material</td><td class="calc">Its part type in Master data → Materials sets the family: plastics → moulding, ADC12 / Al alloys → die casting,
+                cast iron → foundry, steel / aluminium sheet grades → sheet metal. An insert material (brass, …) → bought-out</td></tr>
+              <tr><td>2 · Geometry</td><td class="calc">Each process's rule (Part register setup → Processes) scores the main wall, the share of the surface at that
+                constant wall, bends, fill ratio and size; the highest of the family wins</td></tr>
+              <tr><td>3 · Inserts</td><td class="calc">Moulded-in inserts (insert_count) make it insert moulding or insert die casting</td></tr>
+              <tr class="total"><td>Insert weight</td><td class="calc">Σ quantity × insert volume (own 3D file, or shape formula × dimensions) × insert density</td></tr>
+              <tr class="total"><td>Total part weight</td><td class="calc">Body weight (body volume without inserts × density) + insert weight</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">On <a class="link" href="/import">Import</a>, a smaller part largely enclosed by a bigger one in the same assembly is offered as a
+          moulded-in insert of that body. Confirm it, and it is linked to the body with its quantity instead of becoming a BOM child.
+          On <a class="link" href="/parts">Parts</a> you can link inserts by hand and give each its bought-out price, source and month.</p>
+      </div>
+    </section>
+
+    <section class="bg-grey">
+      <div class="container">
+        <div class="section-head">
           <p class="kicker">Stage A</p>
           <h2>Geometry &amp; net weight</h2>
         </div>
@@ -71,7 +97,7 @@
       </div>
     </section>
 
-    <section class="bg-grey">
+    <section>
       <div class="container">
         <div class="section-head">
           <p class="kicker">Stage B</p>
@@ -92,7 +118,7 @@
       </div>
     </section>
 
-    <section>
+    <section class="bg-grey">
       <div class="container">
         <div class="section-head">
           <p class="kicker">Stage C</p>
@@ -116,7 +142,7 @@
       </div>
     </section>
 
-    <section class="bg-grey">
+    <section>
       <div class="container">
         <div class="section-head">
           <p class="kicker">Rates</p>
@@ -142,7 +168,7 @@
       </div>
     </section>
 
-    <section>
+    <section class="bg-grey">
       <div class="container">
         <div class="section-head">
           <p class="kicker">Mould / die</p>
@@ -163,7 +189,7 @@
       </div>
     </section>
 
-    <section class="bg-grey">
+    <section>
       <div class="container">
         <div class="section-head">
           <p class="kicker">Master data</p>

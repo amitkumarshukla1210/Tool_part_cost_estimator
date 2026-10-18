@@ -26,7 +26,7 @@ FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 THEME_DIR = Path(__file__).resolve().parents[2] / "theme"
 MAX_UPLOAD_MB = 100
 
-app = FastAPI(title="Design to Cost — Part Cost Estimator", version="0.5.0 (part register)")
+app = FastAPI(title="Design to Cost — Part Cost Estimator", version="0.6.0 (part register, inserts)")
 
 
 @app.get("/api/part-types")
@@ -354,8 +354,23 @@ def register_meta():
         "statuses": register_setup.statuses(),
         "sourcing": list(register_setup.sourcing().values()),
         "materials": [m["material"] for m in master_data.tables()["Materials"]],
+        "insert_materials": list(register_setup.insert_materials().values()),
+        "insert_shapes": list(register_setup.insert_shapes().values()),
+        "insert_default_sourcing": register_setup.settings()["insert_default_sourcing"],
         "part_code_pattern": register_setup.settings()["part_code_pattern"],
     }
+
+
+class SuggestIn(BaseModel):
+    metrics: Optional[dict] = None
+    material: str = ""
+    insert_count: float = 0
+
+
+@app.post("/api/suggest-process")
+def suggest_process(inp: SuggestIn):
+    """Process suggestion with its reason: material first, then geometry rules, then inserts."""
+    return register.suggest_process(inp.metrics, inp.material, inp.insert_count)
 
 
 # ---------- part register: projects & variants ----------
@@ -439,6 +454,16 @@ def parts_get(part_id: int):
 @app.put("/api/parts/{part_id}")
 def parts_update(part_id: int, data: dict):
     return register.update_part(part_id, data)
+
+
+@app.post("/api/parts/{part_id}/inserts")
+def parts_link_insert(part_id: int, data: dict):
+    return register.link_insert(part_id, data)
+
+
+@app.delete("/api/parts/{part_id}/inserts/{link_id}")
+def parts_unlink_insert(part_id: int, link_id: int):
+    return register.unlink_insert(part_id, link_id)
 
 
 @app.get("/api/parts/{part_id}/trace")

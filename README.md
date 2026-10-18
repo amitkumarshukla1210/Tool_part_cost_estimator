@@ -190,7 +190,18 @@ cost and annual volume). Then bring in the parts on **Import**:
     kept separate, for you to decide.
   - Tick the parts to register. For each one, set the code (blank = generated from the pattern in master data, e.g.
     `SCT26-0001`), name, material, process and sourcing (Make / Bought-out / Existing / Not required).
-  - The process is **suggested from the geometry** by rules in master data. These are a proposal, so please check them.
+  - The process is **suggested, with its reason** (click *why?*):
+    1. **Material first.** Its part type in Master data → Materials sets the family: plastics → moulding,
+       ADC12 / aluminium alloys → die casting, cast iron → foundry, steel / aluminium sheet grades → sheet metal.
+    2. **Then geometry**, by rules in Part register setup: main wall, how much of the surface is at that constant
+       wall, bends, fill ratio, size.
+    3. **Then inserts:** moulded-in inserts turn it into *insert moulding* or *insert die casting*.
+
+    Choose the material in the tree and the suggestion updates. It is a proposal, so please check it.
+  - **Moulded-in inserts are detected.** A smaller part that is largely enclosed by a bigger one in the same
+    assembly (e.g. brass threaded inserts in plastic bosses) is listed under its body for you to confirm. A
+    confirmed insert becomes its own part (bought-out by default) linked to the body with its quantity. It is not
+    a BOM child, because the body is one moulded part.
 
   Each part's own STEP file and thumbnail are stored, and the BOM tree is added to the chosen variant.
   Re-importing an unchanged assembly creates no new revisions.
@@ -199,16 +210,37 @@ cost and annual volume). Then bring in the parts on **Import**:
   it together with the STEP files or a ZIP. Files are matched by name.
   - Rows without a file are registered as **File missing**.
   - Every row is checked first, so nothing is saved if any row is wrong. The error names the row.
+  - Insert rows name their moulded part in `insert_of_part_code`, with `insert_quantity` and the bought-out price
+    (`unit_price`, `price_currency`, `price_source`, `price_month`).
 
 **Parts** is the register: search by code, name or material and filter by project, process, status, sourcing, rev,
 target cost range or *file missing*, with paging and Excel export. Click a part to:
 - edit its details (every change goes into its **history**: old → new, who, when)
 - see the current revision's geometry. **Volume**, **net weight** (volume × material density from master data) and
   **projected area** are clickable for their trace.
+- see the **suggested process and why**, and use it with one click
+- **link moulded-in inserts:** an existing part code, or a new insert part with its material, its own 3D file or a
+  simple shape with dimensions (pin, bush / threaded insert, hex nut, strip), and its price, source and month.
+  The weight is then shown as **body weight + insert weight = total weight**, each with its full trace.
+- set the **bought-out price** of any BOP part (price, currency, source, month, example flag)
 - download each revision's STEP file
 - **compare two revisions side by side**
 - upload a **new revision** (old revisions are kept)
 - see where the part is used
+
+The insert-moulding rules for the later stages are already in **Master data → Part register setup → Insert
+moulding rules** (all EXAMPLE values):
+- loading time, manual and robot
+- shuttle / rotary-table share
+- pre-heat limit
+- vertical machine and robot thresholds
+- inserts per shot, which caps the cavities
+- locating pin, magnet and pocket costs
+- weld-line, stress and insert-shift risk limits
+- extra rejection
+- insert handling %
+
+The mould concept (stage 5), simulation (stage 6) and part costing (stage 8) will use them.
 
 **Dashboard** shows, per project:
 - parts, file missing, open corrections, CAPEX budget and targets

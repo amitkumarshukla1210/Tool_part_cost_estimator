@@ -129,7 +129,7 @@ def test_single_part_and_new_revision_keeps_history():
 def _sheet(rows):
     wb = load_workbook(io.BytesIO(client.get("/api/import/template.xlsx").content))
     ws = wb["Parts"]
-    ws.delete_rows(2)
+    ws.delete_rows(2, ws.max_row)  # the example rows
     for r in rows:
         ws.append(r)
     buf = io.BytesIO()

@@ -60,9 +60,9 @@ const DATASETS = {
     api: "/api/register-setup",
     file: "master_data/costing_db.sqlite",
     intro:
-      "Lists and settings of the part register: processes (with the rule that auto-suggests a process from the 3D geometry), " +
-      "the design-loop statuses in order, sourcing types, the part-code pattern used when a code is left blank, and the folder " +
-      "where CAD files are stored.",
+      "Lists and settings of the part register: processes (the material family decides first, then the rule that scores the 3D " +
+      "geometry), the design-loop statuses, sourcing types, insert materials and shapes, the insert-moulding rules used by the " +
+      "mould, simulation and costing stages, the part-code pattern, insert detection settings and the folder where CAD files are stored.",
     schemaApi: "/api/register-setup/schema",
     tables: null,
   },

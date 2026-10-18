@@ -9,6 +9,11 @@ silently.
 
 Each unique part definition is measured, exported as its own STEP file and
 rendered as a thumbnail (matplotlib, colours taken from the theme file).
+
+Insert detection: inside each assembly, a smaller part whose surface is largely
+covered by a bigger sibling (the bigger part touches or surrounds it) is listed
+as a possible moulded-in insert of that body, e.g. a brass threaded insert in a
+plastic boss. The engineer confirms each one; nothing is changed automatically.
 """
 
 from __future__ import annotations
@@ -72,7 +77,7 @@ def read_structure(path: str, fallback_name: str) -> dict:
             name = _name(proto)
             is_assy = tool.IsAssembly_s(proto)
             defs[key] = {"key": key, "name": name if good(name) else "", "is_assembly": is_assy,
-                         "shape": tool.GetShape_s(proto), "children": {}, "instance_names": []}
+                         "shape": tool.GetShape_s(proto), "children": {}, "instance_names": [], "placed": []}
             if is_assy:
                 comps = TDF_LabelSequence()
                 tool.GetComponents_s(proto, comps)
@@ -80,6 +85,8 @@ def read_structure(path: str, fallback_name: str) -> dict:
                     comp = comps.Value(i)
                     child = visit(comp, _name(comp))
                     defs[key]["children"][child] = defs[key]["children"].get(child, 0) + 1
+                    # the component placed in this assembly's frame, for insert detection
+                    defs[key]["placed"].append((child, tool.GetShape_s(comp)))
         if instance_name and good(instance_name):
             defs[key]["instance_names"].append(instance_name)
         return key
@@ -93,7 +100,8 @@ def read_structure(path: str, fallback_name: str) -> dict:
         for k in root_keys:
             children[k] = children.get(k, 0) + 1
         defs[root] = {"key": root, "name": fallback_name, "is_assembly": True, "shape": None,
-                      "children": children, "instance_names": []}
+                      "children": children, "instance_names": [],
+                      "placed": [(k, tool.GetShape_s(roots.Value(i + 1))) for i, k in enumerate(root_keys)]}
 
     # Names: definition name, else first instance name, else file name + number.
     n = 0
@@ -117,7 +125,7 @@ def measure(shape: cq.Shape) -> dict:
     proj = {a: projected_area(vertices, triangles, a) for a in ("x", "y", "z")}
     pull = max(proj, key=proj.get)
     volume = shape.Volume()
-    wall, share = wall_stats(shape)
+    wall, share, bends = wall_stats(shape)
     box_volume = max(axes["x"] * axes["y"] * axes["z"], 1e-9)
     return {
         "volume_mm3": round(volume, 3),
@@ -130,6 +138,7 @@ def measure(shape: cq.Shape) -> dict:
         "solid_count": len(shape.Solids()),
         "wall_mm": round(wall, 3),
         "sheet_share": round(share, 4),
+        "bend_count": bends,
         "fill_ratio": round(volume / box_volume, 4),
         "max_dim_mm": round(length, 3),
         "min_dim_mm": round(height, 3),
@@ -141,6 +150,108 @@ def signature(m: dict) -> tuple:
     sig = lambda v: float(f"{v:.4g}")
     b = m["bbox_mm"]
     return (sig(m["volume_mm3"]), sig(m["surface_area_mm2"]), sig(b["length"]), sig(b["width"]), sig(b["height"]))
+
+
+# ---------- moulded-in inserts ----------
+
+def _probe_points(shape: cq.Shape, count: int):
+    """Up to `count` (point, normal, area) samples spread over the surface of a shape."""
+    import numpy as np
+    bb = shape.BoundingBox()
+    verts, tris = shape.tessellate(max(bb.DiagonalLength / 200, 0.02), 0.3)
+    if not tris:
+        return []
+    v = np.array([p.toTuple() for p in verts])
+    t = np.array([tuple(x) for x in tris])
+    a, b, c = v[t[:, 0]], v[t[:, 1]], v[t[:, 2]]
+    cross = np.cross(b - a, c - a)
+    area = np.linalg.norm(cross, axis=1) / 2
+    keep = area > 1e-9
+    centres, normals, area = ((a + b + c) / 3)[keep], (cross[keep].T / (2 * area[keep])).T, area[keep]
+    step = max(1, len(area) // count)
+    order = np.argsort(-area)  # biggest triangles first, then every n-th one
+    picked = order[::step][:count]
+    return [(centres[i], normals[i], area[i]) for i in picked]
+
+
+def _inside(classifiers, point) -> bool:
+    from OCP.gp import gp_Pnt
+    from OCP.TopAbs import TopAbs_IN, TopAbs_ON
+    p = gp_Pnt(*map(float, point))
+    for cl in classifiers:
+        cl.Perform(p, 1e-4)
+        if cl.State() in (TopAbs_IN, TopAbs_ON):
+            return True
+    return False
+
+
+def _classifiers(shape: cq.Shape):
+    from OCP.BRepClass3d import BRepClass3d_SolidClassifier
+    return [BRepClass3d_SolidClassifier(s.wrapped) for s in shape.Solids()]
+
+
+def enclosure(body: cq.Shape, insert: cq.Shape, offset_mm: float, points: int) -> dict:
+    """How much of the insert's surface the body covers.
+
+    Each sample point on the insert surface is moved `offset_mm` outwards (away
+    from the insert material); if that point is inside or on the body, the body
+    covers the insert there. `covered_share` is the covered share of the sampled
+    area. `overlap_mm3` > 0 means the body was modelled solid through the insert.
+    """
+    if not body.Solids() or not insert.Solids():
+        return {"covered_share": 0.0, "overlap_mm3": 0.0}
+    b1, b2 = body.BoundingBox(), insert.BoundingBox()
+    if (b2.xmin > b1.xmax + offset_mm or b2.xmax < b1.xmin - offset_mm or b2.ymin > b1.ymax + offset_mm
+            or b2.ymax < b1.ymin - offset_mm or b2.zmin > b1.zmax + offset_mm or b2.zmax < b1.zmin - offset_mm):
+        return {"covered_share": 0.0, "overlap_mm3": 0.0}
+    own, other = _classifiers(insert), _classifiers(body)
+    covered = total = inner_hits = 0.0
+    for centre, normal, area in _probe_points(insert, points):
+        out_pt = centre + normal * offset_mm
+        if _inside(own, out_pt):  # the triangle normal pointed into the insert: flip it
+            out_pt, in_pt = centre - normal * offset_mm, out_pt
+        else:
+            in_pt = centre - normal * offset_mm
+        total += area
+        if _inside(other, out_pt):
+            covered += area
+        if _inside(other, in_pt):
+            inner_hits += area
+    overlap = 0.0
+    if total and inner_hits / total > 0.05:
+        try:
+            overlap = body.intersect(insert).Volume()
+        except Exception:  # boolean failure: report no overlap rather than a wrong one
+            overlap = 0.0
+    return {"covered_share": round(float(covered / total), 4) if total else 0.0, "overlap_mm3": round(float(overlap), 3)}
+
+
+def detect_inserts(defs: dict, min_share: float, offset_mm: float, points: int) -> list[dict]:
+    """Possible moulded-in inserts in every assembly: smaller parts largely covered by a bigger sibling."""
+    found = []
+    for key, d in defs.items():
+        placed = [(k, cq.Shape.cast(s)) for k, s in d.get("placed", []) if s is not None and not defs[k]["is_assembly"]]
+        if len(placed) < 2:
+            continue
+        volume = {k: s.Volume() for k, s in placed}
+        hits: dict[tuple, dict] = {}
+        for bk, body in placed:
+            for ik, ins in placed:
+                if ik == bk or volume[ik] >= volume[bk]:
+                    continue
+                e = enclosure(body, ins, offset_mm, points)
+                if e["covered_share"] >= min_share:
+                    h = hits.setdefault((bk, ik), {"instances": 0, "share": 0.0, "overlap_mm3": 0.0})
+                    h["instances"] += 1
+                    h["share"] = max(h["share"], e["covered_share"])
+                    h["overlap_mm3"] += e["overlap_mm3"]
+        for (bk, ik), h in hits.items():
+            n_bodies = sum(1 for k, _ in placed if k == bk) or 1
+            found.append({"assembly": key, "body": bk, "insert": ik,
+                          "quantity": max(1, round(h["instances"] / n_bodies)),
+                          "covered_share": float(h["share"]),
+                          "overlap_mm3": round(h["overlap_mm3"] / n_bodies, 3)})
+    return found
 
 
 # ---------- files ----------
@@ -201,11 +312,18 @@ def thumbnail_png(shape: cq.Shape, size_px: int = 220) -> bytes:
 
 # ---------- whole file ----------
 
-def analyse_file(path: str, file_name: str, with_files: bool = True) -> dict:
-    """Part tree with measurements; optionally STEP bytes + thumbnail per definition."""
+def analyse_file(path: str, file_name: str, with_files: bool = True, insert_detection: dict | None = None) -> dict:
+    """Part tree with measurements; optionally STEP bytes + thumbnail per definition.
+
+    insert_detection: {"min_share", "offset_mm", "points"} (from master data) to look for
+    moulded-in inserts; the result is tree["inserts"].
+    """
     stem = Path(file_name).stem
     tree = read_structure(path, stem)
     defs = tree["defs"]
+    tree["inserts"] = detect_inserts(defs, **insert_detection) if insert_detection else []
+    for d in defs.values():
+        d.pop("placed", None)
     for d in defs.values():
         shape = cq.Shape.cast(d["shape"]) if d["shape"] is not None else None
         d.pop("shape")

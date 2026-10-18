@@ -89,7 +89,7 @@ $("variants").addEventListener("click", async (e) => {
   $("bom").innerHTML = `<thead><tr><th>Part code</th><th>Name</th><th class="num">Qty in parent</th><th class="num">Total qty</th>
     <th>Sourcing</th><th>Status</th></tr></thead><tbody>` +
     (bom.length ? bom.map((b) => `<tr><td style="padding-left:${10 + b.depth * 18}px">${b.depth ? "└ " : ""}
-      <a class="link" href="/parts?part=${b.child_part_id}">${esc(b.part_code)}</a></td><td>${esc(b.name)}${b.is_assembly ? ' <span class="badge assy">assembly</span>' : ""}</td>
+      <a class="link" href="/parts?part=${b.child_part_id}">${esc(b.part_code)}</a></td><td>${esc(b.name)}${b.is_assembly ? ' <span class="badge assy">assembly</span>' : ""}${b.kind === "insert" ? ' <span class="badge insert" title="Moulded-in insert of the part above: bought separately, not assembled">moulded-in insert</span>' : ""}</td>
       <td class="calc num">${fmt(b.quantity, 2)}</td><td class="calc num">${fmt(b.total_quantity, 2)}</td><td>${esc(nameOf(meta.sourcing, b.sourcing))}</td>
       <td><span class="badge status">${esc(nameOf(meta.statuses, b.status))}</span></td></tr>`).join("")
       : '<tr><td colspan="6" class="empty">This variant has no BOM yet. Import an assembly or use the Excel template with the variant column.</td></tr>') + "</tbody>";

@@ -60,6 +60,9 @@
     if (s.type === "machine") return `Master data → Machines · ${esc(s.machine_id)} · ${esc(s.field)} ${example(s.is_example)}`;
     if (s.type === "base") return esc(s.note);
     if (s.type === "user") return "Your input";
+    if (s.type === "cad") return `3D file ${esc(s.file || "")}${s.rev ? " · rev " + esc(s.rev) : ""}${s.note ? " · " + esc(s.note) : ""}`;
+    if (s.type === "master") return `Master data → ${esc(s.sheet)} · ${esc(s.row)} ${example(s.is_example)}`;
+    if (s.type === "register") return `Part register · ${esc(s.note)}`;
     return node.kind === "calculated" ? "Calculated" : "—";
   }
 
