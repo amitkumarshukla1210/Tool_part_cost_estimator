@@ -1,0 +1,74 @@
+I am the Project Leader. Design to Cost must become my end-to-end tool to plan BOM cost and CAPEX (tools, moulds, dies, machines) for new product development. Read this whole brief, then:
+(1) write a clear architecture + roadmap in README/ROADMAP.md, split into stages, each stage small enough for one PR;
+(2) for every feature, state honestly: fully automatic / automatic with engineer review / needs external software or data — and which open-source library you will use;
+(3) ask me questions where needed;
+(4) then build Stage 1 only and create a PR.
+Keep all earlier rules: no hard-coded values (everything from master data/formulas), every value clickable to its source and breakup, approved-rate library, Design to Cost theme, Excel + PDF export, built for "my PC now, server later".
+
+========================================================
+INPUT TYPES FROM R&D
+========================================================
+Option 1 – Exploded view / assembly 3D (STEP assembly with many parts).
+Option 2 – Single part 3D (STEP).
+Option 3 – Wire harness and PCB: 3D/CAD (DXF/DWG/STEP, harness KBL/VEC XML, PCB BOM/CPL/Gerber/KiCad/Altium exports) or PDF drawing with BOM table.
+
+========================================================
+FLOW FOR OPTION 1 & 2 (mechanical parts)
+========================================================
+STEP 1 – UPLOAD & PART REGISTER
+- Upload a single part or an assembly. For assemblies, split into parts automatically, show the part tree and thumbnails; I tick which parts to cost (others marked Bought-out / Existing / Not required).
+- For each part: Part code, Part name, Drawing rev no., Project, Material, Process (auto-suggested: plastic injection moulding, die casting, foundry, sheet metal multi-stage, sheet metal progressive, machined, bought-out), Annual volume, Programme life.
+- Bulk upload by Excel template (part code, name, rev, file name, material, volume) for many parts at once.
+
+STEP 2 – TOOL / MOULD CONCEPT DESIGN (automatic first proposal, engineer reviews)
+- Moulds/dies: opening direction, parting line proposal, undercut detection → slides/lifters, cavity count & layout, core/cavity insert size, standard mould base selection, gate/runner type, cooling concept, ejection.
+- Sheet metal: operation sequence (blank, draw, trim, pierce, form, fold…), multi-stage vs progressive, strip layout, stage-wise part shape, weight and tonnage.
+- Output: concept 3D (blocks: mould base, inserts, slides) + 2D/PDF layout with dimensions. Detailed final tool design is expected in the engineer's CAD; allow upload of the final tool 3D/drawing to replace the concept.
+
+STEP 3 – SIMULATION & ANALYSIS PAGE (new page)
+- Plastic / die casting: wall-thickness map, draft-angle check, undercut map, sink/stress-mark risk areas, fill/pack/cooling time estimate → cycle time, injection pressure → clamp tonnage, machine selection.
+- Sheet metal: formability checks (bend radius vs thickness, hole-to-edge, draw ratio/LDR, springback allowance), stage-wise force and press tonnage.
+- Use open-source analytical/empirical methods first; list optional deeper FEA/flow options (e.g. CalculiX, OpenFOAM-based solvers) and their limits. Do not claim Moldflow-level accuracy.
+- Generate a report with coloured pictures (problem areas marked), list of "Corrections required" (to R&D part design or to tool design), cycle time, tonnage, machine.
+
+STEP 4 – DESIGN LOOP
+- Status per part: Uploaded → Concept tool → Simulation → Corrections required → Revised (new rev) → Simulation OK → Tool design frozen.
+- Each loop keeps history: rev, what changed, who, when, simulation result. Compare two revs side by side.
+
+STEP 5 – TOOL COSTING PAGE (after "Simulation OK")
+- Per tool/mould/stage tool: tool material & BOM, process-wise cost (cutting, CNC, EDM/wire cut, grinding, polishing, heat treatment, surface treatment, assembly), design, trial, supplier overhead & profit, packing, transport, country comparison and landed cost (as in my earlier sections A–E).
+
+STEP 6 – PART COSTING PAGE (uses simulation data)
+- RM (gross weight, yield, scrap credit), process cost from simulated cycle time and the selected machine's MHR (machine selection rules visible and editable — critical), secondary operations, rejection, overhead, profit, packing, tool amortisation, logistics, country comparison and landed cost.
+
+STEP 7 – HISTORY & SCALE
+- Every part keeps full history (revs, simulations, tool cost versions, part cost versions, rates used).
+- Must handle ~10,000 3D parts: database (SQLite now, PostgreSQL later), file storage for CAD, fast search/filter by project, part code, rev, process, status, cost range.
+- Dashboard: status of all parts, total tool cost and total BOM cost per project.
+
+STEP 8 – DOWNLOADS
+- For each part: tool cost and part cost with full backup data (all formulas, inputs, sources, rates and rate month) as PDF and Excel.
+- For a project: consolidated BOM cost and tool cost in one Excel + PDF.
+
+========================================================
+FLOW FOR OPTION 3 (wire harness & PCB)
+========================================================
+PAGE A – BOM EXTRACTION
+- Upload harness CAD/PDF. Read the BOM table from the drawing (text-based PDF first; scanned PDF via OCR as later stage) and from CAD/XML where available.
+- Harness BOM: wire grade/type, cross-section, colour, branch/wire lengths (from drawing table or CAD), connectors & terminals (maker, MPN), seals, tubes/sleeves, tapes, clips, grommets, labels, other parts, quantity.
+- PCB BOM: from BOM/CPL/KiCad/Altium exports: components (ref designators, MPN, maker, package, qty), bare PCB (layers, size, thickness), SMT/THT counts.
+- I review and edit the extracted list before costing; mark low-confidence items for checking.
+
+PAGE B – BOM COSTING
+- Harness: wire cost (length × rate per grade/size, copper index linked), connector/terminal cost from part library, processing (cutting, stripping, crimping, assembly board time, testing) with MHR/labour logic.
+- PCB: component cost from my part library (and optional distributor APIs that allow use with a free key), bare board cost, SMT/THT assembly cost, testing.
+- Download BOM + cost in Excel/PDF with backup.
+
+========================================================
+PROJECT LEADER VIEW (end to end)
+========================================================
+- Project dashboard: total BOM cost per product/variant, total tool & mould CAPEX, machine CAPEX needed (new presses/moulding machines if capacity is short), cost vs target, open corrections, status by part.
+- CAPEX plan: tools by supplier/country, payment milestones, timeline.
+- Export project summary for management (Excel + PDF).
+
+Stage 1 to build now: database + part register (single part, assembly split, Excel bulk upload, part code/name/rev, file storage, history, search) and the project dashboard skeleton. Create a PR.

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design to Cost — Part Cost Estimator · Import</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/register.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img src="/theme/logo.png" alt="Design to Cost logo" />
+        <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/dashboard">Dashboard</a></li>
+          <li><a href="/parts">Parts</a></li>
+          <li><a href="/import" class="active" aria-current="page">Import</a></li>
+          <li><a href="/">Estimate</a></li>
+          <li><a href="/rates">Rates</a></li>
+          <li><a href="/master-data">Master data</a></li>
+          <li><a href="/help">Help</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="bg-grey page-head">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Step 1 · Upload &amp; part register</p>
+          <h2>Import parts</h2>
+          <p>A single part or a whole assembly (STEP), or many parts at once with the Excel template.</p>
+        </div>
+        <div class="card toolbar">
+          <label>Project <select id="project"></select></label>
+          <label>Add to BOM of variant <select id="variant"></select></label>
+          <a class="btn btn-outline" href="/dashboard">+ New project / variant</a>
+          <span class="spacer"></span>
+          <div class="tabs" role="tablist" id="tabs">
+            <button type="button" role="tab" class="btn btn-outline" data-tab="step" aria-selected="true">3D file (part or assembly)</button>
+            <button type="button" role="tab" class="btn btn-outline" data-tab="excel" aria-selected="false">Excel bulk upload</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3D file -->
+    <section class="page-body" id="tab-step">
+      <div class="container">
+        <form class="card toolbar" id="stepForm">
+          <label class="grow">STEP file (.step / .stp, units mm) <input type="file" name="file" accept=".step,.stp" required /></label>
+          <button type="submit" class="btn btn-primary">Read file</button>
+        </form>
+        <p id="stepStatus" class="status" role="status"></p>
+        <div id="preview" hidden>
+          <h3 class="block-title" id="previewTitle">Parts found</h3>
+          <p class="warn" id="lookalikes" hidden></p>
+          <p class="note">Tick the parts to register. Repeated parts are grouped with their quantity. Leave a part code blank to generate one
+            (<span id="pattern"></span>). The process is a suggestion from the geometry (rules in Master data → Part register setup); please check it.</p>
+          <div class="table-wrap" style="max-height: 620px"><table class="cost-table" id="tree"></table></div>
+          <form class="card toolbar" id="commitForm" style="margin-top: 14px">
+            <label>Rev no. for new files (blank = A / next) <input name="rev" maxlength="20" /></label>
+            <label class="grow">What changed (for new revisions) <input name="change_note" /></label>
+            <button type="submit" class="btn btn-primary">Register parts</button>
+          </form>
+          <p id="commitStatus" class="status" role="status"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Excel -->
+    <section class="page-body" id="tab-excel" hidden>
+      <div class="container">
+        <div class="steps">
+          <div class="card"><h3>1 · Download the template</h3>
+            <p class="note">Columns: part code, name, rev, file name, material, process, sourcing, volume, programme life, target cost,
+              variant, parent part code, quantity, what changed. The Help sheet explains each column.</p>
+            <a class="btn btn-outline" href="/api/import/template.xlsx">Download Excel template</a></div>
+          <div class="card"><h3>2 · Fill it in</h3>
+            <p class="note">One row per part. A part code that already exists becomes a new revision. Rows whose file is not uploaded are
+              registered as “File missing”, so you can attach the file later.</p></div>
+          <div class="card"><h3>3 · Upload Excel + STEP files or a ZIP</h3>
+            <form id="excelForm" class="grid2">
+              <label class="span2">Excel (.xlsx) <input type="file" name="excel" accept=".xlsx" required /></label>
+              <label class="span2">STEP files and / or ZIP (select several) <input type="file" name="files" accept=".step,.stp,.zip" multiple /></label>
+              <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary">Upload</button></div>
+            </form></div>
+        </div>
+        <p id="excelStatus" class="status" role="status"></p>
+        <div class="table-wrap" id="excelReportWrap" hidden><table class="cost-table" id="excelReport"></table></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container"><p class="footnote">© Design to Cost</p></div>
+  </footer>
+  <script src="/static/common.js"></script>
+  <script src="/static/import.js"></script>
+</body>
+</html>
