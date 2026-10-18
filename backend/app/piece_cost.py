@@ -36,15 +36,29 @@ def graft(t: Trace, sub: dict, prefix: str) -> str:
     return prefix + sub["root"]
 
 
-def run(part_id: int) -> dict:
+def run(part_id: int, country: str | None = None) -> dict:
     from . import register
     d = register.part_detail(part_id, with_rm=False)
     if register.tool_eligibility(d):
         raise PieceError(register.tool_eligibility(d))
     part_type = register_setup.processes()[d["process"]]["part_type"]
     rev_id = d["current_revision_id"]
-    rm = next((v for v in register.rm_versions(part_id) if v["revision_id"] == rev_id), None)
-    tool = next((v for v in register.tool_versions(part_id) if v["revision_id"] == rev_id), None)
+    if country:   # country comparison: RM and tool worked out live in that country
+        from .tool_cost import ToolCostError
+        from .rm_cost import RMError
+        try:
+            rl, tl = register._rm_compute(part_id, country), register._tool_compute(part_id, country)
+        except (register.RegisterError, register.RMNotApplicable, register.ToolNotApplicable, RMError, ToolCostError) as exc:
+            raise PieceError(str(exc)) from None
+        if rl["missing"] or tl["missing"]:
+            raise PieceError(" ".join(rl["missing"] + tl["missing"]))
+        rm = {"net_rm_cost": rl["value"], "version": "live", "rev": d["rev"], "country": rl["country"], "currency": rl["currency"],
+              "as_of": rl["as_of"], "revision_id": rev_id}
+        tool = {"cavities": tl["cavities"], "tool_capex_inr": tl["capex_inr"], "tool_cost_inr": tl["value_inr"], "version": "live",
+                "trace": tl}
+    else:
+        rm = next((v for v in register.rm_versions(part_id) if v["revision_id"] == rev_id), None)
+        tool = next((v for v in register.tool_versions(part_id) if v["revision_id"] == rev_id), None)
     if not rm:
         raise PieceError("Calculate the RM cost of the current revision first.")
     if not tool:
@@ -152,6 +166,9 @@ def run(part_id: int) -> dict:
             "revision": {"id": rev_id, "rev": d["rev"]}, "rm_version": rm["version"], "tool_version": tool["version"],
             "steps": [{"name": r["name"], "node": f"calc:{r['name']}", "is_result": bool(r["is_result"])} for r in order],
             "inputs": [{"variable": k, "node": v} for k, v in names.items()]}
+    out["tool_summary"] = {"value": tool_tr["value"], "value_inr": tool_tr["value_inr"], "capex_inr": tool_tr.get("capex_inr"),
+                           "currency": tool_tr["currency"], "weight_kg": tool_tr["nodes"]["tool_weight"]["value"]
+                           if "tool_weight" in tool_tr["nodes"] else 0.0}
     out["key"] = {"revision_id": rev_id, "rm": rm["version"], "tool": tool["version"], "inputs": typed,
                   "rates": sorted(x["id"] for x in out["rates_used"]), "as_of": as_of}
     out["is_example"] = any(x.get("is_example") for x in out["rates_used"])

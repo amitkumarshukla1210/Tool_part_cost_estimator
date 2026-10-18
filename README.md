@@ -499,6 +499,19 @@ idle stations, pilots. The formulas are **Mould & die database → Strip rules**
 Downloads: **Blank DXF** and **Strip DXF** (CUT layer, dimensions) and the **Tool pack PDF** (dimensioned blank, strip layout, simplified
 stage sketches, forces). The stage sketches show the flat blank (with holes once pierced), not formed shapes.
 
+## Country comparison and landed cost (roadmap stage 11)
+
+On a part's panel (plastic / die-cast / sheet-metal parts with a tool), **Country comparison and landed cost → Compare all countries**
+costs the part **and its tool as if made in each country** (that country's approved material, machine, labour, power and process rates,
+through the same RM, tool-cost and part-cost engines). The **ex-works** price (part cost without local logistics) is shown in the local
+currency, USD and INR. For imports into India it adds **freight** (sea or air per kg × weight), **insurance** (% of ex-works + freight)
+= CIF, **Basic Customs Duty** (by HS code and origin; the FTA / preferential rate of JP, KR, TH, VN is used when you keep the box
+ticked), **SWS** (% of BCD), **IGST** (on CIF + BCD + SWS; the credit is shown separately when `igst_claimable` is 1), **clearance** and
+**inland transport** → **landed cost in INR**. The forex effect (± `fx_scenario_pct`, 5 %), a stacked bar chart and the cheapest country are
+shown; Excel and PDF carry the full data and the rate versions used. HS codes: **Mould & die database → HS codes**. Duty, freight and
+import rates are approved versions in the rate library (categories `duty`, `freight`, `import`). All are EXAMPLE values;
+check the tariff heading and rates with your customs broker.
+
 ## Rates page: country rate library, MHR & labour rates
 
 Open **Rates** in the header. Pick the **producing country** and the **costing month**.

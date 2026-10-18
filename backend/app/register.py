@@ -927,7 +927,7 @@ def _formula_hash(family: str) -> str:
     return hashlib.sha1(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest()[:12]
 
 
-def _rm_compute(part_id: int) -> dict:
+def _rm_compute(part_id: int, country: str | None = None) -> dict:
     """Dry run: the traced RM result of the part's current revision. Raises RMNotApplicable / RegisterError / RMError."""
     from .geometry import blank_estimate
     d = part_detail(part_id, with_rm=False)
@@ -956,7 +956,7 @@ def _rm_compute(part_id: int) -> dict:
             "note": "Estimated from the 3D model: flat length, or developed length for a bent part"}}
         part["blank_width_mm"] = {"value": blank["width"], "unit": "mm", "source": cad | {
             "note": "Estimated from the 3D model: part width"}}
-    country = (d["country"] or register_setup.settings()["default_country"]).upper()
+    country = (country or d["country"] or register_setup.settings()["default_country"]).upper()
     as_of = d["costing_month"] or rates.current_month()
     r = rm_cost.run(family, country=country, as_of=as_of, material=d["material"], part=part, given=overrides,
                     given_source={"type": "user", "note": f"Typed in the part register for {d['part_code']}"}, trace=t)
@@ -1505,7 +1505,7 @@ def _tool_master_hash(part_type: str) -> str:
     return hashlib.sha1(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()[:12]
 
 
-def _tool_compute(part_id: int) -> dict:
+def _tool_compute(part_id: int, country: str | None = None) -> dict:
     """Dry run: the traced tool cost of the part's current revision. Raises ToolNotApplicable / ToolCostError."""
     d = part_detail(part_id, with_rm=False)
     why = tool_eligibility(d)
@@ -1535,7 +1535,7 @@ def _tool_compute(part_id: int) -> dict:
     except ValueError as exc:
         raise ToolNotApplicable(f"Stage C (cavities and tools) cannot be worked out: {exc}") from None
     typed = d["tool_inputs"] or {}
-    country = (d["tool_country"] or d["country"] or register_setup.settings()["default_country"]).upper()
+    country = (country or d["tool_country"] or d["country"] or register_setup.settings()["default_country"]).upper()
     as_of = d["costing_month"] or rates.current_month()
     inp = tool_cost.ToolInput(
         part_type=part_type, cavities=typed.get("cavities") or cap["cavities_per_tool"],

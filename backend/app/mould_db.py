@@ -177,6 +177,14 @@ TABLES = {
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
     ]},
+    "hs_codes": {"title": "HS codes", "unique": ("scope", "part_type"), "columns": [
+        col("scope", "Of", "scope_of", ("tool", "part")),
+        col("part_type", "Part type", "part_type", PART_TYPES),
+        col("hs_code", "HS code (duty and IGST rates use it)"),
+        col("description", "Description"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
     "tool_processes": {"title": "Tool processes", "unique": ("code",), "columns": [
         col("code", "Process"),
         col("pricing", "Priced by", "pricing", PRICING),
