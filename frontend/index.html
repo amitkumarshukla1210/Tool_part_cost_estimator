@@ -7,6 +7,7 @@
   <link rel="icon" type="image/png" href="/theme/logo.png" />
   <link rel="stylesheet" href="/theme/dtc-theme.css" />
   <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/rates.css" />
   <script type="importmap">
     {
       "imports": {
@@ -44,6 +45,10 @@
           <p class="kicker">Part Cost Estimator</p>
           <h2>Estimate a part from its 3D model</h2>
           <p>Upload a STEP file to get geometry, weight, RM cost, cavities, tools and a mould BOM.</p>
+        </div>
+        <div class="card part-banner" id="partBanner" hidden>
+          <p><b id="partBannerText"></b></p>
+          <p class="status" id="partBannerStatus" role="status"></p>
         </div>
 
         <div class="top-grid">
@@ -158,14 +163,22 @@
               <label data-types="sheet_metal">Sheet edge trim (mm)
                 <input type="number" name="edge_mm" step="0.5" min="0" /></label>
 
-              <label>Currency
-                <input type="text" name="currency" maxlength="5" /></label>
+              <label>Producing country
+                <select id="country"></select></label>
+              <label>Costing month
+                <input type="text" id="asOf" maxlength="7" pattern="\d{4}-\d{2}" placeholder="blank = this month" /></label>
               <label>Material rate per kg
-                <input type="number" name="material_rate_per_kg" step="0.01" min="0" placeholder="e.g. 180" /></label>
-              <label class="span2"><span data-label="scrap_rate_per_kg"></span>
-                <input type="number" name="scrap_rate_per_kg" step="0.01" min="0" value="0" /></label>
+                <input type="number" name="material_rate_per_kg" step="0.01" min="0" placeholder="approved rate" /></label>
+              <label><span data-label="scrap_rate_per_kg"></span>
+                <input type="number" name="scrap_rate_per_kg" step="0.01" min="0" placeholder="approved rate" /></label>
             </form>
+            <p class="note" id="rateNote">The material rate and scrap value come from the approved rate library for the producing country.
+              Type a number only to replace them; a typed value is traced as your input and is in the country's currency.</p>
             <p class="note" data-types="sheet_metal" id="sheetHint"></p>
+            <div id="savePart" hidden>
+              <button type="button" class="btn btn-primary" id="savePartBtn">Save to part</button>
+              <span class="note">Stores the inputs you changed on the part and calculates a new RM cost version.</span>
+            </div>
           </div>
           <div>
             <p id="statusB" class="status error" role="status"></p>
@@ -181,6 +194,7 @@
                   <tr><td>Material yield</td><td class="calc num" id="b-yield"></td></tr>
                   <tr data-types="sheet_metal"><td>Blanks per sheet</td><td class="calc num" id="b-nest"></td></tr>
                   <tr data-types="sheet_metal"><td>Sheet weight</td><td class="calc num" id="b-sheet"></td></tr>
+                  <tr><td>Material rate</td><td class="calc num" id="b-rate"></td></tr>
                   <tr><td>RM cost (gross)</td><td class="calc num" id="b-rm"></td></tr>
                   <tr><td>Scrap credit</td><td class="calc num" id="b-credit"></td></tr>
                   <tr class="total"><td>Net RM cost per part</td><td class="calc num" id="b-net-rm"></td></tr>
@@ -332,6 +346,7 @@
     <div class="container"><p class="footnote">© Design to Cost</p></div>
   </footer>
 
+  <script src="/static/trace.js"></script>
   <script type="module" src="/static/app.js"></script>
 </body>
 </html>

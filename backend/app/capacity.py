@@ -24,7 +24,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from . import master_data
-from .gross_weight import grid_fit
+from .rm_cost import grid_fit
 
 # Inputs that come from master data when the request leaves them out.
 COMMON_KEYS = ["annual_volume", "working_days", "shifts_per_day", "hours_per_shift", "programme_years"]

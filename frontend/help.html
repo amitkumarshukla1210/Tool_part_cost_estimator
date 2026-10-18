@@ -115,6 +115,16 @@
             </tbody>
           </table>
         </div>
+        <p class="note">These formulas are not written in the program. They are rows in Master data → Countries, machines &amp; formulas
+          (scopes <code>rm_plastic</code>, <code>rm_die_casting</code>, <code>rm_foundry</code>, <code>rm_sheet_metal</code>), so you can change them.
+          The material rate and scrap value are <b>approved rates</b> of the producing country (Rates page, categories <code>material</code> and
+          <code>material_scrap</code>). Every number on the page is clickable.</p>
+        <h3 class="block-title">RM cost of a registered part</h3>
+        <p>The Parts page shows the RM cost of every part that is made by you (moulding, casting, sheet metal) and has a material. It is stored as a
+          numbered <b>version</b> with its full trace and the rate versions it used, and a new version is made when the 3D file, material, process,
+          country, month, inserts or your typed inputs change. A newly approved rate does <b>not</b> change a stored cost: the part shows
+          “Newer approved rates exist” and you click <b>Recalculate with latest rates</b> (or <b>Recalculate RM</b> on the Dashboard for the
+          whole project). Use <b>Open in Estimate</b> on a part to work on it with the full Stage B–C page and <b>Save to part</b> to keep your changes.</p>
       </div>
     </section>
 
@@ -199,7 +209,7 @@
           <div class="card">
             <h3>General master data · Excel</h3>
             <p><code>master_data/master_data.xlsx</code> has three sheets: <b>Parameters</b> (defaults and rules), <b>Materials</b>
-              (density, RM rate, scrap value) and <b>Machines</b> (tonnage, tie-bar size, MHR).</p>
+              (density; the RM rate and scrap value are approved rates on the Rates page) and <b>Machines</b> (tonnage, tie-bar size, MHR).</p>
           </div>
           <div class="card">
             <h3>Mould &amp; die database · SQLite</h3>

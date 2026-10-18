@@ -6,7 +6,13 @@ or directly in Excel. The workbook has two sheets:
 
     Parameters  part_type | parameter | value | unit | description
                 part_type "all" applies to every part type.
-    Materials   part_type | material | density_g_cm3 | rate_per_kg | scrap_rate_per_kg | notes
+    Materials   part_type | material | density_g_cm3 | notes
+
+Material RATES are not here: they are versioned, approved rates in the rate
+library (category "material" and "material_scrap", item = material name, per
+country), so every RM cost records the rate version and month it used.
+An older workbook that still has rate_per_kg / scrap_rate_per_kg columns can be
+uploaded; those columns are ignored and a note says so.
 
 The file is re-read whenever it changes on disk.
 """
@@ -28,11 +34,13 @@ PART_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal")
 # Sheet name -> columns, and which columns must be numbers.
 SHEETS = {
     "Parameters": ["part_type", "parameter", "value", "unit", "description"],
-    "Materials": ["part_type", "material", "density_g_cm3", "rate_per_kg", "scrap_rate_per_kg", "notes"],
+    "Materials": ["part_type", "material", "density_g_cm3", "notes"],
 }
 NUMERIC = {
-    "Materials": {"density_g_cm3", "rate_per_kg", "scrap_rate_per_kg"},
+    "Materials": {"density_g_cm3"},
 }
+# Columns of older versions that are no longer read (material rates moved to the rate library).
+RETIRED = {"Materials": {"rate_per_kg": "the RM rate", "scrap_rate_per_kg": "the scrap value"}}
 # Parameters whose value is text or a comma list; every other parameter is a number.
 TEXT_PARAMETERS = {"currency"}
 LIST_PARAMETERS = {"standard_cavities"}
@@ -49,6 +57,21 @@ def path() -> Path:
 
 
 # ---------- reading ----------
+
+def retired_columns(p: Path) -> list[str]:
+    """Notes on old columns in a workbook that are ignored now."""
+    wb = load_workbook(p, read_only=True, data_only=True)
+    notes = []
+    for sheet, cols in RETIRED.items():
+        if sheet in wb.sheetnames:
+            header = next(wb[sheet].iter_rows(values_only=True, max_row=1), ())
+            for c in cols:
+                if c in header:
+                    notes.append(f"{sheet}: column '{c}' ({cols[c]}) is ignored. Material rates are approved rates in the "
+                                 "rate library now (Rates page, category material / material_scrap).")
+    wb.close()
+    return notes
+
 
 def _read_workbook(p: Path) -> dict:
     if not p.exists():
@@ -210,14 +233,15 @@ def write(data: dict, p: Path | None = None) -> None:
     _cache["key"] = None
 
 
-def replace_from_upload(content: bytes) -> None:
-    """Check an uploaded workbook and, if valid, make it the master data."""
+def replace_from_upload(content: bytes) -> list[str]:
+    """Check an uploaded workbook and, if valid, make it the master data. Returns notes (ignored old columns)."""
     fd, tmp = tempfile.mkstemp(suffix=".xlsx")
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(content)
         try:
             data = _read_workbook(Path(tmp))
+            notes = retired_columns(Path(tmp))
         except MasterDataError:
             raise
         except Exception as exc:
@@ -225,3 +249,4 @@ def replace_from_upload(content: bytes) -> None:
     finally:
         os.remove(tmp)
     write(data)
+    return notes

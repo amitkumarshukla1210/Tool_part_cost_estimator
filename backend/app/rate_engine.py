@@ -36,7 +36,8 @@ def _convert(trace: Trace, node: str, label: str, from_cur: str, to_cur: str, as
         return node
     a, b = fx_to_inr(trace, from_cur, as_of), fx_to_inr(trace, to_cur, as_of)
     out = f"{node}:{to_cur}"
-    trace.compute(out, f"{label} in {to_cur}", "value * fx_from / fx_to", trace.nodes[node]["unit"], money=True,
+    unit = trace.nodes[node]["unit"].replace(from_cur, to_cur)
+    trace.compute(out, f"{label} in {to_cur}", "value * fx_from / fx_to", unit, money=True,
                   description=f"Converted from {from_cur} to {to_cur} via INR forex rates of {as_of}.",
                   names={"value": node, "fx_from": a, "fx_to": b})
     return out
@@ -76,11 +77,25 @@ def run(scope: str, country: str, as_of: str | None = None, machine: dict | None
                 nid = _convert(trace, nid, inp["label"] or var, rate["currency"], cur, as_of)
         names[var] = nid
 
+    result, components, _ = evaluate_scope(trace, setup, scope, names, cur, as_of)
+    out = trace.to_dict(result)
+    out |= {"scope": scope, "country": country, "currency": cur, "as_of": as_of,
+            "value": trace.value(result), "value_inr": trace.value("result:inr"), "components": components}
+    return out
+
+
+def evaluate_scope(trace: Trace, setup: dict, scope: str, names: dict, cur: str, as_of: str):
+    """Run the cost formulas of a scope in order on the inputs in `names` (variable -> node id).
+
+    Adds one node per formula plus the result in INR ("result:inr").
+    Returns (result node, component nodes in sheet order, formula rows in calculation order).
+    """
     rows = [(i, r) for i, r in enumerate(setup["cost_formulas"], start=2) if r["scope"] == scope]
     if not rows:
         raise EngineError(f"Master data has no cost formulas for '{scope}'.")
     result = result_unit = None
-    for r in formula_order(rows, set(names)):
+    order = formula_order(rows, set(names))
+    for r in order:
         nid = f"calc:{r['name']}"
         # Units are written with {cur}, e.g. "{cur}/h"; those values are money.
         trace.compute(nid, r["label"] or r["name"], r["formula"], r["unit"].replace("{cur}", cur),
@@ -95,11 +110,7 @@ def run(scope: str, country: str, as_of: str | None = None, machine: dict | None
                   result_unit.replace("{cur}", "INR"), money=True,
                   description=f"Converted with the INR per {cur} forex rate of {as_of}.",
                   names={"value": result, "fx": fx})
-    out = trace.to_dict(result)
-    out |= {"scope": scope, "country": country, "currency": cur, "as_of": as_of,
-            "value": trace.value(result), "value_inr": trace.value("result:inr"),
-            "components": [names[r["name"]] for _, r in rows if not r["is_result"]]}
-    return out
+    return result, [names[r["name"]] for _, r in rows if not r["is_result"]], order
 
 
 def mhr(machine_id: str, country: str, as_of: str | None = None) -> dict:

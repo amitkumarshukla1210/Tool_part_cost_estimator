@@ -87,6 +87,13 @@ parts = Table(
     Column("price_is_example", Boolean, default=False),
     # simple shape + dimensions for a part without a 3D file, e.g. {"shape": "bush", "od_mm": 6, ...}
     Column("dimensions", JSON),
+    # RM cost: producing country and costing month (blank = default country / current month), your typed inputs
+    Column("country", String(10), default=""),
+    Column("costing_month", String(7), default=""),
+    Column("rm_inputs", JSON),
+    # latest RM cost version (kept here too for fast search, filters and dashboards)
+    Column("rm_cost_id", Integer),
+    Column("rm_cost_inr", Float),
     Column("created_by", String(100), default=""),
     Column("created_at", DateTime, default=now),
     Column("updated_at", DateTime, default=now, onupdate=now),
@@ -133,6 +140,35 @@ part_inserts = Table(
     Column("notes", Text, default=""),
     Column("created_at", DateTime, default=now),
     UniqueConstraint("part_id", "insert_part_id"),
+)
+
+# RM cost versions: never overwritten. Each keeps its full trace and the rate versions it used.
+rm_costs = Table(
+    "rm_costs", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("revision_id", ForeignKey("revisions.id")),
+    Column("rev", String(20), default=""),
+    Column("family", String(30), nullable=False),      # plastic, die_casting, foundry, sheet_metal
+    Column("process", String(60), default=""),
+    Column("material", String(200), default=""),
+    Column("country", String(10), nullable=False),
+    Column("currency", String(10), nullable=False),
+    Column("as_of", String(7), nullable=False),        # costing month
+    Column("inputs", JSON),                            # your typed inputs used
+    Column("key", JSON),                               # what the result depends on, to skip identical recalculations
+    Column("net_weight_g", Float),
+    Column("gross_weight_g", Float),
+    Column("net_rm_cost", Float),                      # in the country's currency
+    Column("net_rm_cost_inr", Float),
+    Column("rates_used", JSON),                        # [{id, category, item, country, month, value}]
+    Column("trace", JSON),
+    Column("reason", String(300), default=""),
+    Column("created_by", String(100), default=""),
+    Column("created_at", DateTime, default=now),
+    UniqueConstraint("part_id", "version"),
+    Index("ix_rm_costs_part", "part_id"),
 )
 
 history = Table(

@@ -51,6 +51,42 @@ class Trace:
                                "kind": "calculated", "formula": text, "inputs": inputs, "description": description}
         return value
 
+    def add_derived(self, node_id, label, value, unit, method, inputs: dict, description=""):
+        """A value worked out by a search in code (e.g. sheet nesting) rather than one formula.
+
+        `method` says in words how it is found; `inputs` maps a name to the node it used.
+        """
+        self.nodes[node_id] = {"id": node_id, "label": label, "value": value, "unit": unit, "money": False,
+                               "kind": "calculated", "formula": method, "method": True,
+                               "inputs": [{"name": n, "node": nid} for n, nid in inputs.items()],
+                               "description": description}
+        return value
+
     def to_dict(self, root: str) -> dict:
         return {"root": root, "currency": self.currency, "nodes": self.nodes,
                 "rates_used": sorted(self.rates_used.values(), key=lambda r: r["id"])}
+
+
+def source_text(node: dict) -> str:
+    """Plain-text 'comes from' of a node, for Excel and PDF exports (the browser panel has its own)."""
+    s = node.get("source") or {}
+    t = s.get("type")
+    if t == "rate":
+        r = s["rate"]
+        return (f"Rate library #{r['id']} · {r['category']} / {r['item']}" + (f" · {r['country']}" if r["country"] else "")
+                + f" · {r['month']} · {r['status']}" + (" · EXAMPLE" if r.get("is_example") else ""))
+    if t == "machine":
+        return f"Master data → Machines · {s.get('machine_id')} · {s.get('field')}"
+    if t == "master":
+        return f"Master data → {s.get('sheet')} · {s.get('row')}" + (" · EXAMPLE" if s.get("is_example") else "")
+    if t == "cad":
+        return f"3D file {s.get('file', '')}" + (f" · rev {s['rev']}" if s.get("rev") else "") + (f" · {s['note']}" if s.get("note") else "")
+    if t == "user":
+        return "Your input" + (f" · {s['note']}" if s.get("note") else "")
+    if t == "register":
+        return f"Part register · {s.get('note', '')}"
+    if t == "missing":
+        return f"MISSING · {s.get('note', '')}"
+    if t == "base":
+        return s.get("note", "")
+    return "Calculated" if node.get("kind") == "calculated" else "—"

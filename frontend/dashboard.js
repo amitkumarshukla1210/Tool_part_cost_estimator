@@ -15,7 +15,7 @@ async function loadProjects(select) {
   if (want && projects.some((p) => p.id === want)) $("project").value = want;
   $("empty").hidden = projects.length > 0;
   $("content").hidden = projects.length === 0;
-  ["editProject", "newVariant", "openParts", "importLink", "xlsx", "pdf"].forEach((id) => ($(id).hidden = !projects.length));
+  ["editProject", "newVariant", "openParts", "importLink", "xlsx", "pdf", "rmRecalc"].forEach((id) => ($(id).hidden = !projects.length));
   if (projects.length) load();
 }
 
@@ -58,17 +58,19 @@ function render() {
     tile("Open corrections", fmt(d.open_corrections), "from the design loop", d.open_corrections > 0) +
     tile("CAPEX budget", inr(d.capex.budget_inr), "tools, moulds & machines") +
     tile("Tool & mould CAPEX", inr(d.capex.tool_cost_inr), "costed so far") +
+    tile("Parts with RM cost", fmt(d.parts_rm_costed), "raw material only") +
     tile("Parts with target", fmt(d.parts_with_target), d.target_piece_cost_sum_inr != null ? `sum of targets ${inr(d.target_piece_cost_sum_inr)}` : "");
   $("notCosted").textContent = d.not_costed_note;
 
   $("variants").innerHTML = `<thead><tr><th>Variant</th><th>Name</th><th class="num">Annual volume</th><th class="num">BOM lines</th>
-    <th class="num">Unique parts</th><th class="num">Target BOM cost</th><th class="num">BOM cost</th><th class="num">vs target</th><th></th></tr></thead><tbody>` +
+    <th class="num">Unique parts</th><th class="num">Target BOM cost</th><th class="num">RM cost (raw material only)</th><th class="num">RM vs target</th><th class="num">Parts without RM</th><th></th></tr></thead><tbody>` +
     (d.variants.length ? d.variants.map((v, i) => `<tr class="clickable" data-v="${i}"><td>${esc(v.code)}</td><td>${esc(v.name)}</td>
       <td class="calc num">${fmt(v.annual_volume)}</td><td class="calc num">${v.bom_lines}</td><td class="calc num">${v.unique_parts}</td>
-      <td class="calc num">${inr(v.target_bom_cost_inr)}</td><td class="calc num">${inr(v.bom_cost_inr)}</td>
-      <td class="calc num">${v.bom_cost_inr != null && v.target_bom_cost_inr ? fmt(((v.bom_cost_inr - v.target_bom_cost_inr) / v.target_bom_cost_inr) * 100, 1) + " %" : "—"}</td>
+      <td class="calc num">${inr(v.target_bom_cost_inr)}</td><td class="calc num">${inr(v.rm_cost_inr)}</td>
+      <td class="calc num">${v.rm_cost_inr != null && v.target_bom_cost_inr ? fmt((v.rm_cost_inr / v.target_bom_cost_inr) * 100, 1) + " % of target" : "—"}</td>
+      <td class="calc num">${v.rm_parts_missing ? `<span class="badge missing">${v.rm_parts_missing}</span>` : v.rm_parts_costed ? "0" : "—"}</td>
       <td><button type="button" class="btn btn-outline small" data-edit="${i}">Edit</button></td></tr>`).join("")
-      : '<tr><td colspan="9" class="empty">No variant yet. Add one with “+ Variant”.</td></tr>') + "</tbody>";
+      : '<tr><td colspan="10" class="empty">No variant yet. Add one with “+ Variant”.</td></tr>') + "</tbody>";
 
   $("byStatus").innerHTML = bars(d.status, d.parts_total);
   $("byProcess").innerHTML = bars(d.process, d.parts_total);
@@ -152,5 +154,19 @@ $("variantForm").addEventListener("submit", async (e) => {
   }
 });
 
+$("rmRecalc").addEventListener("click", async () => {
+  $("rmRecalc").disabled = true;
+  status($("status"), "Recalculating RM cost with the latest approved rates…");
+  try {
+    const r = await api(`/api/projects/${current()}/rm-cost/recalculate`, { method: "POST" });
+    await load();
+    status($("status"), `${r.new_versions} part${r.new_versions === 1 ? "" : "s"} got a new RM cost version, ${r.unchanged} unchanged.` +
+      (r.problems.length ? ` ${r.problems.length} could not be costed (open the part to see why).` : ""), r.problems.length ? "error" : "ok");
+  } catch (err) {
+    status($("status"), err.message, "error");
+  } finally {
+    $("rmRecalc").disabled = false;
+  }
+});
 $("project").addEventListener("change", load);
 loadProjects();

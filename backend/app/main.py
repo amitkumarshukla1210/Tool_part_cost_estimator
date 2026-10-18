@@ -19,14 +19,14 @@ from typing import Optional
 
 from .geometry import PART_TYPES, analyze, blank_estimate, load_step, sheet_thickness, tessellate
 from . import (capacity, costing_setup, file_store, gross_weight, master_data, mould, mould_db, rate_engine, rates,
-               register, register_setup)
+               register, register_setup, rm_cost)
 from . import projects_db
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 THEME_DIR = Path(__file__).resolve().parents[2] / "theme"
 MAX_UPLOAD_MB = 100
 
-app = FastAPI(title="Design to Cost — Part Cost Estimator", version="0.6.0 (part register, inserts)")
+app = FastAPI(title="Design to Cost — Part Cost Estimator", version="0.7.0 (RM cost on the register)")
 
 
 @app.get("/api/part-types")
@@ -96,7 +96,18 @@ async def analyze_part(
 
 @app.get("/api/gross-weight/defaults")
 def gross_weight_defaults():
+    """Per part type: the master-data defaults of the inputs you can type over, and the list of those inputs."""
     return {pt: gross_weight.defaults(pt) for pt in PART_TYPES}
+
+
+@app.get("/api/rm/meta")
+def rm_meta():
+    """Choices for the RM section of the Estimate page and the part panel (all from master data)."""
+    return {"default_country": gross_weight.default_country(),
+            "countries": [{"code": c["code"], "name": c["name"], "currency": c["currency"]}
+                          for c in costing_setup.tables()["countries"]],
+            "inputs": {pt: gross_weight.inputs(pt) for pt in PART_TYPES},
+            "month": rates.current_month()}
 
 
 @app.post("/api/gross-weight")
@@ -144,8 +155,8 @@ def master_data_download():
 async def master_data_upload(file: UploadFile = File(...)):
     if not (file.filename or "").lower().endswith(".xlsx"):
         raise HTTPException(400, "Please upload an Excel .xlsx file.")
-    master_data.replace_from_upload(await file.read())
-    return master_data.tables()
+    notes = master_data.replace_from_upload(await file.read())
+    return master_data.tables() | ({"_notes": notes} if notes else {})
 
 
 @app.get("/api/mould-db/schema")
@@ -424,26 +435,31 @@ def projects_dashboard_pdf(project_id: int):
 
 # ---------- part register: parts ----------
 
-def _filters(q, project_id, process, status, sourcing, rev, file_missing, target_min, target_max):
-    fm = None if file_missing in (None, "") else file_missing.lower() in ("1", "true", "yes")
+def _filters(q, project_id, process, status, sourcing, rev, file_missing, target_min, target_max,
+             rm_min=None, rm_max=None, rm_missing=None):
+    flag = lambda v: None if v in (None, "") else v.lower() in ("1", "true", "yes")
     return dict(q=q, project_id=project_id, process=process, status=status, sourcing=sourcing, rev=rev,
-                file_missing=fm, target_min=target_min, target_max=target_max)
+                file_missing=flag(file_missing), target_min=target_min, target_max=target_max,
+                rm_min=rm_min, rm_max=rm_max, rm_missing=flag(rm_missing))
 
 
 @app.get("/api/parts")
 def parts_search(q: str = "", project_id: Optional[int] = None, process: str = "", status: str = "", sourcing: str = "",
                  rev: str = "", file_missing: Optional[str] = None, target_min: Optional[float] = None,
-                 target_max: Optional[float] = None, sort: str = "part_code", limit: int = 50, offset: int = 0):
-    return register.search(**_filters(q, project_id, process, status, sourcing, rev, file_missing, target_min, target_max),
-                           sort=sort, limit=limit, offset=offset)
+                 target_max: Optional[float] = None, rm_min: Optional[float] = None, rm_max: Optional[float] = None,
+                 rm_missing: Optional[str] = None, sort: str = "part_code", limit: int = 50, offset: int = 0):
+    return register.search(**_filters(q, project_id, process, status, sourcing, rev, file_missing, target_min, target_max,
+                                      rm_min, rm_max, rm_missing), sort=sort, limit=limit, offset=offset)
 
 
 @app.get("/api/parts/export.xlsx")
 def parts_export(q: str = "", project_id: Optional[int] = None, process: str = "", status: str = "", sourcing: str = "",
                  rev: str = "", file_missing: Optional[str] = None, target_min: Optional[float] = None,
-                 target_max: Optional[float] = None):
+                 target_max: Optional[float] = None, rm_min: Optional[float] = None, rm_max: Optional[float] = None,
+                 rm_missing: Optional[str] = None):
     return _xlsx(register.export_parts_excel(**_filters(q, project_id, process, status, sourcing, rev, file_missing,
-                                                         target_min, target_max)), "part_register.xlsx")
+                                                         target_min, target_max, rm_min, rm_max, rm_missing)),
+                 "part_register.xlsx")
 
 
 @app.get("/api/parts/{part_id}")
@@ -469,6 +485,43 @@ def parts_unlink_insert(part_id: int, link_id: int):
 @app.get("/api/parts/{part_id}/trace")
 def parts_trace(part_id: int, revision_id: Optional[int] = None):
     return register.revision_trace(part_id, revision_id)
+
+
+@app.get("/api/parts/{part_id}/rm-cost")
+def parts_rm_versions(part_id: int):
+    return register.rm_versions(part_id)
+
+
+@app.post("/api/parts/{part_id}/rm-cost")
+def parts_rm_calculate(part_id: int, data: dict):
+    """Calculate (or recalculate with the latest approved rates). With `rm_inputs`, `country` or `costing_month`
+    they are saved on the part first (this is what "Save to part" on the Estimate page sends)."""
+    reason = str(data.get("reason") or "recalculated by you").strip()
+    if any(k in data for k in ("rm_inputs", "country", "costing_month")):
+        res = register.set_rm_inputs(part_id, data.get("rm_inputs"), data.get("country"), data.get("costing_month"), reason)
+        return res
+    return register.compute_rm(part_id, reason) | {"part": register.part_detail(part_id)}
+
+
+@app.get("/api/parts/{part_id}/rm-cost/trace")
+def parts_rm_trace(part_id: int, version: Optional[int] = None):
+    return register.rm_trace(part_id, version)
+
+
+@app.get("/api/parts/{part_id}/rm-cost/export.xlsx")
+def parts_rm_excel(part_id: int, version: Optional[int] = None):
+    return _xlsx(register.export_rm_excel(part_id, version), f"rm_cost_part_{part_id}.xlsx")
+
+
+@app.get("/api/parts/{part_id}/rm-cost/export.pdf")
+def parts_rm_pdf(part_id: int, version: Optional[int] = None):
+    return Response(register.export_rm_pdf(part_id, version), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="rm_cost_part_{part_id}.pdf"'})
+
+
+@app.post("/api/projects/{project_id}/rm-cost/recalculate")
+def projects_rm_recalculate(project_id: int):
+    return register.recalculate_project(project_id)
 
 
 @app.post("/api/parts/{part_id}/revisions")
@@ -546,6 +599,7 @@ def _require_xlsx(file: UploadFile) -> None:
         raise HTTPException(400, "Please upload an Excel .xlsx file.")
 
 
+@app.exception_handler(rm_cost.RMError)
 @app.exception_handler(master_data.MasterDataError)
 @app.exception_handler(mould_db.MouldDbError)
 @app.exception_handler(costing_setup.SetupError)

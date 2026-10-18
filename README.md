@@ -60,9 +60,15 @@ chosen part type, with typical starting values filled in, and recalculates as yo
 | Foundry | Casting yield % (65 %): gating, risers. Melt loss (4 %) | Net ÷ yield % |
 | Sheet metal | Thickness and flat blank L × W (estimated from the 3D model), sheet size (2500 × 1250), gap between blanks (5 mm), sheet edge trim (5 mm) | Sheet weight ÷ blanks per sheet |
 
-All part types also take a **material rate per kg**, a **scrap / regrind / returns value per kg** and a currency (INR by default).
+All part types also use a **material rate per kg** and a **scrap / regrind / returns value per kg**. Both are **approved rates of the
+producing country** from the rate library (categories `material` and `material_scrap`, item = the material name), for the costing month.
+The page has a *Producing country* and a *Costing month* box; the cost is shown in that country's currency (and in INR). Type a
+rate only to replace the library rate; it is then traced as your input. Nothing is hard-coded: the steps below are rows in
+**Master data → Countries, machines & formulas** (scopes `rm_plastic`, `rm_die_casting`, `rm_foundry`, `rm_sheet_metal`) and every
+result on the page is clickable for its formula, inputs and sources. Only the sheet nesting search is done in code.
 
 **Formulas**
+- (These are the default formulas in master data; change a row there and every RM cost follows.)
 - Returns / scrap = gross − net (runners, biscuit, overflows, risers, or the sheet skeleton and punched holes)
 - Material used per part = gross × (1 + process or melt loss %). For sheet metal it equals gross.
 - Material yield = net ÷ material used
@@ -131,7 +137,7 @@ stays unchanged.
 | Sheet | Contents |
 |---|---|
 | Parameters | All Stage B / C defaults and rules per part type (`all` = every type): runner %, yields, melt/process loss, sheet size, working days, shifts, OEE, cycle time, max cavities, plate size, spacing, tool life, `standard_cavities`, plastic cycle rule, and the Stage F tonnage factors (cavity pressure, safety factors) |
-| Materials | Part materials with density, RM rate/kg and scrap value/kg. These are the presets on the estimator, and choosing one fills its rates in Stage B |
+| Materials | Part materials with their density and part type (family). These are the presets on the estimator and the choices on the register. **Material rates are approved rates in the rate library** (see Part RM cost) |
 
 You can also edit this file directly in Excel while the server runs. It is re-read when it changes.
 Write lists like `standard_cavities` as `1, 2, 4, 8`, with spaces, so Excel keeps them as text.
@@ -261,6 +267,53 @@ PostgreSQL later: set `DATABASE_URL`, e.g. `postgresql+psycopg://user:password@s
 
 ---
 
+## Part RM cost on the register (roadmap stage 2)
+
+Every part of the register that you **make** (moulding, die casting, foundry, sheet metal) and that has a material gets a
+**raw-material (RM) cost**. It is the Stage B calculation, run on the part's current revision:
+
+1. **Net weight** = CAD volume × material density (body only for an insert-moulded part; inserts are costed in stage 8).
+2. **Gross weight, returns, material used, yield, RM cost, scrap credit, net RM cost** from the `rm_<family>` formulas in master data.
+3. **Inputs** come from three places, each shown in the trace:
+   - the **rate library**: the approved material rate and scrap value of the part's producing country for the costing month;
+   - **Master data → Parameters** of the family (runner %, yield %, losses, sheet size, gap, edge);
+   - the **3D file**: net weight, sheet thickness and flat blank (estimated; check them against the drawing).
+
+   Type any of them over in the part panel (**RM inputs, country and month**); it is then traced as your input.
+4. The result is stored as a numbered **RM cost version** with its full trace and the rate versions it used.
+
+**When a new version is made.** Automatically, when something the result depends on changes: a new revision, the material, process,
+sourcing, producing country, costing month, your typed inputs, or the inserts. If nothing changed, no version is made. Versions are
+never overwritten.
+
+**New rates do not change old costs.** Approving a newer rate leaves every stored cost as it was. The part then shows *Newer approved
+rates exist* with the old and new value of each rate, and you click **Recalculate with latest rates** (the Dashboard has
+**Recalculate RM** for a whole project). The same notice appears when you change a formula in master data.
+
+**Who gets an RM cost.** Not assemblies, and not bought-out / existing / not-required parts (those show their bought-out price). Machined
+parts say that their RM (bar stock) comes in a later stage. A part without a material, a density, a 3D file or an approved rate shows
+exactly what is missing; the weights are still shown, and nothing wrong is stored.
+
+**Where it appears.**
+- **Parts:** *Net RM cost (INR)* column, filters *RM cost from / to* and *No RM cost yet*, sort by highest RM cost, and in the part
+  panel the full RM block (clickable values, versions, Excel and PDF cost sheet).
+- **Dashboard:** *RM cost* per variant = Σ (total quantity × net RM cost) over the BOM, its share of the target BOM cost, and the
+  number of parts still without an RM cost. It is labelled **raw material only**: process cost comes in stage 8.
+- **Estimate page:** *Open in Estimate* on a part loads its STEP file, material, country and typed inputs without uploading again;
+  **Save to part** stores the inputs you changed and makes a new version.
+- **Exports:** the **RM cost sheet** of a part (Excel with Summary, Steps, Inputs and Rates used sheets, and PDF) and RM columns in the
+  Parts Excel export and in the project PDF.
+
+**Producing country.** Each part has an optional producing country; blank means the default in **Master data → Part register setup
+→ Register settings → default_country** (India). Material rates are seeded for India only (EXAMPLE values). Rates for the other countries
+come in stage 3; until then a part set to another country says which rate is missing.
+
+**Material rates moved.** `rate_per_kg` and `scrap_rate_per_kg` are no longer in the *Materials* sheet. Their values became EXAMPLE
+approved rates for India (month 2026-10, approved as "Example seed"). Set your own on the **Rates** page, or import them from Excel. An older
+`master_data.xlsx` that still has the two columns can be uploaded; the columns are ignored and the upload tells you so.
+
+---
+
 ## Rates page: country rate library, MHR & labour rates
 
 Open **Rates** in the header. Pick the **producing country** and the **costing month**.
@@ -303,7 +356,8 @@ Use *Examples only* in the Rate library to work through them.
 
 ## Full roadmap
 
-Stages A–C are done. Next come five requirement sets, built one PR at a time:
+Stages A–C, the rate library and MHR engine, the part register (stages 1 and 1b) and the RM cost on the register (stage 2) are done.
+Next come five requirement sets, built one PR at a time:
 **A** sheet-metal tools, **B** tool / mould / die cost, **C** country rate library,
 **D** country comparison for parts, and **E** dynamic rate library with monthly update and approval.
 
@@ -421,7 +475,8 @@ The tests use sample parts whose volume, weight, box and projected area can be c
 
 ```
 backend/app/geometry.py       STEP reading and all geometry calculations (CadQuery)
-backend/app/gross_weight.py   Stage B: gross weight, yield, sheet nesting and RM cost
+backend/app/gross_weight.py   Estimate page Stage B: request model around the RM engine
+backend/app/rm_cost.py        RM engine: gross weight, yield, RM cost, scrap credit from master-data formulas, fully traced
 backend/app/capacity.py       Stage C: cavities, tools, tool life, machine hours
 backend/app/master_data.py    Reads, checks and saves master_data.xlsx
 backend/app/mould_db.py       Mould & die tables in the costing database
@@ -434,7 +489,7 @@ backend/app/rates.py          Versioned country rate library with approval
 backend/app/rate_engine.py    MHR and labour rate per country, fully traced
 backend/app/trace.py          Traceable calculations (formula, inputs, sources)
 backend/app/projects_db.py    Project database (SQLAlchemy: SQLite now, PostgreSQL later)
-backend/app/register.py       Part register: projects, variants, parts, revisions, BOM, history, search, dashboard
+backend/app/register.py       Part register: projects, variants, parts, revisions, BOM, history, search, dashboard, RM cost versions
 backend/app/register_setup.py Master data of the register (processes, statuses, sourcing, code pattern, storage folder)
 backend/app/cad_import.py     STEP reading: assembly tree (XCAF), quantities, look-alikes, thumbnails
 backend/app/file_store.py     CAD file storage by checksum
@@ -464,9 +519,13 @@ tests/                        Automated tests (pytest)
 ### API (for later integration with ERP / PLM / dashboards)
 `POST /api/analyze` takes a multipart form with `file` (.step/.stp), `part_type` (`plastic` | `die_casting` | `foundry` | `sheet_metal`) and `density` (g/cm³).
 It returns JSON with `metrics` (all the numbers above) and `mesh` (triangles for the viewer).
-`POST /api/gross-weight` takes JSON with `part_type`, `net_weight_g`, `density_g_cm3`, the rates, and the
-Stage B inputs from the table above (any you leave out use the defaults). It returns gross weight, yield, nesting and
-cost. `GET /api/gross-weight/defaults` lists the default values.
+`POST /api/gross-weight` takes JSON with `part_type`, `net_weight_g`, `density_g_cm3`, `material` and optionally `country`,
+`as_of` and the Stage B inputs from the table above (any you leave out use master data; the material rate comes from the approved
+rate library). It returns gross weight, yield, nesting, cost and the full `nodes` trace. `GET /api/gross-weight/defaults` lists
+the default values and `GET /api/rm/meta` the countries and inputs.
+RM cost of registered parts: `GET /api/parts/{id}/rm-cost` (versions), `POST /api/parts/{id}/rm-cost` (calculate; with `rm_inputs`,
+`country`, `costing_month` it saves them first), `GET /api/parts/{id}/rm-cost/trace?version=`, `…/export.xlsx`, `…/export.pdf`
+and `POST /api/projects/{id}/rm-cost/recalculate`.
 `POST /api/capacity` (Stage C) and `POST /api/mould/estimate` (mould size & BOM) work the same way.
 `GET/PUT /api/master-data` and `GET/PUT /api/mould-db` read and save the data sets.
 `…/download` and `…/upload` move them to and from Excel.

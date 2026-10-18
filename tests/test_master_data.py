@@ -21,10 +21,14 @@ def set_param(data, part_type, name, value):
 
 def test_every_part_type_has_its_defaults():
     for pt in master_data.PART_TYPES:
-        assert client.get("/api/gross-weight/defaults").json()[pt]["currency"] == "INR"
+        assert client.get("/api/gross-weight/defaults").json()[pt]          # master-data defaults of the RM inputs
         assert client.get("/api/capacity/defaults").json()["by_part_type"][pt]["oee_pct"] > 0
     tables = client.get("/api/master-data").json()
     assert {m["part_type"] for m in tables["Materials"]} == set(master_data.PART_TYPES)
+    # the currency of a cost is the producing country's, and the default country is a setting
+    meta = client.get("/api/rm/meta").json()
+    assert meta["default_country"] == "IN"
+    assert {c["code"]: c["currency"] for c in meta["countries"]}["IN"] == "INR"
 
 
 def test_saved_change_is_used_by_calculations(master_data_copy):
@@ -65,7 +69,7 @@ def test_missing_parameter_gives_clear_message():
     data["Parameters"] = [r for r in data["Parameters"] if not (r["part_type"] == "foundry" and r["parameter"] == "yield_pct")]
     client.put("/api/master-data", json=data)
     r = client.post("/api/gross-weight", json={"part_type": "foundry", "net_weight_g": 650, "density_g_cm3": 7.2})
-    assert r.status_code == 422
+    assert r.status_code == 400
     assert "yield_pct" in r.text and "Parameters" in r.text
 
 
