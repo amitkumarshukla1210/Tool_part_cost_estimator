@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
-from backend.app import costing_setup, register, rm_cost
+from backend.app import costing_setup, rates, register, rm_cost
 from backend.app import projects_db as db
 from backend.app.main import app
 
@@ -160,7 +160,8 @@ def test_missing_rate_gives_a_clear_message_and_stores_nothing():
 def test_other_country_uses_its_own_rates_and_currency():
     pid = add_part(project())
     client.put(f"/api/parts/{pid}", json={"country": "CN"})
-    assert "No approved rate" in detail(pid)["rm"]["problem"]              # no CN material rates yet (stage 3)
+    assert detail(pid)["rm"]["problem"] == ""                              # stage 3 seeded CN material rates
+    assert rates.lookup("material", "ABS", "CN", "2026-10")["currency"] == "CNY"
     approver()
     new_rate("ABS", 14, country="CN", month="2026-10")
     new_rate("ABS", 0, category="material_scrap", country="CN", month="2026-10")

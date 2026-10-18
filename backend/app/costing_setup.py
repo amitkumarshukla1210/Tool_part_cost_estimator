@@ -1,6 +1,8 @@
 """Setup tables of the costing database: what the rate engine calculates with.
 
     countries        country code, name and currency
+    country_index    price level of each country against India (part materials, tool steels, processes);
+                     used only to PROPOSE rates for countries that have none yet
     machines         technical data per machine (power, area, life, residual,
                      maintenance); prices and consumables are country rates
     labour_grades    skill levels (operator, toolmaker, ...)
@@ -50,6 +52,14 @@ TABLES = {
         col("code", "Code"),
         col("name", "Country"),
         col("currency", "Currency"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "country_index": {"title": "Country rate index", "unique": ("country",), "columns": [
+        col("country", "Country code"),
+        col("material_index", "Part materials (India = 1)", "number"),
+        col("tool_steel_index", "Tool steels (India = 1)", "number"),
+        col("process_index", "Processes (India = 1)", "number"),
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
     ]},
@@ -133,6 +143,14 @@ def _check(clean: dict) -> None:
         c["currency"] = c["currency"].upper()
         if len(c["currency"]) != 3:
             raise SetupError(f"Countries row {i}: currency must be a 3-letter code such as INR, USD, JPY.")
+    codes = {c["code"] for c in clean["countries"]}
+    for i, r in enumerate(clean["country_index"], start=2):
+        r["country"] = r["country"].upper()
+        if r["country"] not in codes:
+            raise SetupError(f"Country rate index row {i}: country '{r['country']}' is not in Countries.")
+        for k in ("material_index", "tool_steel_index", "process_index"):
+            if r[k] <= 0:
+                raise SetupError(f"Country rate index row {i}: {k} must be more than 0 (India = 1).")
     for i, r in enumerate(clean["formula_inputs"], start=2):
         if r["source"] == "rate" and not (r["category"] and r["item"]):
             raise SetupError(f"Formula inputs row {i}: a rate input needs a rate category and item.")

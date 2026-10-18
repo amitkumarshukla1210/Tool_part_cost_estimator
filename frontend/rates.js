@@ -50,6 +50,7 @@ $("month").addEventListener("change", refresh);
 
 function refresh() {
   if (tab === "mhr") loadMhr();
+  if (tab === "grid") loadGrid();
   if (tab === "library") loadLibrary();
   if (tab === "review") loadReview();
   updateReviewCount();
@@ -111,6 +112,69 @@ document.addEventListener("click", (e) => {
   if (!b || !mhrData) return;
   const all = [...mhrData.machines, ...mhrData.labour];
   window.TracePanel.open(all[Number(b.dataset.row)], b.dataset.node);
+});
+
+// ---------- Material & process rates by country ----------
+let gridData = null;
+async function loadGrid() {
+  $("gridStatus").textContent = "";
+  try {
+    gridData = await api(`/api/rates/grid?as_of=${month()}`);
+  } catch (err) {
+    $("gridStatus").textContent = err.message;
+    $("gridStatus").className = "status error";
+    return;
+  }
+  const keep = $("gridGroup").value;
+  $("gridGroup").innerHTML = gridData.groups.map((g) =>
+    `<option value="${esc(g.category)}" ${g.category === keep ? "selected" : ""}>${esc(g.title)}</option>`).join("");
+  renderGrid();
+}
+
+function renderGrid() {
+  if (!gridData) return;
+  const g = gridData.groups.find((x) => x.category === $("gridGroup").value) || gridData.groups[0];
+  const inr = $("gridShow").value === "inr";
+  const q = $("gridSearch").value.trim().toLowerCase();
+  const cs = gridData.countries;
+  const cells = [];
+  const rows = g.items.filter((it) => !q || it.item.toLowerCase().includes(q));
+  $("gridTable").innerHTML = `<thead><tr><th>Item</th><th>Per</th>${cs.map((c) =>
+    `<th class="num">${esc(c.name)} (${inr ? "INR" : esc(c.currency)})</th>`).join("")}</tr></thead><tbody>` +
+    (rows.map((it) => `<tr><td>${esc(it.item)}</td><td>${esc(it.unit)}</td>${cs.map((c) => {
+      const cell = it.cells[c.code];
+      if (!cell?.rate) return `<td class="calc num">${cell?.open_drafts ? `<span class="trace-var">${cell.open_drafts} in review</span>` : "—"}</td>`;
+      cells.push(cell.rate);
+      const shown = inr ? cell.inr : cell.rate.value;
+      const sub = inr
+        ? (cell.vs_base_pct == null || c.code === gridData.base ? "" : `${cell.vs_base_pct > 0 ? "+" : ""}${num(cell.vs_base_pct, 1)} % vs ${esc(gridData.base)}`)
+        : (cell.inr == null || c.code === gridData.base ? "" : `${num(cell.inr, 2)} INR · ${cell.vs_base_pct > 0 ? "+" : ""}${num(cell.vs_base_pct, 1)} %`);
+      return `<td class="calc num"><button type="button" class="tv" data-gridcell="${cells.length - 1}">${shown == null ? "—" : num(shown)}</button>${
+        cell.rate.is_example ? ' <span class="example-mark" title="Example value">•</span>' : ""}${sub ? `<div class="trace-var">${sub}</div>` : ""}</td>`;
+    }).join("")}</tr>`).join("") || `<tr><td colspan="${cs.length + 2}" class="empty">Nothing matches.</td></tr>`) + "</tbody>";
+  $("gridTable")._cells = cells;
+}
+$("gridGroup").addEventListener("change", renderGrid);
+$("gridShow").addEventListener("change", renderGrid);
+$("gridSearch").addEventListener("input", renderGrid);
+$("gridTable").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-gridcell]");
+  if (b) window.TracePanel.openRate($("gridTable")._cells[Number(b.dataset.gridcell)]);
+});
+$("proposeRates").addEventListener("click", async () => {
+  try {
+    const r = await api("/api/rates/propose-from-index", { method: "POST", body: JSON.stringify({ month: month() }) });
+    const skipped = r.skipped.length ? ` Skipped: ${r.skipped.map((s) => `${s.country} (${s.reason})`).join("; ")}` : "";
+    $("gridStatus").textContent = r.created
+      ? `${r.created} rates saved as drafts. Check and approve them under Rate review.${skipped}`
+      : `Nothing to propose: every country already has a rate for each item.${skipped}`;
+    $("gridStatus").className = "status ok";
+    updateReviewCount();
+    loadGrid();
+  } catch (err) {
+    $("gridStatus").textContent = err.message;
+    $("gridStatus").className = "status error";
+  }
 });
 
 // ---------- Rate library ----------
@@ -330,5 +394,5 @@ async function updateReviewCount() {
   $("country").innerHTML = countries.map((c) => `<option value="${esc(c.code)}">${esc(c.name)} (${esc(c.currency)})</option>`).join("");
   $("month").value = new Date().toISOString().slice(0, 7);
   const start = location.hash.slice(1);
-  showTab(["mhr", "library", "review"].includes(start) ? start : "mhr");
+  showTab(["mhr", "grid", "library", "review"].includes(start) ? start : "mhr");
 })();

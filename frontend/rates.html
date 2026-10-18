@@ -45,6 +45,7 @@
             <input type="month" id="month" /></label>
           <div class="tabs" role="tablist" id="tabs">
             <button role="tab" class="btn btn-outline" data-tab="mhr" aria-selected="true">Machine &amp; labour rates</button>
+            <button role="tab" class="btn btn-outline" data-tab="grid" aria-selected="false">Material &amp; process rates</button>
             <button role="tab" class="btn btn-outline" data-tab="library" aria-selected="false">Rate library</button>
             <button role="tab" class="btn btn-outline" data-tab="review" aria-selected="false">Rate review <span id="reviewCount" class="count"></span></button>
           </div>
@@ -67,6 +68,33 @@
         </div>
         <p class="note">All values in the producing country's currency, with the final rate also in INR.
           Logic: Master data → Countries, machines &amp; formulas → Cost formulas.</p>
+      </div>
+    </section>
+
+    <!-- Material & process rates by country -->
+    <section id="tab-grid" class="tab-pane" hidden>
+      <div class="container">
+        <div class="md-toolbar">
+          <label class="inline">Rates
+            <select id="gridGroup"></select></label>
+          <label class="inline">Show
+            <select id="gridShow">
+              <option value="local">Country currency</option>
+              <option value="inr">INR</option>
+            </select></label>
+          <label class="inline grow">Search
+            <input type="search" id="gridSearch" placeholder="material, steel or process" /></label>
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-outline" id="proposeRates">Propose missing rates from India × index</button>
+        </div>
+        <p id="gridStatus" class="status" role="status"></p>
+        <div class="table-wrap tall">
+          <table class="cost-table" id="gridTable"></table>
+        </div>
+        <p class="note">Approved value for the costing month. Click a value for its source, approval and history; small
+          grey text is the value in INR and the difference against India. Rates without a value are not proposed
+          automatically: use the button (saves Drafts for review, using Master data → Country rate index). EXAMPLE
+          values are marked with •.</p>
       </div>
     </section>
 

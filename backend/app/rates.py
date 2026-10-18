@@ -195,12 +195,12 @@ def keys_used(trace_rates: list[dict]) -> list[dict]:
 
 # ---------- writing (append-only for approved rows) ----------
 
-def create(data: dict, approve: bool = False, origin: str = "manual") -> dict:
+def create(data: dict, approve: bool = False, origin: str = "manual", approver: str = "") -> dict:
     row = _clean(data)
     now = date.today().isoformat()
     row |= {"status": "draft", "approved_by": "", "approved_date": "", "origin": origin, "created_at": now}
     if approve:
-        row |= {"status": "approved", "approved_by": _approver(), "approved_date": now}
+        row |= {"status": "approved", "approved_by": approver or _approver(), "approved_date": now}
     cols = list(row)
     with closing(_connect()) as con, con:
         cur = con.execute(f"INSERT INTO rates ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",

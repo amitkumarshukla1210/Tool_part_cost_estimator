@@ -5,7 +5,8 @@ Holds the data that sizes a mould or die and builds its BOM:
     mould_bases     standard mould base / die holder sizes, plates, weight, cost
     tool_materials  core/cavity and plate steels, density, rate per kg
     bom_elements    BOM lines with formula rules for quantity, cost, weight, hours
-    process_rates   machining and other process rates per hour
+    process_rates   machining and other process rates per hour (India values; other countries are in the rate library)
+    process_unit_rates  heat treatment per kg, wire cut per cm², polishing per cm², painting per m², transport per kg, ...
     sizing_rules    walls and gaps that turn part size into insert size
 
 Every row has an is_example flag: seeded placeholder values are 1 until you
@@ -20,6 +21,8 @@ from .table_set import TableSet, col
 DEFAULT_PATH = costing_db.DEFAULT_PATH
 PART_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal")
 CATEGORIES = ("made", "bought_out", "process")
+# What a process rate is charged per (the unit of the rate in the library is "<currency>/<basis>").
+BASES = ("kg", "cm²", "mm", "m²", "unit")
 
 
 class MouldDbError(ValueError):
@@ -55,7 +58,7 @@ TABLES = {
         col("code", "Steel / material"),
         col("application", "Used for"),
         col("density_g_cm3", "Density (g/cm³)", "number"),
-        col("rate_per_kg", "Rate / kg", "number"),
+        col("rate_per_kg", "Rate / kg (India)", "number"),
         col("hardness", "Hardness"),
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
@@ -76,7 +79,16 @@ TABLES = {
     "process_rates": {"title": "Process rates", "unique": ("code",), "columns": [
         col("code", "Process"),
         col("description", "Description"),
-        col("rate_per_hour", "Rate / hour", "number"),
+        col("rate_per_hour", "Rate / hour (India)", "number"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "process_unit_rates": {"title": "Process rates by unit", "unique": ("code",), "columns": [
+        col("code", "Process"),
+        col("description", "Description"),
+        col("basis", "Charged per", "basis", BASES),
+        col("india_rate", "Rate (India)", "number"),
+        col("min_charge", "Minimum charge per job (India)", "number", required=False),
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
     ]},

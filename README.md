@@ -306,11 +306,49 @@ exactly what is missing; the weights are still shown, and nothing wrong is store
 
 **Producing country.** Each part has an optional producing country; blank means the default in **Master data → Part register setup
 → Register settings → default_country** (India). Material rates are seeded for India only (EXAMPLE values). Rates for the other countries
-come in stage 3; until then a part set to another country says which rate is missing.
+are seeded in stage 3 (see below); a part set to a country with a missing rate says which rate is missing.
 
 **Material rates moved.** `rate_per_kg` and `scrap_rate_per_kg` are no longer in the *Materials* sheet. Their values became EXAMPLE
 approved rates for India (month 2026-10, approved as "Example seed"). Set your own on the **Rates** page, or import them from Excel. An older
 `master_data.xlsx` that still has the two columns can be uploaded; the columns are ignored and the upload tells you so.
+
+---
+
+## Material & process rates by country (roadmap stage 3)
+
+Open **Rates → Material & process rates**. It is a grid of item × country (India, China, Korea, Japan, Taiwan,
+Thailand, Vietnam, Germany, USA) for the costing month. Choose what to see, in the country's currency or in INR:
+
+| Group | Items | Charged per |
+|---|---|---|
+| Part materials, and their scrap value | ABS, PP, PA66 GF30, ADC12, CRCA, SS 304, aluminium, copper, … (22) | kg |
+| Tool steels | P20, 2738, S136, H13, 1.2343 ESR, D2, SKD11, mould base steel, C45 / S50C, BeCu | kg |
+| Processes per hour | CNC milling, EDM, wire cut, grinding, deep-hole drilling, polishing, heat treatment, fitting, design, try-out | hour |
+| Processes per unit | heat treatment and vacuum heat treatment, cutting | kg |
+| | wire cut | cm² or mm of cut |
+| | polishing, mirror polishing, texture / etching, nitriding, hard chrome | cm² |
+| | painting | m² or unit |
+| | transport | kg |
+| Minimum charge per job | for the per-unit processes that have one | job |
+
+- These are **ordinary rates in the rate library**: approved, versioned by month, with source, history and trend.
+  Click a value to see all of that. Small grey text under a value is the INR value and the difference against India.
+- **Master data holds the list, the unit and the India value**; the other countries are derived:
+  - *Tool materials* and *Process rates* (India rate per kg / per hour) and the new *Process rates by unit*
+    (what it is charged per, India rate, minimum charge per job) are in **Master data → Mould & die database**.
+  - *Country rate index* is in **Master data → Countries, machines & formulas**. It gives each country's price level
+    against India (India = 1) for part materials, tool steels and processes.
+- **Proposing rates.** A country's rate = India rate × index ÷ forex (INR per unit of its currency), rounded to 3
+  significant digits. *Propose missing rates from India × index* saves **drafts** for review, only where a country has no
+  version of that rate yet. It never changes an existing rate. If a country has no index row or forex rate, it is skipped
+  and the message says why.
+- **First set-up.** The India values that were in Master data became the first approved version (source "Moved from
+  Master data in Stage 3"). The other 8 countries are approved **EXAMPLE** values from the indices (all marked •).
+  Replace them with supplier quotes or market rates (**New version** in the Rate library, or Excel import as drafts).
+- Because part-material rates now exist for every country, **a part set to another producing country gets its RM cost
+  straight away** (stage 2), in that country's currency and in INR.
+- The mould preview and its BOM still read the India steel and process prices of the Master data tables. They move to
+  the traced country rates with the tool cost engine (stage 4).
 
 ---
 
@@ -356,7 +394,7 @@ Use *Examples only* in the Rate library to work through them.
 
 ## Full roadmap
 
-Stages A–C, the rate library and MHR engine, the part register (stages 1 and 1b) and the RM cost on the register (stage 2) are done.
+Stages A–C, the rate library and MHR engine, the part register (stages 1 and 1b), the RM cost on the register (stage 2) and the material & process rates by country (stage 3) are done.
 Next come five requirement sets, built one PR at a time:
 **A** sheet-metal tools, **B** tool / mould / die cost, **C** country rate library,
 **D** country comparison for parts, and **E** dynamic rate library with monthly update and approval.
@@ -486,6 +524,7 @@ backend/app/costing_db.py     The shared SQLite file (costing_db.sqlite)
 backend/app/table_set.py      Editable table sets: validation, Excel import/export
 backend/app/costing_setup.py  Countries, machines, labour grades, cost formulas, formula inputs
 backend/app/rates.py          Versioned country rate library with approval
+backend/app/country_rates.py  Material & process rates by country: base values, proposals from the country index, grid
 backend/app/rate_engine.py    MHR and labour rate per country, fully traced
 backend/app/trace.py          Traceable calculations (formula, inputs, sources)
 backend/app/projects_db.py    Project database (SQLAlchemy: SQLite now, PostgreSQL later)
