@@ -28,7 +28,8 @@ def run(shape, part_type="plastic", **kw):
 def test_thickness_by_ray_casting():
     plate = cq.Workplane("XY").box(80, 60, 3).val()
     r = run(plate)
-    assert r["results"]["min_wall_mm"] == pytest.approx(3, abs=0.01)  # most faces: through the 3 mm plate
+    assert r["results"]["max_wall_mm"] == pytest.approx(3, abs=0.05)        # most faces: through the 3 mm plate; rims no longer read as 60 to 80 mm
+    assert 1.5 <= r["results"]["min_wall_mm"] <= 3.01                       # the thinnest few % sit next to the holes
     assert r["opening_axis"] == "z"
 
 
@@ -89,3 +90,10 @@ def test_part_simulation_endpoint_and_pdf():
     assert s["machine"]["process"] == "Injection moulding" and "cycle_s" in s["results"] and s["is_example"]
     pdf = client.get(f"/api/parts/{pid}/simulation/report.pdf")
     assert pdf.status_code == 200 and pdf.content[:4] == b"%PDF"
+
+
+def test_a_rim_is_not_a_thick_wall():
+    cup = cq.Workplane("XY").box(100, 60, 30).cut(cq.Workplane("XY").box(95, 55, 30).translate((0, 0, 2.5))).val()   # open box, 2.5 mm walls, 30 mm high
+    r = run(cup, wall_mm=2.5)
+    assert r["results"]["max_wall_mm"] < 4 and r["maps"]["sink_risk_cm2"] == pytest.approx(0, abs=0.5)
+    assert r["results"]["cycle_s"] < 120                                   # the rim top faces used to read 30 mm and give a cycle of 1,700 s

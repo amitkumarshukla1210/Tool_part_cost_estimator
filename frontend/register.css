@@ -123,3 +123,6 @@ details.bop fieldset { margin-bottom: 10px; }
 .ex-table .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .ex-table .chip { font-size: 11px; padding: 1px 6px; border-radius: 10px; background: var(--grey-light); color: var(--ink); }
 .ex-table .done { color: var(--grey); }
+
+/* The cost tables in the part panel must show their last row (the result); the panel itself scrolls. */
+.part-panel .table-wrap { max-height: none; }

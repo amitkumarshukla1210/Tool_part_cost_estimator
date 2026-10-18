@@ -70,6 +70,31 @@ def thickness(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, offset: float) ->
     return out
 
 
+def local_thickness(tri: np.ndarray, area: np.ndarray, n: np.ndarray, idx: np.ndarray, ray: np.ndarray, offset: float, samples: int = 20000) -> np.ndarray:
+    """Thickness at each face: the ray length, cut down to the section the midpoint really sits in.
+
+    A ray along a rim or boss end runs the whole length of the wall (30 mm for a 2.5 mm wall). The point halfway along the ray is
+    then close to the wall's side faces, so local thickness = min(ray, 2 × distance from the midpoint to the nearest surface),
+    the diameter of the sphere that fits at the midpoint. Surface distance is measured to evenly spread sample points.
+    """
+    rng = np.random.default_rng(0)
+    pick = rng.choice(len(tri), size=samples, p=area / area.sum())
+    r1, r2 = rng.random((2, samples))
+    flip = r1 + r2 > 1
+    r1, r2 = np.where(flip, 1 - r1, r1), np.where(flip, 1 - r2, r2)
+    t = tri[pick]
+    pts = t[:, 0] + r1[:, None] * (t[:, 1] - t[:, 0]) + r2[:, None] * (t[:, 2] - t[:, 0])
+    out = ray.copy()
+    ok = np.where(~np.isnan(ray))[0]
+    for s0 in range(0, len(ok), 256):
+        k = ok[s0:s0 + 256]
+        c = tri[idx[k]].mean(axis=1)
+        mid = c - n[idx[k]] * (offset + ray[k] / 2)[:, None]
+        d2 = ((mid[:, None, :] - pts[None]) ** 2).sum(-1).min(axis=1)
+        out[k] = np.minimum(ray[k], 2 * np.sqrt(d2))
+    return out
+
+
 def _machine(part_type: str, force_t: float) -> dict:
     process = master_data.parameters(part_type).get("trial_machine_process")
     ms = [m for m in costing_setup.tables()["machines"] if m["process"] == process]
@@ -96,7 +121,7 @@ def run(vertices, triangles, part_type: str, facts: dict, projected_area_mm2: di
     step = max(1, math.ceil(len(tri) / p["undercut_max_faces"]))
     idx = np.arange(0, len(tri), step)
     th = np.full(len(tri), np.nan)
-    th[idx] = thickness(tri, n, idx, p["undercut_offset_mm"])
+    th[idx] = local_thickness(tri, area, n, idx, thickness(tri, n, idx, p["undercut_offset_mm"]), p["undercut_offset_mm"])
     meas = th[~np.isnan(th)]
     wall = facts.get("wall_mm") or (float(np.median(meas)) if len(meas) else 0)
     env = sample_env(part_type) | {k: 0.0 for k in SIM_VARS}
@@ -125,11 +150,12 @@ def run(vertices, triangles, part_type: str, facts: dict, projected_area_mm2: di
             "undercut_cm2": c["undercut_area_cm2"], "surface_cm2": float(area.sum()) / 100}
     machine = _machine(part_type, env["clamp_t"])
     corr = []
-    if maps["draft_low_cm2"] > 0:
+    floor = env.get("report_min_area_cm2", 0.1)           # smaller areas are mesh noise, not a correction (Simulation rules)
+    if maps["draft_low_cm2"] > floor:
         corr.append(f"Add draft of at least {env['min_draft_deg']:g}° on {maps['draft_low_cm2']:.1f} cm² of walls along the opening direction {c['opening_axis'].upper()}.")
-    if maps["sink_risk_cm2"] > 0:
+    if maps["sink_risk_cm2"] > floor:
         corr.append(f"Core out thick sections: {maps['sink_risk_cm2']:.1f} cm² is thicker than {env['sink_ratio']:g} × the {wall:.2f} mm wall (sink / porosity risk).")
-    if maps["thin_cm2"] > 0:
+    if maps["thin_cm2"] > floor:
         corr.append(f"Check thin walls: {maps['thin_cm2']:.1f} cm² is thinner than {env['thin_ratio']:g} × the {wall:.2f} mm wall (short-shot risk).")
     if c["slides"] or c["lifters"]:
         corr.append(f"Undercuts ({maps['undercut_cm2']:.1f} cm²) need {c['slides']} slide(s) / {c['lifters']} lifter(s), or a design change.")

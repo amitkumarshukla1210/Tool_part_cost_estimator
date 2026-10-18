@@ -136,3 +136,6 @@ button.tv:hover, button.tv:focus-visible { color: var(--brand); outline: none; b
   .trace-panel { width: 100vw; }
 }
 .trace-body .cost-table tr.subtotal td { font-weight: 800; }
+
+/* Machine and labour rate tables: show every row, the page scrolls. */
+#tab-mhr .table-wrap { max-height: none; }
