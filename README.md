@@ -554,6 +554,31 @@ Open **Harness & PCB** in the header and upload a file:
 The XML reader follows the KBL / VEC structure by element names and was built and tested with small hand-made samples, not with your real exports:
 check the first real file and tell me what differs. Costing is in the next section.
 
+## Server mode (roadmap stage 17)
+
+By default the app runs on one PC without a login. For a team, run it once on a server:
+
+```
+pip install -r requirements.txt -r requirements-server.txt        # psycopg is only needed for PostgreSQL
+export DTC_MODE=server
+export DTC_ADMIN_PASSWORD='a long first password'                 # creates the first user "admin" when there are no users yet
+export DATABASE_URL='postgresql+psycopg://user:password@dbhost/dtc'
+export DTC_STORAGE_FOLDER=/srv/dtc-files                          # shared folder for CAD files and thumbnails (or set it in Master data → Register settings)
+export DTC_COOKIE_SECURE=1                                        # when served over HTTPS
+uvicorn backend.app.main:app --host 0.0.0.0 --port 8000           # put an HTTPS reverse proxy (nginx, Caddy, IIS) in front
+```
+
+- **Logins and roles**: everybody logs in; the admin adds users on **Users** (user name, role, password of 10+ characters, active). **viewer** reads; **engineer** changes projects, parts, costs and
+  master data; **approver** also approves rates; **admin** also manages users. The last admin cannot be removed. Passwords are stored as scrypt hashes, sessions expire after 12 hours,
+  changing a password or deactivating a user ends their sessions.
+- **Who did what**: every history record shows the logged-in user, and an approved rate shows the approver who clicked, never a typed name.
+- **Move from the local PC**: `python -m backend.app.server_tools migrate-projects --from sqlite:///data/projects.sqlite --to postgresql+psycopg://...` copies all project data into an empty
+  database (ids are kept); copy the `storage/` folder to the shared folder; `server_tools create-user NAME --role ...` and `server_tools check` help with set-up.
+- **Not changed**: the costing database (rates, formulas, machines, mould and sheet tables, `master_data/costing_db.sqlite`) and `master_data.xlsx` stay files on the server (one web process, a few
+  dozen users is fine; back them up with the database). `GET /api/server/health` reports mode, database kind and whether the storage folder is writable.
+
+PostgreSQL was **not** available where this stage was built: the migration and the app were tested on SQLite only. Try the migration on a copy first.
+
 ## Scanned drawings and DWG (roadmap stage 16)
 
 The Harness & PCB page also reads:

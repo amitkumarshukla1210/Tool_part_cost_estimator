@@ -1,0 +1,2 @@
+# Extra packages for server mode with PostgreSQL (pip install -r requirements.txt -r requirements-server.txt)
+psycopg[binary]>=3.1

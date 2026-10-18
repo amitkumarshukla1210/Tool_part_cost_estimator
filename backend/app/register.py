@@ -39,7 +39,8 @@ class RegisterError(ValueError):
 
 
 def user() -> str:
-    return rates.settings().get("approver_name") or "local user"
+    from . import auth
+    return auth.username() or rates.settings().get("approver_name") or "local user"
 
 
 def _log(conn, entity, entity_id, action, detail=None):

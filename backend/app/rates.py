@@ -200,7 +200,7 @@ def create(data: dict, approve: bool = False, origin: str = "manual", approver: 
     now = date.today().isoformat()
     row |= {"status": "draft", "approved_by": "", "approved_date": "", "origin": origin, "created_at": now}
     if approve:
-        row |= {"status": "approved", "approved_by": approver or _approver(), "approved_date": now}
+        row |= {"status": "approved", "approved_by": _approver() if _server() else approver or _approver(), "approved_date": now}
     cols = list(row)
     with closing(_connect()) as con, con:
         cur = con.execute(f"INSERT INTO rates ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
@@ -222,7 +222,16 @@ def update(rate_id: int, data: dict, approve: bool = False) -> dict:
     return get(rate_id)
 
 
+def _server() -> bool:
+    from . import auth
+    return auth.server_mode()
+
+
 def _approver() -> str:
+    from . import auth
+    if auth.server_mode():                       # server mode: the logged-in approver, never a typed name
+        auth.require("approver")
+        return auth.username()
     name = settings()["approver_name"].strip()
     if not name:
         raise RateError("Set your name for approvals first (Rates → Rate review → Approver name).")
