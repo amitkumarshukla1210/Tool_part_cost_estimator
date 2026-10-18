@@ -1,4 +1,4 @@
-"""Design to Cost: web server for the Part Cost Estimator module (Stages A to C, rate library and MHR).
+"""Design to Cost: web server for the Part Cost Estimator module (Stages A to C, rate library and MHR, part register).
 
 Run from the repository root:
     uvicorn backend.app.main:app --reload
@@ -18,13 +18,15 @@ from pydantic import BaseModel
 from typing import Optional
 
 from .geometry import PART_TYPES, analyze, blank_estimate, load_step, sheet_thickness, tessellate
-from . import capacity, costing_setup, gross_weight, master_data, mould, mould_db, rate_engine, rates
+from . import (capacity, costing_setup, file_store, gross_weight, master_data, mould, mould_db, rate_engine, rates,
+               register, register_setup)
+from . import projects_db
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 THEME_DIR = Path(__file__).resolve().parents[2] / "theme"
 MAX_UPLOAD_MB = 100
 
-app = FastAPI(title="Design to Cost — Part Cost Estimator", version="0.4.0 (rate library & MHR)")
+app = FastAPI(title="Design to Cost — Part Cost Estimator", version="0.5.0 (part register)")
 
 
 @app.get("/api/part-types")
@@ -314,6 +316,201 @@ def labour_one(grade: str, country: str = "IN", as_of: Optional[str] = None):
     return rate_engine.labour_rate(grade, country.upper(), as_of)
 
 
+# ---------- part register: setup ----------
+
+@app.get("/api/register-setup/schema")
+def register_setup_schema():
+    return register_setup.schema()
+
+
+@app.get("/api/register-setup")
+def register_setup_get():
+    return register_setup.tables()
+
+
+@app.put("/api/register-setup")
+def register_setup_put(data: dict):
+    register_setup.write(data)
+    return register_setup.tables()
+
+
+@app.get("/api/register-setup/download")
+def register_setup_download():
+    return _xlsx(register_setup.to_excel(), "part_register_setup.xlsx")
+
+
+@app.post("/api/register-setup/upload")
+async def register_setup_upload(file: UploadFile = File(...)):
+    _require_xlsx(file)
+    register_setup.from_excel(await file.read())
+    return register_setup.tables()
+
+
+@app.get("/api/register-meta")
+def register_meta():
+    """Choices for the register pages, all from master data."""
+    return {
+        "processes": list(register_setup.processes().values()),
+        "statuses": register_setup.statuses(),
+        "sourcing": list(register_setup.sourcing().values()),
+        "materials": [m["material"] for m in master_data.tables()["Materials"]],
+        "part_code_pattern": register_setup.settings()["part_code_pattern"],
+    }
+
+
+# ---------- part register: projects & variants ----------
+
+@app.get("/api/projects")
+def projects_list():
+    return register.list_projects()
+
+
+@app.post("/api/projects")
+def projects_create(data: dict):
+    return register.create_project(data)
+
+
+@app.get("/api/projects/{project_id}")
+def projects_get(project_id: int):
+    return register.get_project(project_id)
+
+
+@app.put("/api/projects/{project_id}")
+def projects_update(project_id: int, data: dict):
+    return register.update_project(project_id, data)
+
+
+@app.post("/api/projects/{project_id}/variants")
+def variants_create(project_id: int, data: dict):
+    return register.create_variant(project_id, data)
+
+
+@app.put("/api/variants/{variant_id}")
+def variants_update(variant_id: int, data: dict):
+    return register.update_variant(variant_id, data)
+
+
+@app.get("/api/variants/{variant_id}/bom")
+def variants_bom(variant_id: int):
+    return register.variant_bom(variant_id)
+
+
+@app.get("/api/projects/{project_id}/dashboard")
+def projects_dashboard(project_id: int):
+    return register.dashboard(project_id)
+
+
+@app.get("/api/projects/{project_id}/dashboard.pdf")
+def projects_dashboard_pdf(project_id: int):
+    code = register.get_project(project_id)["code"]
+    return Response(register.export_dashboard_pdf(project_id), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{code}_project_summary.pdf"'})
+
+
+# ---------- part register: parts ----------
+
+def _filters(q, project_id, process, status, sourcing, rev, file_missing, target_min, target_max):
+    fm = None if file_missing in (None, "") else file_missing.lower() in ("1", "true", "yes")
+    return dict(q=q, project_id=project_id, process=process, status=status, sourcing=sourcing, rev=rev,
+                file_missing=fm, target_min=target_min, target_max=target_max)
+
+
+@app.get("/api/parts")
+def parts_search(q: str = "", project_id: Optional[int] = None, process: str = "", status: str = "", sourcing: str = "",
+                 rev: str = "", file_missing: Optional[str] = None, target_min: Optional[float] = None,
+                 target_max: Optional[float] = None, sort: str = "part_code", limit: int = 50, offset: int = 0):
+    return register.search(**_filters(q, project_id, process, status, sourcing, rev, file_missing, target_min, target_max),
+                           sort=sort, limit=limit, offset=offset)
+
+
+@app.get("/api/parts/export.xlsx")
+def parts_export(q: str = "", project_id: Optional[int] = None, process: str = "", status: str = "", sourcing: str = "",
+                 rev: str = "", file_missing: Optional[str] = None, target_min: Optional[float] = None,
+                 target_max: Optional[float] = None):
+    return _xlsx(register.export_parts_excel(**_filters(q, project_id, process, status, sourcing, rev, file_missing,
+                                                         target_min, target_max)), "part_register.xlsx")
+
+
+@app.get("/api/parts/{part_id}")
+def parts_get(part_id: int):
+    return register.part_detail(part_id)
+
+
+@app.put("/api/parts/{part_id}")
+def parts_update(part_id: int, data: dict):
+    return register.update_part(part_id, data)
+
+
+@app.get("/api/parts/{part_id}/trace")
+def parts_trace(part_id: int, revision_id: Optional[int] = None):
+    return register.revision_trace(part_id, revision_id)
+
+
+@app.post("/api/parts/{part_id}/revisions")
+async def parts_new_revision(part_id: int, file: UploadFile = File(...), rev: str = Form(""), change_note: str = Form("")):
+    if not (file.filename or "").lower().endswith((".step", ".stp")):
+        raise HTTPException(400, "Please upload a .step or .stp file.")
+    return register.new_revision_from_upload(part_id, await file.read(), file.filename, rev, change_note)
+
+
+@app.get("/api/files/{file_id}")
+def files_get(file_id: int):
+    from sqlalchemy import select
+    with projects_db.engine().connect() as conn:
+        row = conn.execute(select(projects_db.files).where(projects_db.files.c.id == file_id)).mappings().first()
+    if not row:
+        raise HTTPException(404, "File not found.")
+    path = file_store.path_of(dict(row))
+    if not path.exists():
+        raise HTTPException(404, f"The file is registered but missing from the storage folder ({row['stored_path']}).")
+    inline = row["kind"] == "thumbnail"
+    return FileResponse(path, filename=None if inline else row["original_name"],
+                        media_type="image/png" if inline else "application/octet-stream")
+
+
+# ---------- part register: import ----------
+
+class CommitIn(BaseModel):
+    project_id: int
+    variant_id: Optional[int] = None
+    rev: str = ""
+    change_note: str = ""
+    items: dict = {}
+
+
+@app.post("/api/import/step")
+async def import_step(file: UploadFile = File(...)):
+    if not (file.filename or "").lower().endswith((".step", ".stp")):
+        raise HTTPException(400, "Please upload a .step or .stp file.")
+    data = await file.read()
+    if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
+        raise HTTPException(413, f"File is larger than {MAX_UPLOAD_MB} MB.")
+    return register.import_preview(data, file.filename)
+
+
+@app.get("/api/import/{token}/thumb/{key}")
+def import_thumb(token: str, key: str):
+    return FileResponse(register.import_thumbnail(token, key), media_type="image/png")
+
+
+@app.post("/api/import/{token}/commit")
+def import_commit(token: str, inp: CommitIn):
+    return register.import_commit(token, inp.project_id, inp.variant_id, inp.items, inp.rev, inp.change_note)
+
+
+@app.get("/api/import/template.xlsx")
+def import_template():
+    return _xlsx(register.excel_template(), "part_register_template.xlsx")
+
+
+@app.post("/api/import/excel")
+async def import_excel(project_id: int = Form(...), excel: UploadFile = File(...),
+                       files: list[UploadFile] = File(default=[])):
+    _require_xlsx(excel)
+    uploads = [(f.filename or "", await f.read()) for f in files if f.filename]
+    return register.bulk_upload(project_id, await excel.read(), uploads)
+
+
 def _xlsx(content: bytes, name: str) -> Response:
     return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
@@ -329,6 +526,8 @@ def _require_xlsx(file: UploadFile) -> None:
 @app.exception_handler(costing_setup.SetupError)
 @app.exception_handler(rates.RateError)
 @app.exception_handler(rate_engine.EngineError)
+@app.exception_handler(register.RegisterError)
+@app.exception_handler(register_setup.RegisterSetupError)
 def master_data_error(request, exc):
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
@@ -346,6 +545,21 @@ def master_data_page():
 @app.get("/rates")
 def rates_page():
     return FileResponse(FRONTEND_DIR / "rates.html")
+
+
+@app.get("/dashboard")
+def dashboard_page():
+    return FileResponse(FRONTEND_DIR / "dashboard.html")
+
+
+@app.get("/parts")
+def parts_page():
+    return FileResponse(FRONTEND_DIR / "parts.html")
+
+
+@app.get("/import")
+def import_page():
+    return FileResponse(FRONTEND_DIR / "import.html")
 
 
 @app.get("/help")

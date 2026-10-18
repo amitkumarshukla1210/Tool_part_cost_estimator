@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design to Cost — Part Cost Estimator · Dashboard</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/register.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img src="/theme/logo.png" alt="Design to Cost logo" />
+        <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/dashboard" class="active" aria-current="page">Dashboard</a></li>
+          <li><a href="/parts">Parts</a></li>
+          <li><a href="/import">Import</a></li>
+          <li><a href="/">Estimate</a></li>
+          <li><a href="/rates">Rates</a></li>
+          <li><a href="/master-data">Master data</a></li>
+          <li><a href="/help">Help</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="bg-grey page-head">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Project leader view</p>
+          <h2>Project dashboard</h2>
+          <p>Status of every part, BOM cost and CAPEX against target, per project and variant.</p>
+        </div>
+        <div class="card toolbar">
+          <label>Project <select id="project"></select></label>
+          <button type="button" class="btn btn-outline" id="newProject">+ New project</button>
+          <button type="button" class="btn btn-outline" id="editProject">Edit project</button>
+          <button type="button" class="btn btn-outline" id="newVariant">+ Variant</button>
+          <span class="spacer"></span>
+          <a class="btn btn-outline" id="openParts" href="/parts">Open parts</a>
+          <a class="btn btn-outline" id="importLink" href="/import">Import parts</a>
+          <a class="btn btn-outline" id="xlsx">Export Excel</a>
+          <a class="btn btn-primary" id="pdf">Export PDF</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="page-body">
+      <div class="container">
+        <p id="status" class="status" role="status"></p>
+        <div id="empty" class="card" hidden>
+          <h3>No project yet</h3>
+          <p class="note">Create a project, add a variant (e.g. STD), then import its parts from a 3D assembly, single parts or the Excel template.</p>
+          <button type="button" class="btn btn-primary" id="emptyNew">+ Create your first project</button>
+        </div>
+        <div id="content" hidden>
+          <div class="tiles" id="tiles"></div>
+          <p class="warn" id="notCosted"></p>
+
+          <h3 class="block-title">Variants · BOM cost vs target</h3>
+          <div class="table-wrap"><table class="cost-table" id="variants"></table></div>
+          <div id="bomBlock" hidden>
+            <h3 class="block-title" id="bomTitle">BOM</h3>
+            <div class="table-wrap"><table class="cost-table" id="bom"></table></div>
+          </div>
+
+          <div class="two-col">
+            <div>
+              <h3 class="block-title">Status of parts</h3>
+              <div class="table-wrap"><table class="cost-table" id="byStatus"></table></div>
+            </div>
+            <div>
+              <h3 class="block-title">Process</h3>
+              <div class="table-wrap"><table class="cost-table" id="byProcess"></table></div>
+              <h3 class="block-title">Sourcing</h3>
+              <div class="table-wrap"><table class="cost-table" id="bySourcing"></table></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <dialog id="projectDialog" class="card">
+      <form method="dialog" id="projectForm" class="grid2">
+        <h3 class="span2" id="projectTitle">New project</h3>
+        <label>Project code <input name="code" required maxlength="40" placeholder="e.g. SCT26" /></label>
+        <label>Project name <input name="name" required /></label>
+        <label>Customer <input name="customer" /></label>
+        <label>CAPEX budget (INR) <input type="number" name="capex_budget_inr" min="0" step="1000" /></label>
+        <label class="span2">Description <input name="description" /></label>
+        <p class="status error span2" id="projectStatus"></p>
+        <div class="span2 dialog-actions">
+          <button type="button" class="btn btn-outline" data-close>Cancel</button>
+          <button type="submit" class="btn btn-primary" value="save">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="variantDialog" class="card">
+      <form method="dialog" id="variantForm" class="grid2">
+        <h3 class="span2" id="variantTitle">New variant</h3>
+        <label>Variant code <input name="code" required maxlength="40" placeholder="e.g. STD" /></label>
+        <label>Variant name <input name="name" required placeholder="e.g. Standard" /></label>
+        <label>Target BOM cost (INR) <input type="number" name="target_bom_cost_inr" min="0" step="any" /></label>
+        <label>Annual volume <input type="number" name="annual_volume" min="0" step="1" /></label>
+        <label class="span2">Notes <input name="notes" /></label>
+        <p class="status error span2" id="variantStatus"></p>
+        <div class="span2 dialog-actions">
+          <button type="button" class="btn btn-outline" data-close>Cancel</button>
+          <button type="submit" class="btn btn-primary" value="save">Save</button>
+        </div>
+      </form>
+    </dialog>
+  </main>
+
+  <footer>
+    <div class="container"><p class="footnote">© Design to Cost</p></div>
+  </footer>
+  <script src="/static/common.js"></script>
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>

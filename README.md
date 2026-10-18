@@ -178,6 +178,57 @@ big changes.
 
 ---
 
+## Part register & project dashboard (roadmap stage 1)
+
+**Dashboard → + New project** (code, name, customer, CAPEX budget) and **+ Variant** (e.g. STD, with target BOM
+cost and annual volume). Then bring in the parts on **Import**:
+
+- **3D file (part or assembly):** upload a STEP file. An assembly is split into its parts automatically:
+  - The tree shows every part with a thumbnail, its quantity in the parent and its total quantity.
+  - Repeated parts (4 identical pins) become **one part with quantity 4**.
+  - Parts that only look identical (same volume, area and size, different name) are **flagged as look-alikes** and
+    kept separate, for you to decide.
+  - Tick the parts to register. For each one, set the code (blank = generated from the pattern in master data, e.g.
+    `SCT26-0001`), name, material, process and sourcing (Make / Bought-out / Existing / Not required).
+  - The process is **suggested from the geometry** by rules in master data. These are a proposal, so please check them.
+
+  Each part's own STEP file and thumbnail are stored, and the BOM tree is added to the chosen variant.
+  Re-importing an unchanged assembly creates no new revisions.
+- **Excel bulk upload:** download the template, fill one row per part (code, name, rev, file name, material,
+  process, sourcing, volume, programme life, target cost, variant, parent part, quantity, what changed), then upload
+  it together with the STEP files or a ZIP. Files are matched by name.
+  - Rows without a file are registered as **File missing**.
+  - Every row is checked first, so nothing is saved if any row is wrong. The error names the row.
+
+**Parts** is the register: search by code, name or material and filter by project, process, status, sourcing, rev,
+target cost range or *file missing*, with paging and Excel export. Click a part to:
+- edit its details (every change goes into its **history**: old → new, who, when)
+- see the current revision's geometry. **Volume**, **net weight** (volume × material density from master data) and
+  **projected area** are clickable for their trace.
+- download each revision's STEP file
+- **compare two revisions side by side**
+- upload a **new revision** (old revisions are kept)
+- see where the part is used
+
+**Dashboard** shows, per project:
+- parts, file missing, open corrections, CAPEX budget and targets
+- variants with target BOM cost
+- the BOM tree
+- parts by status, process and sourcing
+- **Export PDF** (project summary) and **Export Excel** (part register)
+
+Costs appear on the dashboard from the costing stages.
+
+**Where your data lives:**
+- `data/projects.sqlite` holds projects, parts, revisions, BOM and history.
+- The storage folder holds the CAD files and thumbnails, each stored once by checksum. It is `storage/` by default;
+  change `storage_folder` in Master data → Part register setup → Register settings, e.g. to a network drive.
+
+Both are **your company data**: they are not committed to GitHub, so back them up. The project tables also run on
+PostgreSQL later: set `DATABASE_URL`, e.g. `postgresql+psycopg://user:password@server/dtc`.
+
+---
+
 ## Rates page: country rate library, MHR & labour rates
 
 Open **Rates** in the header. Pick the **producing country** and the **costing month**.
@@ -247,17 +298,12 @@ Stages A–C are done. Next come five requirement sets, built one PR at a time:
 | Your own edits | Saved as a new version (old values never overwritten). By default it is a Draft for review; **Save & approve** approves it in one step. |
 | Data home | **Costing database** (SQLite, `master_data/costing_db.sqlite`) with Excel import/export and editing in the app. |
 
-### PR plan
-| PR | Contents | Requirements |
-|---|---|---|
-| **4 (this)** | This roadmap. **Versioned country rate library**: history, Draft → Reviewed → Approved, Rate review page, approved-only lookup. Countries and forex. Machines with price per country. **MHR & labour-rate engine** with all formulas in data. **Traceability panel.** | B3, B5, B6, C1–C3, C5, E1, E4–E6 |
-| 5 | Material rates by grade and process rates by country (₹/kg, ₹/h, ₹/mm, ₹/cm², ₹/m², per unit). **Tool cost engine:** process list (raw-material cutting, CNC, wire cut/EDM, grinding, polishing, heat treatment, surface treatment, assembly, try-out); process time from logic (volume removed, area, feature count…); machine, MHR, labour skill and operators per process; trial, design, overhead & profit, packing & transport, warranty/spares. The mould BOM becomes fully traced. **Tool cost sheet** exported to Excel and PDF. | B1, B2, B4, B7, C2 |
-| 6 | **Country comparison** for tools and parts side by side: RM, process, tool amortisation, overhead, rejection, profit, packing. Ex-works in local currency, USD and INR. **Landed cost in India:** freight, insurance, BCD, SWS, IGST (credit shown separately), clearance & port charges, inland transport. Duty per HS code and country incl. FTA rates. Forex sensitivity (e.g. USD ±5 %). Stacked bar chart with the cheapest country highlighted. Excel/PDF export. Traceability added to Stages A–C. | C4, D1–D7 |
-| 7 | **Monthly auto-update:** a GitHub Actions job on the 1st of each month plus a **Fetch now** button. It uses only free, official, legally usable sources (list below). Index-based proposals for rates with no free source: new = last approved × (index now ÷ index at approval), with the formula editable. New values arrive as Drafts with change % and a threshold highlight. A failed fetch keeps the last approved value and shows a warning. Trend chart per rate. | E1–E3, E7 |
-| 8 | **Sheet-metal tools:** multi-stage or progressive. Operation sequence auto-suggested from part features (editable). Per stage: weight incl. scrap removed, cutting / forming / drawing force and tonnage (formula shown), press selected from your machine list. Drawings: blank / flat pattern as DXF + dimensioned PDF, per-stage CAD upload or simplified sketch, and one PDF pack. Progressive strip layout: pitch, strip width, bridge/web, stations, pilots, utilisation %, as DXF + PDF. | A1–A5 |
-| later | Stage D product BOM (multi-part assemblies) and the full should-cost report and dashboard. | |
+### Stage plan
+The full architecture, the honest "how automatic is each feature" table and the stage-by-stage plan (one PR per
+stage) are in **[ROADMAP.md](ROADMAP.md)**. The two briefs it is built from are kept in `docs/`
+(`MASTER_FLOW_PROMPT.txt`, `ROADMAP_PROMPT.txt`) so every future session works from the same requirements.
 
-### Free official data sources planned for the monthly update (PR 7)
+### Free official data sources planned for the monthly update (roadmap stage 12)
 Only sources that publish free data for reuse are used, and nothing is scraped from sites that forbid it. Each licence
 is checked again before its fetcher is switched on. Until then every rate stays a manually approved value.
 
@@ -355,6 +401,12 @@ backend/app/costing_setup.py  Countries, machines, labour grades, cost formulas,
 backend/app/rates.py          Versioned country rate library with approval
 backend/app/rate_engine.py    MHR and labour rate per country, fully traced
 backend/app/trace.py          Traceable calculations (formula, inputs, sources)
+backend/app/projects_db.py    Project database (SQLAlchemy: SQLite now, PostgreSQL later)
+backend/app/register.py       Part register: projects, variants, parts, revisions, BOM, history, search, dashboard
+backend/app/register_setup.py Master data of the register (processes, statuses, sourcing, code pattern, storage folder)
+backend/app/cad_import.py     STEP reading: assembly tree (XCAF), quantities, look-alikes, thumbnails
+backend/app/file_store.py     CAD file storage by checksum
+backend/app/pdf_report.py     PDF exports in the Design to Cost style
 backend/app/main.py           FastAPI web server: all /api endpoints + serves the pages
 master_data/                  master_data.xlsx and costing_db.sqlite (your editable data)
 frontend/index.html           Estimator page (form + results + 3D viewer)
@@ -362,11 +414,18 @@ frontend/app.js               Estimator logic and three.js viewer
 frontend/master-data.*        Master data page (editor for both data sets)
 frontend/help.*               Help page
 frontend/rates.*              Rates page (MHR & labour, rate library, rate review)
+frontend/dashboard.*          Project dashboard
+frontend/parts.*              Part register (search, part details, revisions, history)
+frontend/import.*             Import: STEP part / assembly split, Excel bulk upload
+frontend/common.js, register.css  Shared helpers and layout of the register pages
 frontend/trace.js             Traceability panel used by every page
 theme/                        Design to Cost theme: dtc-theme.css, logo.png, THEME.md
+docs/                         The requirement briefs (MASTER_FLOW_PROMPT.txt, ROADMAP_PROMPT.txt)
+ROADMAP.md                    Architecture, automation levels and stage plan
+data/, storage/               Your project data and CAD files (created on first use, not in git)
 frontend/style.css            Page styling
 frontend/vendor/three/        three.js r160 (MIT licence), bundled for offline use
-samples/                      Sample STEP parts + the script that makes them
+samples/                      Sample STEP parts and an assembly (demo_assembly.step) + the script that makes them
 tests/                        Automated tests (pytest)
 ```
 

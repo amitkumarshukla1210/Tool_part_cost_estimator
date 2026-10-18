@@ -35,7 +35,27 @@ def sheet_metal_bracket():
     )
 
 
+def demo_assembly():
+    """Base plate + bracket group (2 identical brackets) + 4 identical pins + 1 look-alike pin."""
+    plate = cq.Workplane("XY").box(200, 120, 10)
+    bracket = (cq.Workplane("XZ").polyline([(0, 0), (40, 0), (40, 4), (4, 4), (4, 30), (0, 30)])
+               .close().extrude(-25))
+    pin = cq.Workplane("XY").circle(4).extrude(20)
+    group = cq.Assembly(name="bracket_group")
+    group.add(bracket, name="bracket", loc=cq.Location((0, 0, 5)))
+    group.add(bracket, name="bracket_2", loc=cq.Location((60, 0, 5)))
+    assy = cq.Assembly(name="demo_assembly")
+    assy.add(plate, name="base_plate")
+    assy.add(group, name="bracket_group", loc=cq.Location((-80, -20, 0)))
+    for i, (x, y) in enumerate([(-90, -50), (90, -50), (-90, 50), (90, 50)]):
+        assy.add(pin, name=f"pin_{i + 1}", loc=cq.Location((x, y, 5)))
+    assy.add(cq.Workplane("XY").circle(4).extrude(20), name="locating_pin", loc=cq.Location((0, 50, 5)))
+    return assy
+
+
 if __name__ == "__main__":
+    demo_assembly().export(str(OUT / "demo_assembly.step"))
+    print("wrote", OUT / "demo_assembly.step")
     for name, fn in [
         ("plate_with_hole", plate_with_hole),
         ("plastic_cover", plastic_cover),

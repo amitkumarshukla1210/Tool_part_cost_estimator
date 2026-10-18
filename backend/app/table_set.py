@@ -53,6 +53,11 @@ class TableSet:
         for table, t in self.tables.items():
             defs = ", ".join(f"{c['key']} {SQL_TYPE.get(c['kind'], 'TEXT')}" for c in t["columns"])
             con.execute(f"CREATE TABLE IF NOT EXISTS {table} (id INTEGER PRIMARY KEY, {defs}, UNIQUE ({', '.join(t['unique'])}))")
+            # Columns added in a newer version of the app are added to an existing database (data kept).
+            have = {r["name"] for r in con.execute(f"PRAGMA table_info({table})")}
+            for c in t["columns"]:
+                if c["key"] not in have:
+                    con.execute(f"ALTER TABLE {table} ADD COLUMN {c['key']} {SQL_TYPE.get(c['kind'], 'TEXT')}")
         return con
 
     def schema(self) -> dict:

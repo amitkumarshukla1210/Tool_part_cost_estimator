@@ -1,0 +1,62 @@
+Before Stage D, update the roadmap and README with all requirements below (sections A–E), then build them stage by stage (one PR per stage). Explain each step simply; I'm new to GitHub. Ask me before assuming anything important.
+
+GENERAL RULES (apply everywhere)
+- NO hard-coded values. Every number comes from master data or a formula stored in master data, so I can change the logic later to market rates.
+- TRACEABILITY: every value on screen is clickable and opens a panel showing: formula, inputs used, where each input comes from (master data sheet/row, my input, fetched source, or calculated), its month, approval status and full breakup.
+- All outputs in my Design to Cost table style, exportable to Excel and PDF with the full breakup.
+- Example/placeholder values are clearly marked until I replace them.
+
+A. SHEET METAL TOOLS
+1. Tool type: multi-stage (separate tool per operation) or progressive (one tool, strip).
+2. Operation sequence per part, e.g. Blanking → Drawing → Trimming → Piercing → Forming/Folding. Auto-suggest the sequence from part features; I can edit, add or remove stages.
+3. For each stage: part weight (incl. scrap removed), cutting/forming/drawing force and press tonnage (formula shown), press selection from my machine list.
+4. Stage drawings: auto-generate blank / flat pattern as DXF + dimensioned PDF. For intermediate stages, let me upload a CAD file per stage, else create a simplified dimensioned sketch. Export all stage drawings as one PDF pack.
+5. Progressive tools: strip layout (pitch, strip width, bridge/web allowance, number of stations, pilot holes, material utilisation %), as DXF + PDF.
+
+B. TOOL / MOULD / DIE COST (all processes)
+1. Tool cost built from processes: raw material cutting, CNC machining, wire cut/EDM, grinding, polishing, heat treatment, surface treatment/painting, assembly, try-out.
+2. For each process: process time (from logic: volume removed, area, feature count, etc.), machine required, MHR, labour required (skill level, rate, number of operators).
+3. MHR full breakdown, calculated not typed: machine price, depreciation (life, years, shifts), interest, power (kW × utilisation × rate), maintenance %, floor space (m² × rent), consumables/tooling, overheads, labour. Same for labour rate.
+4. Add: tool trial cost (no. of trials × press/machine hours × MHR + material), design cost, supplier overhead & profit %, packing & transport cost, warranty/spares if needed.
+5. Example: Grinding MHR ₹2000 → click → depreciation ₹x + power ₹y + labour ₹z + … with the source of each.
+
+C. COUNTRY RATE LIBRARY (master data)
+1. Countries: India, China, Korea, Japan, Taiwan, Thailand, Vietnam, Germany, USA (I can add more).
+2. Per country, with unit, currency, source and "valid from" date for each rate:
+   - Electricity rate (per kWh, industrial)
+   - Labour rate by skill level (operator, skilled machinist, toolmaker, designer) per hour, plus working hours/shifts per year
+   - Floor space rent (per m²/month), interest rate, overhead %, profit %
+   - Material rates by grade (P20, H13, 2738, D2, SKD11, mould base steel, CRCA, SS, aluminium, plastics, etc.) per kg
+   - Standard process rates with their unit: e.g. heat treatment INR/kg, CNC INR/hour, wire cut per mm or per cm², polishing per cm², painting per m² or per unit, transport per kg
+   - Machine prices by country
+3. Forex master: currency rates with date; show results in INR, USD and the country's own currency.
+4. Tool country comparison: same tool made in India / China / Korea / Japan etc. side by side, plus for imported tools: freight, insurance, import duty %, customs clearance, landed cost in India.
+
+D. COUNTRY COMPARISON FOR PARTS (same logic as tools)
+1. For the same part, should-cost if made in each country, side by side.
+2. Breakup per country, each clickable with source:
+   - Raw material cost (grade rate of that country × gross weight, scrap credit)
+   - Process cost (cycle time × that country's MHR, labour, power)
+   - Tool amortisation (tool cost ÷ tool life or programme volume)
+   - Overhead, rejection %, profit %
+   - Packing cost (per unit)
+   - Ex-works price in local currency, USD and INR
+3. Landed cost in India: + sea/air freight, insurance, Basic Customs Duty %, Social Welfare Surcharge, IGST % (show credit separately if claimable), customs clearance & port charges, inland transport → landed cost per part in INR.
+4. Forex: USD, CNY, KRW, JPY, EUR, THB, VND with date; show effect of a forex change (e.g. USD ±5%).
+5. Duty and tax rates stored per HS code and country (FTA/preferential rates, e.g. Japan/Korea CEPA, ASEAN).
+6. Output: comparison table + stacked bar chart (RM / process / tool / packing / freight / duty), cheapest country highlighted.
+
+E. DYNAMIC RATE LIBRARY WITH MONTHLY UPDATE + APPROVAL
+1. Every rate (forex, material grades, electricity, labour, process rates, duty, freight) is stored with history: value, unit, currency, country, month, source URL, fetched date, status (Draft / Reviewed / Approved), approved by, approved date, comment. Never overwrite old values; keep month-on-month history and a trend chart per rate.
+2. Monthly auto-update: a scheduled job (GitHub Actions on the 1st of each month, plus a "Fetch now" button in the app) pulls data ONLY from free, official, legally usable sources/APIs (e.g. central-bank forex rates, World Bank commodity prices, ILO labour data, World Bank/government electricity & inflation data). No scraping of sites that forbid it. List every source with URL, update frequency and licence in the README.
+3. Rates with no free source (exact steel grades, MHR, process rates) are proposed using index logic, e.g. new rate = last approved rate × (current index ÷ index at approval). Formula shown and editable.
+4. New values arrive as DRAFT on a "Rate review" page: old approved vs new proposed, % change, source link, highlighted if change > threshold (e.g. ±5%, configurable).
+5. I can edit any draft, add a comment, then Approve (one by one or bulk). Only APPROVED rates are used in costing. Every costing report records which rate version/month it used, so old reports stay reproducible.
+6. If a fetch fails, keep the last approved value and show a warning; never break the costing.
+
+ORDER OF WORK
+1. Update roadmap + README with A–E and the list of planned stages.
+2. Build the master-data foundation first: rate library with history + approval status, country & forex tables, and the traceability panel.
+3. Then the MHR / labour-rate breakdown engine.
+4. Then B (tool cost), A (sheet metal stages + strip layout), D/C (country comparison + landed cost), E (monthly auto-fetch + review page).
+Create a PR after each stage.

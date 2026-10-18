@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design to Cost — Part Cost Estimator · Parts</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/rates.css" />
+  <link rel="stylesheet" href="/static/register.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img src="/theme/logo.png" alt="Design to Cost logo" />
+        <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/dashboard">Dashboard</a></li>
+          <li><a href="/parts" class="active" aria-current="page">Parts</a></li>
+          <li><a href="/import">Import</a></li>
+          <li><a href="/">Estimate</a></li>
+          <li><a href="/rates">Rates</a></li>
+          <li><a href="/master-data">Master data</a></li>
+          <li><a href="/help">Help</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="bg-grey page-head">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Part register</p>
+          <h2>Parts</h2>
+          <p>Every part with its revisions, files and full history. Search by code, name, project, rev, process, status or cost.</p>
+        </div>
+        <form class="card toolbar" id="filters">
+          <label class="grow">Search code / name / material <input type="search" name="q" /></label>
+          <label>Project <select name="project_id"></select></label>
+          <label>Process <select name="process"></select></label>
+          <label>Status <select name="status"></select></label>
+          <label>Sourcing <select name="sourcing"></select></label>
+          <label>Rev <input name="rev" size="5" /></label>
+          <label>Target from (INR) <input type="number" name="target_min" min="0" step="any" style="width:110px" /></label>
+          <label>to <input type="number" name="target_max" min="0" step="any" style="width:110px" /></label>
+          <label class="check"><input type="checkbox" name="file_missing" value="true" /> File missing only</label>
+          <label>Sort <select name="sort">
+            <option value="part_code">Part code</option><option value="name">Name</option>
+            <option value="updated">Last changed</option><option value="status">Status</option><option value="process">Process</option>
+          </select></label>
+          <a class="btn btn-outline" id="export">Export Excel</a>
+          <a class="btn btn-primary" href="/import">+ Import parts</a>
+        </form>
+      </div>
+    </section>
+
+    <section class="page-body">
+      <div class="container">
+        <p id="status" class="status" role="status"></p>
+        <div class="table-wrap" style="max-height: none"><table class="cost-table" id="table"></table></div>
+        <div class="pager"><span id="count"></span>
+          <button type="button" class="btn btn-outline small" id="prev">← Previous</button>
+          <button type="button" class="btn btn-outline small" id="next">Next →</button></div>
+      </div>
+    </section>
+  </main>
+
+  <aside class="part-panel" id="panel" hidden role="dialog" aria-label="Part details">
+    <div class="panel-head"><span class="kicker">Part</span>
+      <button type="button" class="panel-close" id="panelClose" aria-label="Close">✕</button></div>
+    <div class="panel-body" id="panelBody"></div>
+  </aside>
+
+  <footer>
+    <div class="container"><p class="footnote">© Design to Cost</p></div>
+  </footer>
+  <script src="/static/common.js"></script>
+  <script src="/static/trace.js"></script>
+  <script src="/static/parts.js"></script>
+</body>
+</html>

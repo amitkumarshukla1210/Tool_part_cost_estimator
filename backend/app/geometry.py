@@ -135,6 +135,29 @@ def analyze(shape: cq.Shape, part_type: str, density_g_cm3: float, mesh=None) ->
     )
 
 
+def wall_stats(shape: cq.Shape) -> tuple[float, float]:
+    """(most common wall thickness in mm, share of the surface that is such parallel face pairs)."""
+    planes = []
+    for face in shape.Faces():
+        if face.geomType() != "PLANE":
+            continue
+        planes.append((face.normalAt(), face.Center(), face.Area()))
+    votes: dict[float, float] = {}
+    for i, (n1, c1, a1) in enumerate(planes):
+        for n2, c2, a2 in planes[i + 1:]:
+            if n1.dot(n2) > -0.999:
+                continue
+            gap = abs((c2 - c1).dot(n1))
+            if gap > 1e-3:
+                key = round(gap, 2)
+                votes[key] = votes.get(key, 0.0) + min(a1, a2)
+    area = shape.Area() or 1.0
+    if not votes:
+        return 2 * shape.Volume() / area, 0.0
+    best = max(votes, key=votes.get)
+    return best, min(1.0, 2 * votes[best] / area)
+
+
 def sheet_thickness(shape: cq.Shape) -> float:
     """Estimate sheet thickness in mm from opposite parallel planar faces.
 

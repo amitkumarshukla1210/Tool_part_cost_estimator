@@ -1,6 +1,6 @@
 /* Help page layout. Colours and fonts come from theme/dtc-theme.css. */
 
-.help-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.help-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
 .help-steps.two { grid-template-columns: repeat(2, 1fr); }
 .help-steps .card p { font-size: 13.5px; color: var(--grey); }
 .help-steps .step {
