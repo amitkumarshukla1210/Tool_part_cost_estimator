@@ -539,6 +539,21 @@ The project dashboard now starts with the **Project leader view**:
   Cash-out by month and totals by supplier and country follow.
 - **Open corrections** from the design loop, and the consolidated **Excel and PDF** (summary, BOM cost, machines, plan, payments, timeline).
 
+## Harness & PCB BOM extraction (roadmap stage 14)
+
+Open **Harness & PCB** in the header and upload a file:
+- **Harness**: a KBL or VEC **XML** export (wires are grouped by part, colour and cross-section with their count and total length; connectors, terminals,
+  seals, sleeves, tapes, clips, grommets and labels are counted), or a **text PDF** drawing with a BOM table (the header row must name a quantity or part number
+  column). Scanned PDFs are refused with a clear message (OCR is stage 16); DWG needs a DXF/STEP/XML export first.
+- **PCB**: a BOM **CSV or Excel** from KiCad, Altium or any tool (designator column plus two of value, footprint, quantity, part number), an optional **pick-and-place
+  (CPL) CSV** (placement count, board extents, cross-check with the BOM) and the bare-board data you type (layers, thickness, width, height). SMT / THT is
+  taken from the BOM column or guessed from the package name (guesses are marked).
+- **Review**: every line has a confidence and the reason it is lower (no part number, quantity differs from the designators, category guessed, ...). Lines under 0.8 are
+  yellow; editing a line sets it to 1. Add or remove lines, *Mark reviewed* (reopened by any later edit), export to Excel. Changes are in the history.
+
+The XML reader follows the KBL / VEC structure by element names and was built and tested with small hand-made samples, not with your real exports:
+check the first real file and tell me what differs. Nothing is priced yet (stage 15).
+
 ## Rates page: country rate library, MHR & labour rates
 
 Open **Rates** in the header. Pick the **producing country** and the **costing month**.

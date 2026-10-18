@@ -253,6 +253,30 @@ capex_items = Table(
     Index("ix_capex_project", "project_id"),
 )
 
+bom_extracts = Table(
+    "bom_extracts", meta,
+    Column("id", Integer, primary_key=True),
+    Column("project_id", ForeignKey("projects.id", ondelete="SET NULL")),
+    Column("name", String(200), nullable=False),
+    Column("kind", String(20), nullable=False),        # harness, pcb
+    Column("format", String(60), default=""),
+    Column("file_id", ForeignKey("files.id")),
+    Column("board", JSON),                             # PCB: typed layers / size / thickness
+    Column("status", String(20), default="draft"),     # draft, reviewed
+    Column("reviewed_by", String(100), default=""),
+    Column("created_by", String(100), default=""),
+    Column("created_at", DateTime, default=now),
+)
+
+bom_extract_lines = Table(
+    "bom_extract_lines", meta,
+    Column("id", Integer, primary_key=True),
+    Column("extract_id", ForeignKey("bom_extracts.id", ondelete="CASCADE"), nullable=False),
+    Column("position", Integer, nullable=False),
+    Column("data", JSON, nullable=False),              # category, ref, part_number, ..., confidence, flags, source, edited
+    Index("ix_bom_extract_lines", "extract_id", "position"),
+)
+
 history = Table(
     "history", meta,
     Column("id", Integer, primary_key=True),
