@@ -71,7 +71,7 @@ def _num(v, where, kind=float, required=False):
 
 # ---------- projects & variants ----------
 
-PROJECT_FIELDS = ("code", "name", "customer", "description", "capex_budget_inr")
+PROJECT_FIELDS = ("code", "name", "customer", "description", "capex_budget_inr", "sop_date")
 VARIANT_FIELDS = ("code", "name", "target_bom_cost_inr", "annual_volume", "notes")
 
 
@@ -80,6 +80,11 @@ def _project_values(data, where="Project"):
     for k in PROJECT_FIELDS:
         if k in data:
             out[k] = _num(data[k], f"{where}: CAPEX budget") if k == "capex_budget_inr" else str(data[k] or "").strip()
+    if out.get("sop_date"):
+        try:
+            datetime.strptime(out["sop_date"], "%Y-%m-%d")
+        except ValueError:
+            raise RegisterError(f"{where}: SOP date '{out['sop_date']}' must look like 2027-04-01.") from None
     if "code" in out:
         out["code"] = out["code"].upper()
         if not out["code"]:
