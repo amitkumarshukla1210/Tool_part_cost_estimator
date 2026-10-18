@@ -10,8 +10,9 @@ const DATASETS = {
     api: "/api/master-data",
     file: "master_data/master_data.xlsx",
     intro:
-      "Every rate, default and rule used by Stages A–C. Edit here and click Save, or download the Excel file, " +
-      "change it in Excel and upload it again. New values apply to the next calculation.",
+      "Every default and rule used by Stages A–C, and the density of each material. Material RATES (per kg, and the scrap value) " +
+      "are versioned, approved rates: set them on the Rates page (category material / material_scrap). Edit here and click Save, " +
+      "or download the Excel file, change it in Excel and upload it again. New values apply to the next calculation.",
     tables: {
       Parameters: {
         title: "Parameters",
@@ -29,8 +30,6 @@ const DATASETS = {
           { key: "part_type", label: "Part type", kind: "part_type" },
           { key: "material", label: "Material", kind: "text" },
           { key: "density_g_cm3", label: "Density (g/cm³)", kind: "number" },
-          { key: "rate_per_kg", label: "RM rate / kg", kind: "number" },
-          { key: "scrap_rate_per_kg", label: "Scrap value / kg", kind: "number" },
           { key: "notes", label: "Notes", kind: "wide" },
         ],
       },
@@ -96,7 +95,7 @@ function renderHelp() {
   let vars = conf().formulaVars;
   if (!vars && data?.formula_inputs) {
     vars = {};
-    for (const r of data.formula_inputs) vars[`${r.variable} (${r.scope})`] = `${r.label}: ${r.source === "machine" ? "machine field " + r.item : "rate " + r.category + " / " + r.item}`;
+    for (const r of data.formula_inputs) vars[`${r.variable} (${r.scope})`] = `${r.label}: ${{ machine: "machine field ", parameter: "Parameters row ", part: "part value " }[r.source] ? { machine: "machine field ", parameter: "Parameters row ", part: "part value " }[r.source] + r.item : "rate " + r.category + " / " + r.item}`;
     for (const r of data.cost_formulas || []) vars[`${r.name} (${r.scope})`] = `${r.label}: result of another formula`;
   }
   $("variables").innerHTML = Object.entries(vars || {}).map(([k, v]) => `<dt><code>${escapeHtml(k)}</code></dt><dd>${escapeHtml(v)}</dd>`).join("");
@@ -334,8 +333,10 @@ $("upload").addEventListener("change", async () => {
     const res = await fetch(`${conf().api}/upload`, { method: "POST", body: form });
     const body = await res.json();
     if (!res.ok) throw new Error(errorText(body.detail));
+    const notes = body._notes || [];
+    delete body._notes;
     setData(body);
-    setStatus(`${file.name} imported and saved to ${conf().file}.`, "ok");
+    setStatus(`${file.name} imported and saved to ${conf().file}.${notes.length ? " Note: " + notes.join(" ") : ""}`, "ok");
   } catch (err) {
     setStatus(`Upload rejected, nothing was changed: ${err.message}`, "error");
   } finally {

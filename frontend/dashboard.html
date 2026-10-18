@@ -46,6 +46,7 @@
           <span class="spacer"></span>
           <a class="btn btn-outline" id="openParts" href="/parts">Open parts</a>
           <a class="btn btn-outline" id="importLink" href="/import">Import parts</a>
+          <button type="button" class="btn btn-outline" id="rmRecalc" title="Recalculate the RM cost of every part with the latest approved rates">Recalculate RM</button>
           <a class="btn btn-outline" id="xlsx">Export Excel</a>
           <a class="btn btn-primary" id="pdf">Export PDF</a>
         </div>
@@ -64,7 +65,7 @@
           <div class="tiles" id="tiles"></div>
           <p class="warn" id="notCosted"></p>
 
-          <h3 class="block-title">Variants · BOM cost vs target</h3>
+          <h3 class="block-title">Variants · RM cost vs target</h3>
           <div class="table-wrap"><table class="cost-table" id="variants"></table></div>
           <div id="bomBlock" hidden>
             <h3 class="block-title" id="bomTitle">BOM</h3>

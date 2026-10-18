@@ -2,7 +2,7 @@
 const { $, esc, fmt, inr, api, registerMeta, options, status, thumb } = window.DTC;
 const PAGE = 50;
 let offset = 0;
-let meta, projects;
+let meta, projects, rmMeta;
 let part = null;
 
 const filters = () => {
@@ -15,6 +15,7 @@ const nameOf = (list, code) => list.find((x) => x.code === code)?.name ?? code ?
 
 async function init() {
   meta = await registerMeta();
+  rmMeta = await api("/api/rm/meta");
   projects = await api("/api/projects");
   const f = $("filters").elements;
   f.namedItem("project_id").innerHTML = options(projects.map((p) => ({ code: p.id, name: `${p.code} · ${p.name}` })), "", "All projects");
@@ -52,15 +53,16 @@ async function search() {
   $("prev").disabled = offset === 0;
   $("next").disabled = offset + PAGE >= res.total;
   $("table").innerHTML = `<thead><tr><th></th><th>Part code</th><th>Name</th><th>Rev</th><th>Project</th><th>Process</th>
-    <th>Material</th><th>Status</th><th>Sourcing</th><th class="num">Volume (cm³)</th><th>File</th></tr></thead><tbody>` +
+    <th>Material</th><th>Status</th><th>Sourcing</th><th class="num">Volume (cm³)</th><th class="num">Net RM cost (INR)</th><th>File</th></tr></thead><tbody>` +
     (res.rows.length ? res.rows.map((r) => `<tr class="clickable" data-id="${r.id}"><td>${thumb(r.thumbnail_file_id)}</td>
       <td><b>${esc(r.part_code)}</b></td><td>${esc(r.name)}${r.is_assembly ? ' <span class="badge assy">assembly</span>' : ""}</td>
       <td>${esc(r.rev ?? "")}</td><td>${esc(r.project_code)}</td><td>${esc(nameOf(meta.processes, r.process))}</td>
       <td>${esc(r.material)}</td><td><span class="badge status">${esc(nameOf(meta.statuses, r.status))}</span></td>
       <td>${esc(nameOf(meta.sourcing, r.sourcing))}</td>
       <td class="calc num">${r.geometry?.volume_cm3 != null ? fmt(r.geometry.volume_cm3, 2) : "—"}</td>
+      <td class="calc num">${r.rm_cost_inr != null ? fmt(r.rm_cost_inr, 2) : "—"}</td>
       <td>${r.file_id ? "STEP" : '<span class="badge missing">File missing</span>'}</td></tr>`).join("")
-      : '<tr><td colspan="11" class="empty">No parts match. Import parts on the Import page.</td></tr>') + "</tbody>";
+      : '<tr><td colspan="12" class="empty">No parts match. Import parts on the Import page.</td></tr>') + "</tbody>";
 }
 $("table").addEventListener("click", (e) => {
   const row = e.target.closest("tr[data-id]");
@@ -82,6 +84,8 @@ async function openPart(id) {
   history.replaceState(null, "", `?part=${id}`);
   part.trace = null;
   if (part.file_id && !part.is_assembly) part.trace = await api(`/api/parts/${id}/trace`).catch(() => null);
+  part.rmTrace = part.rm?.applicable && !part.rm.problem ? await api(`/api/parts/${id}/rm-cost/trace`).catch(() => null) : null;
+  part.rmVersions = part.rm?.versions ? await api(`/api/parts/${id}/rm-cost`).catch(() => []) : [];
   renderPart();
   $("panel").hidden = false;
 }
@@ -137,6 +141,74 @@ const priceFields = (p = {}, prefix = "") => `
   <label>Price source <input name="${prefix}price_source" placeholder="supplier quote, catalogue, estimate" value="${esc(p.price_source ?? "")}" /></label>
   <label>Price month <input name="${prefix}price_month" placeholder="2026-10" pattern="\\d{4}-\\d{2}" value="${esc(p.price_month ?? "")}" /></label>
   <label class="check span2"><input type="checkbox" name="${prefix}price_is_example" value="true" ${p.price_is_example ? "checked" : ""} /> Example price (replace later)</label>`;
+
+
+// ---------- raw-material (RM) cost ----------
+function rmBlock(p) {
+  if (p.is_assembly) return "";
+  const rm = p.rm, v = rm.latest, tr = p.rmTrace;
+  const tv = (id, text) => `<button type="button" class="tv" data-rmtrace="${id}">${text}</button>`;
+  const node = (id) => tr?.nodes[id];
+  const amount = (id, unit, d = 2) => (node(id) ? tv(id, `${fmt(node(id).value, d)} ${unit}`) : "—");
+  const example = v?.is_example ? ' <span class="badge badge-example" title="Some rates used are placeholders">EXAMPLE rates</span>' : "";
+  let html = `<h3 class="block-title">Raw-material (RM) cost</h3>`;
+  if (rm.problem) html += `<p class="warn">${esc(rm.problem)}</p>`;
+  if (rm.outdated) {
+    html += `<p class="warn">${esc(rm.outdated)}
+      ${rm.rate_changes.map((c) => `<br/>${esc(c.rate)}: ${fmt(c.old_value, 2)} (${esc(c.old_month)}) → <b>${fmt(c.new_value, 2)}</b> (${esc(c.new_month)})`).join("")}
+      <br/><button type="button" class="btn btn-primary small" id="rmRecalc">${rm.latest ? "Recalculate with latest rates" : "Calculate RM cost"}</button></p>`;
+  }
+  if (rm.weights && !v) html += `<p class="note">Weights are calculated; the cost needs the missing rate. Gross weight ${fmt(rm.weights.gross_g, 2)} g.</p>`;
+  if (v && tr) {
+    const cur = tr.currency;
+    const has = (id) => node(id);
+    html += `<div class="table-wrap"><table class="cost-table"><tbody>
+      <tr><td>Net weight (body, from the 3D file × density)</td><td class="calc num">${amount("weight", "g")}</td></tr>
+      <tr><td>Gross weight</td><td class="calc num">${amount("calc:gross_g", "g")}</td></tr>
+      <tr><td>Returns / scrap</td><td class="calc num">${amount("calc:returns_g", "g")}</td></tr>
+      <tr><td>Material used per part</td><td class="calc num">${amount("calc:input_g", "g")}</td></tr>
+      <tr><td>Material yield</td><td class="calc num">${amount("calc:material_yield_pct", "%", 1)}</td></tr>
+      ${has("in:blanks_per_sheet") ? `<tr><td>Blanks per sheet</td><td class="calc num">${amount("in:blanks_per_sheet", "pcs", 0)}</td></tr>` : ""}
+      <tr><td>Material rate (${esc(tr.country)}, ${esc(tr.as_of)})</td><td class="calc num">${amount("in:material_rate", cur + "/kg")}</td></tr>
+      <tr><td>RM cost (material used × rate)</td><td class="calc num">${amount("calc:rm_cost", cur)}</td></tr>
+      <tr><td>Scrap credit</td><td class="calc num">${amount("calc:scrap_credit", cur)}</td></tr>
+      <tr class="total"><td>Net RM cost per part · version ${v.version}${example}</td>
+        <td class="calc num">${tv(tr.root, `${fmt(v.net_rm_cost, 2)} ${esc(cur)}`)}${cur !== "INR" ? `<div class="note">${fmt(v.net_rm_cost_inr, 2)} INR</div>` : ""}</td></tr>
+    </tbody></table></div>
+    <p class="note">Click any value for its formula, inputs, sources and rate versions (#${v.rates_used.map((r) => r.id).join(", #")}).
+      Stored ${esc(v.created_at.slice(0, 16).replace("T", " "))} by ${esc(v.created_by)} · ${esc(v.reason)}.
+      <a class="link" href="/api/parts/${p.id}/rm-cost/export.xlsx">Excel</a> · <a class="link" href="/api/parts/${p.id}/rm-cost/export.pdf">PDF</a>
+      ${p.file_id ? ` · <a class="link" href="/?part=${p.id}">Open in Estimate</a>` : ""}</p>`;
+  }
+  if (rm.applicable) {
+    const typed = p.rm_inputs || {};
+    html += `<details class="card add-insert" ${Object.keys(typed).length || p.country || p.costing_month ? "open" : ""}>
+      <summary class="btn btn-outline small">RM inputs, country and month</summary>
+      <form id="rmForm" class="grid2">
+        <label>Producing country <select name="country"><option value="">Default (${esc(p.effective_country)})</option>
+          ${rmMeta.countries.map((c) => `<option value="${esc(c.code)}" ${c.code === p.country ? "selected" : ""}>${esc(c.name)} (${esc(c.currency)})</option>`).join("")}</select></label>
+        <label>Costing month <input name="costing_month" placeholder="blank = ${esc(rmMeta.month)}" pattern="\\d{4}-\\d{2}" value="${esc(p.costing_month || "")}" /></label>
+        <p class="note span2">Leave a box empty to use the default shown. A value you type replaces it and is traced as your input.
+          Money values are in the producing country's currency.</p>
+        ${rm.overridable.map((i) => `<label>${esc(i.label)} (${esc(i.unit)})
+          <input type="number" min="0" step="any" name="in_${esc(i.variable)}" value="${typed[i.variable] ?? ""}"
+            placeholder="${i.default != null ? esc(i.default) : i.source === "rate" ? "approved rate" : "from the 3D file"}" /></label>`).join("")}
+        <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary">Save and calculate</button></div>
+        <p class="status span2" id="rmStatus"></p>
+      </form></details>`;
+  }
+  if (rm.versions) {
+    html += `<details class="card add-insert"><summary class="btn btn-outline small">RM cost versions (${rm.versions})</summary>
+      <div class="table-wrap"><table class="cost-table" id="rmVersions"><thead><tr><th>Ver</th><th>Rev</th><th>Material</th><th>Country</th><th>Month</th>
+        <th class="num">Net RM cost</th><th class="num">INR</th><th>Rates</th><th>Why</th><th>By / when</th></tr></thead><tbody>
+        ${p.rmVersions.map((x) => `<tr class="clickable" data-rmversion="${x.version}"><td><b>${x.version}</b></td><td>${esc(x.rev)}</td><td>${esc(x.material)}</td>
+          <td>${esc(x.country)}</td><td>${esc(x.as_of)}</td><td class="calc num">${fmt(x.net_rm_cost, 2)} ${esc(x.currency)}</td><td class="calc num">${fmt(x.net_rm_cost_inr, 2)}</td>
+          <td>#${x.rates_used.map((r) => r.id).join(", #")}${x.is_example ? ' <span class="badge badge-example">EXAMPLE</span>' : ""}</td>
+          <td>${esc(x.reason)}</td><td>${esc(x.created_by)} · ${esc(x.created_at.slice(0, 16).replace("T", " "))}</td></tr>`).join("")}</tbody></table></div>
+      <p class="note">Old versions are never changed. Click a version to see its full trace.</p></details>`;
+  }
+  return html;
+}
 
 function suggestionBox(p) {
   const s = p.suggestion;
@@ -222,6 +294,7 @@ function renderPart() {
     <h3 class="block-title">Geometry · rev ${esc(cur?.rev ?? "—")}</h3>
     <div class="table-wrap"><table class="cost-table"><tbody>${geometryRows(cur?.geometry) || '<tr><td class="empty">No 3D file for this revision.</td></tr>'}</tbody></table></div>
 
+    ${rmBlock(p)}
     ${insertsBlock(p)}
     ${mouldedIntoBlock(p)}
 
@@ -269,13 +342,27 @@ $("panelBody").addEventListener("submit", async (e) => {
     data.price_is_example = f.has("price_is_example");
     data.dimensions = readDims(f) ?? {};
     try {
-      part = await api(`/api/parts/${part.id}`, { method: "PUT", body: JSON.stringify(data) });
-      part.trace = part.file_id && !part.is_assembly ? await api(`/api/parts/${part.id}/trace`).catch(() => null) : null;
-      renderPart();
+      await api(`/api/parts/${part.id}`, { method: "PUT", body: JSON.stringify(data) });
+      await openPart(part.id);
       status($("partStatus"), "Saved. The change is in the history below.", "ok");
       search();
     } catch (err) {
       status($("partStatus"), err.message, "error");
+    }
+  }
+  if (e.target.id === "rmForm") {
+    const f = new FormData(e.target);
+    const inputs = {};
+    for (const [k, v] of f.entries()) if (k.startsWith("in_") && v !== "") inputs[k.slice(3)] = Number(v);
+    status($("rmStatus"), "Calculating…");
+    try {
+      const res = await api(`/api/parts/${part.id}/rm-cost`, { method: "POST", body: JSON.stringify({
+        rm_inputs: inputs, country: f.get("country"), costing_month: f.get("costing_month"), reason: "changed in the part panel" }) });
+      await openPart(part.id);
+      search();
+      status($("rmStatus"), res.message, "ok");
+    } catch (err) {
+      status($("rmStatus"), err.message, "error");
     }
   }
   if (e.target.id === "insertForm") {
@@ -285,9 +372,8 @@ $("panelBody").addEventListener("submit", async (e) => {
     for (const k of ["unit_price", "price_currency", "price_source", "price_month"]) data[k] = f.get(`n_${k}`);
     if (!data.name) delete data.material;
     try {
-      part = await api(`/api/parts/${part.id}/inserts`, { method: "POST", body: JSON.stringify(data) });
-      part.trace = part.file_id && !part.is_assembly ? await api(`/api/parts/${part.id}/trace`).catch(() => null) : null;
-      renderPart();
+      await api(`/api/parts/${part.id}/inserts`, { method: "POST", body: JSON.stringify(data) });
+      await openPart(part.id);
       search();
     } catch (err) {
       status($("insertStatus"), err.message, "error");
@@ -296,9 +382,8 @@ $("panelBody").addEventListener("submit", async (e) => {
   if (e.target.id === "revForm") {
     status($("revStatus"), "Reading the STEP file…");
     try {
-      part = await api(`/api/parts/${part.id}/revisions`, { method: "POST", body: new FormData(e.target) });
-      part.trace = part.is_assembly ? null : await api(`/api/parts/${part.id}/trace`).catch(() => null);
-      renderPart();
+      await api(`/api/parts/${part.id}/revisions`, { method: "POST", body: new FormData(e.target) });
+      await openPart(part.id);
       search();
     } catch (err) {
       status($("revStatus"), err.message, "error");
@@ -317,14 +402,33 @@ $("panelBody").addEventListener("click", async (e) => {
       status($("partStatus"), err.message, "error");
     }
   }
+  const rt = e.target.closest("[data-rmtrace]");
+  if (rt && part.rmTrace) window.TracePanel.open(part.rmTrace, rt.dataset.rmtrace);
+  const rv = e.target.closest("[data-rmversion]");
+  if (rv) {
+    const tr = await api(`/api/parts/${part.id}/rm-cost/trace?version=${rv.dataset.rmversion}`);
+    window.TracePanel.open(tr, tr.root);
+  }
+  if (e.target.id === "rmRecalc") {
+    e.target.disabled = true;
+    try {
+      const res = await api(`/api/parts/${part.id}/rm-cost`, { method: "POST", body: JSON.stringify({ reason: "recalculated with the latest approved rates" }) });
+      await openPart(part.id);
+      search();
+      status($("partStatus"), res.message, "ok");
+    } catch (err) {
+      e.target.disabled = false;
+      status($("partStatus"), err.message, "error");
+    }
+  }
   const o = e.target.closest("[data-open]");
   if (o) openPart(Number(o.dataset.open));
   const u = e.target.closest("[data-unlink]");
   if (u && confirm("Remove this insert from the part? The insert part itself stays in the register.")) {
     try {
-      part = await api(`/api/parts/${part.id}/inserts/${u.dataset.unlink}`, { method: "DELETE" });
-      part.trace = part.file_id && !part.is_assembly ? await api(`/api/parts/${part.id}/trace`).catch(() => null) : null;
-      renderPart();
+      await api(`/api/parts/${part.id}/inserts/${u.dataset.unlink}`, { method: "DELETE" });
+      await openPart(part.id);
+      search();
     } catch (err) {
       status($("partStatus"), err.message, "error");
     }

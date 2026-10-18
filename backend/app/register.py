@@ -27,7 +27,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font
 from sqlalchemy import and_, func, or_, select
 
-from . import cad_import, file_store, formula, master_data, rates, register_setup
+from . import cad_import, costing_setup, file_store, formula, master_data, rates, register_setup, rm_cost
 from . import projects_db as db
 from .table_set import EXAMPLE_FILL, HEADER_FILL
 
@@ -204,7 +204,7 @@ def update_variant(vid: int, data: dict) -> dict:
 
 PART_FIELDS = ("name", "material", "process", "sourcing", "status", "annual_volume", "programme_life_years",
                "target_piece_cost_inr", "notes", "unit_price", "price_currency", "price_source", "price_month",
-               "price_is_example", "dimensions")
+               "price_is_example", "dimensions", "country", "costing_month", "rm_inputs")
 
 
 def next_part_code(conn, project_code: str) -> str:
@@ -301,6 +301,18 @@ def _part_values(data, where="Part"):
             out[k] = _num(v, f"{where}: annual volume", int)
         elif k in ("programme_life_years", "target_piece_cost_inr", "unit_price"):
             out[k] = _num(v, f"{where}: {k.replace('_', ' ')}")
+        elif k == "country":
+            code = str(v or "").strip().upper()
+            if code and code not in costing_setup.countries():
+                raise RegisterError(f"{where}: country '{code}' is not in Master data → Countries.")
+            out[k] = code
+        elif k == "costing_month":
+            m = str(v or "").strip()
+            if m and not rates.MONTH.match(m):
+                raise RegisterError(f"{where}: costing month '{m}' must look like 2026-10.")
+            out[k] = m
+        elif k == "rm_inputs":
+            out[k] = _rm_inputs(v, where)
         elif k == "price_is_example":
             out[k] = v is True or str(v).strip().lower() in ("1", "true", "yes", "on", "example")
         elif k == "dimensions":
@@ -408,7 +420,7 @@ def _same(a, b) -> bool:
     return a == b or (empty(a) and empty(b))
 
 
-def update_part(part_id: int, data: dict) -> dict:
+def update_part(part_id: int, data: dict, refresh: bool = True) -> dict:
     vals = _part_values(data)
     with db.engine().begin() as conn:
         old = conn.execute(select(db.parts).where(db.parts.c.id == part_id)).mappings().first()
@@ -418,6 +430,8 @@ def update_part(part_id: int, data: dict) -> dict:
         if changes:
             conn.execute(db.parts.update().where(db.parts.c.id == part_id).values(**vals))
             _log(conn, "part", part_id, "updated", changes)
+    if refresh and {"material", "process", "sourcing", "country", "costing_month", "rm_inputs"} & set(changes):
+        refresh_rm([part_id], "part details changed")
     return part_detail(part_id)
 
 
@@ -434,6 +448,7 @@ def new_revision_from_upload(part_id: int, content: bytes, file_name: str, rev: 
     with db.engine().begin() as conn:
         add_revision(conn, part_id, rev, step=content, file_name=file_name, thumbnail=root.get("thumbnail"),
                      geometry=geometry, change_note=change_note, source=f"upload {file_name}")
+    refresh_rm([part_id], "new revision")
     return part_detail(part_id)
 
 
@@ -448,7 +463,8 @@ def _part_query():
 
 
 def search(q="", project_id=None, process="", status="", sourcing="", rev="", file_missing=None,
-           target_min=None, target_max=None, sort="part_code", limit=50, offset=0) -> dict:
+           target_min=None, target_max=None, rm_min=None, rm_max=None, rm_missing=None, sort="part_code", limit=50,
+           offset=0) -> dict:
     query, r = _part_query()
     conds = []
     if q:
@@ -469,9 +485,15 @@ def search(q="", project_id=None, process="", status="", sourcing="", rev="", fi
         conds.append(db.parts.c.target_piece_cost_inr >= target_min)
     if target_max is not None:
         conds.append(db.parts.c.target_piece_cost_inr <= target_max)
+    if rm_min is not None:
+        conds.append(db.parts.c.rm_cost_inr >= rm_min)
+    if rm_max is not None:
+        conds.append(db.parts.c.rm_cost_inr <= rm_max)
+    if rm_missing is True:
+        conds.append(and_(db.parts.c.rm_cost_inr.is_(None), db.parts.c.is_assembly.is_(False)))
     if conds:
         query = query.where(and_(*conds))
-    sort_cols = {"part_code": db.parts.c.part_code, "name": db.parts.c.name, "updated": db.parts.c.updated_at.desc(),
+    sort_cols = {"rm_cost": db.parts.c.rm_cost_inr.desc(), "part_code": db.parts.c.part_code, "name": db.parts.c.name, "updated": db.parts.c.updated_at.desc(),
                  "status": db.parts.c.status, "process": db.parts.c.process}
     with db.engine().connect() as conn:
         total = conn.execute(select(func.count()).select_from(query.subquery())).scalar()
@@ -480,7 +502,7 @@ def search(q="", project_id=None, process="", status="", sourcing="", rev="", fi
     return {"total": total, "rows": [_plain(x) for x in rows]}
 
 
-def part_detail(part_id: int) -> dict:
+def part_detail(part_id: int, with_rm: bool = True) -> dict:
     query, _ = _part_query()
     with db.engine().connect() as conn:
         p = conn.execute(query.where(db.parts.c.id == part_id)).mappings().first()
@@ -509,14 +531,27 @@ def part_detail(part_id: int) -> dict:
                                     .where(db.part_inserts.c.insert_part_id == part_id)).mappings().all()
     insert_count = sum(i["quantity"] for i in inserts)
     suggestion = suggest_process(p["geometry"], p["material"], insert_count) if not p["is_assembly"] else None
-    return _plain(p) | {"revisions": [_plain(x) for x in revs], "history": [_plain(x) for x in hist],
-                        "where_used": [_plain(x) for x in used], "children": [_plain(x) for x in children],
-                        "inserts": inserts, "insert_count": insert_count,
-                        "moulded_into": [_plain(x) for x in moulded_into], "suggestion": suggestion}
+    out = _plain(p) | {"revisions": [_plain(x) for x in revs], "history": [_plain(x) for x in hist],
+                       "where_used": [_plain(x) for x in used], "children": [_plain(x) for x in children],
+                       "inserts": inserts, "insert_count": insert_count,
+                       "moulded_into": [_plain(x) for x in moulded_into], "suggestion": suggestion}
+    if with_rm:
+        out["rm"] = rm_summary(out)
+        out["effective_country"] = (out["country"] or register_setup.settings()["default_country"]).upper()
+    return out
 
 
 def revision_trace(part_id: int, rev_id: int | None = None) -> dict:
-    """Traceable geometry and weight of a revision.
+    """Traceable geometry and weight of a revision (see _geometry_trace)."""
+    t, nodes, warnings, *_ = _geometry_trace(part_id, rev_id)
+    out = t.to_dict(nodes[0])
+    out["components"] = nodes
+    out["warnings"] = warnings
+    return out
+
+
+def _geometry_trace(part_id: int, rev_id: int | None = None):
+    """Traceable geometry and weight of a revision -> (Trace, node ids, warnings, part detail, revision).
 
     Body weight = (CAD volume − any modelled overlap with inserts) × material density.
     With moulded-in inserts: insert weight = Σ quantity × insert volume × insert density
@@ -524,7 +559,7 @@ def revision_trace(part_id: int, rev_id: int | None = None) -> dict:
     total weight = body weight + insert weight.
     """
     from .trace import Trace
-    d = part_detail(part_id)
+    d = part_detail(part_id, with_rm=False)
     rev = next((r for r in d["revisions"] if rev_id in (None, r["id"])), None)
     if not rev or not rev["geometry"]:
         raise RegisterError("This revision has no 3D file yet, so there is no geometry to trace.")
@@ -596,10 +631,7 @@ def revision_trace(part_id: int, rev_id: int | None = None) -> dict:
                       names={"body": "weight", "inserts": "insert_weight"},
                       description="Body (plastic / metal) weight + insert weight")
             nodes.insert(0, "total_weight")
-    out = t.to_dict(nodes[0])
-    out["components"] = nodes
-    out["warnings"] = warnings
-    return out
+    return t, nodes, warnings, d, rev
 
 
 # ---------- moulded-in inserts ----------
@@ -719,6 +751,7 @@ def link_insert(part_id: int, data: dict) -> dict:
             vals = {k: v for k, v in vals.items() if v not in (None, "")}
             insert_id, _ = upsert_part(conn, body["project_id"], code, vals)
         _set_insert_link(conn, part_id, insert_id, qty, notes=str(data.get("link_notes") or "").strip())
+    refresh_rm([part_id], "insert linked")
     return part_detail(part_id)
 
 
@@ -732,7 +765,326 @@ def unlink_insert(part_id: int, link_id: int) -> dict:
         conn.execute(db.part_inserts.delete().where(db.part_inserts.c.id == link_id))
         _log(conn, "part", part_id, "insert_removed", {"insert": row["part_code"], "quantity": row["quantity"]})
         _log(conn, "part", row["insert_part_id"], "removed_from", {"part_id": part_id})
+    refresh_rm([part_id], "insert removed")
     return part_detail(part_id)
+
+
+# ---------- raw-material (RM) cost versions ----------
+# The RM engine (rm_cost.py) works from the formulas in master data. Here its result is stored as a numbered,
+# never-overwritten version of the part, with its full trace and the rate versions it used. A new version is made
+# automatically when something the result depends on changes (new revision, material, process, country, month,
+# typed inputs, inserts). Approving a newer rate does NOT change stored costs: the part shows "newer approved
+# rates exist" and you recalculate on purpose.
+
+class RMNotApplicable(Exception):
+    """RM cannot be worked out for this part (the message says why and what to do)."""
+
+
+RM_COLUMNS = ("id", "part_id", "version", "revision_id", "rev", "family", "process", "material", "country", "currency",
+              "as_of", "inputs", "key", "net_weight_g", "gross_weight_g", "net_rm_cost", "net_rm_cost_inr",
+              "rates_used", "reason", "created_by", "created_at")
+
+
+def _rm_inputs(v, where):
+    """{variable: number} typed over per part, checked against the RM formula inputs of every family."""
+    if v in (None, "", {}):
+        return None
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except ValueError:
+            raise RegisterError(f"{where}: RM inputs are not readable.") from None
+    allowed = {i["variable"] for fam in rm_cost.FAMILIES for i in rm_cost.overridable(fam)}
+    out = {}
+    for k, val in v.items():
+        if val in (None, ""):
+            continue
+        if k not in allowed:
+            raise RegisterError(f"{where}: '{k}' is not an RM input you can type over ({', '.join(sorted(allowed))}).")
+        n = _num(val, f"{where}: {k}", required=True)
+        if n < 0:
+            raise RegisterError(f"{where}: {k} must not be negative.")
+        out[k] = n
+    return out or None
+
+
+def rm_eligibility(p: dict) -> str:
+    """Why RM cannot be worked out for this part, or "" when it can."""
+    if p["is_assembly"]:
+        return "An assembly has no RM cost of its own; its parts do."
+    src = register_setup.sourcing().get(p["sourcing"])
+    if src and not src["is_costed"]:
+        return f"{src['name']} parts have a bought-out price, not an RM cost."
+    proc = register_setup.processes().get(p["process"])
+    if not proc:
+        return "Set the process first."
+    if not proc["part_type"]:
+        return f"RM for {proc['name']} parts (bar stock, bought-out) comes in a later stage."
+    if not p["material"]:
+        return "Set the material first."
+    return ""
+
+
+def _rm_family(p: dict) -> str:
+    return register_setup.processes()[p["process"]]["part_type"]
+
+
+def _formula_hash(family: str) -> str:
+    setup = costing_setup.tables()
+    scope = rm_cost.scope(family)
+    rows = [r for k in ("cost_formulas", "formula_inputs") for r in setup[k] if r["scope"] == scope]
+    return hashlib.sha1(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest()[:12]
+
+
+def _rm_compute(part_id: int) -> dict:
+    """Dry run: the traced RM result of the part's current revision. Raises RMNotApplicable / RegisterError / RMError."""
+    from .geometry import blank_estimate
+    d = part_detail(part_id, with_rm=False)
+    why = rm_eligibility(d)
+    if why:
+        raise RMNotApplicable(why)
+    family = _rm_family(d)
+    try:
+        t, nodes, warnings, d, rev = _geometry_trace(part_id)
+    except RegisterError:
+        raise RMNotApplicable("This part has no 3D file yet, so there is no volume to weigh. Upload a revision.") from None
+    if "weight" not in t.nodes:
+        raise RMNotApplicable(f"'{d['material']}' has no density in Master data → Materials. Add it there first.")
+    g = rev["geometry"]
+    cad = {"type": "cad", "file": rev["original_name"], "rev": rev["rev"], "sha256": rev["sha256"]}
+    overrides = d["rm_inputs"] or {}
+    part = {"net_weight_g": "weight", "density_g_cm3": "density"}
+    if family == "sheet_metal":
+        wall = g.get("wall_mm") or 0
+        if wall <= 0 and "thickness_mm" not in overrides:
+            raise RMNotApplicable("The sheet thickness could not be found in the 3D model. Type it under RM inputs.")
+        blank = blank_estimate(g["volume_mm3"], g["bbox_mm"], wall or overrides["thickness_mm"])
+        part["thickness_mm"] = {"value": wall, "unit": "mm",
+                                "source": cad | {"note": "Most common wall (sheet thickness) found in the 3D model"}}
+        part["blank_length_mm"] = {"value": blank["length"], "unit": "mm", "source": cad | {
+            "note": "Estimated from the 3D model: flat length, or developed length for a bent part"}}
+        part["blank_width_mm"] = {"value": blank["width"], "unit": "mm", "source": cad | {
+            "note": "Estimated from the 3D model: part width"}}
+    country = (d["country"] or register_setup.settings()["default_country"]).upper()
+    as_of = d["costing_month"] or rates.current_month()
+    r = rm_cost.run(family, country=country, as_of=as_of, material=d["material"], part=part, given=overrides,
+                    given_source={"type": "user", "note": f"Typed in the part register for {d['part_code']}"}, trace=t)
+    r["key"] = {"revision_id": rev["id"], "material": d["material"], "family": family, "country": country,
+                "as_of": as_of, "inputs": overrides, "net_weight_g": round(t.value("weight"), 6),
+                "rates": sorted(x["id"] for x in r["rates_used"]), "formulas": _formula_hash(family)}
+    r["revision"] = {"id": rev["id"], "rev": rev["rev"]}
+    r["process"] = d["process"]
+    r["warnings"] = warnings
+    return r
+
+
+def _rm_row(row) -> dict:
+    d = _plain({k: row[k] for k in RM_COLUMNS})
+    d["is_example"] = any(x.get("is_example") for x in d["rates_used"] or [])
+    return d
+
+
+def rm_versions(part_id: int) -> list[dict]:
+    with db.engine().connect() as conn:
+        rows = conn.execute(select(db.rm_costs).where(db.rm_costs.c.part_id == part_id)
+                            .order_by(db.rm_costs.c.version.desc())).mappings().all()
+    return [_rm_row(r) for r in rows]
+
+
+def _rate_changes(old_used: list, new_used: list) -> list[dict]:
+    new = {(x["category"], x["item"], x["country"]): x for x in new_used}
+    return [{"rate": f"{o['category']} / {o['item']}" + (f" · {o['country']}" if o["country"] else ""),
+             "old_value": o["value"], "old_month": o["month"], "new_value": new[k]["value"], "new_month": new[k]["month"]}
+            for o in old_used if (k := (o["category"], o["item"], o["country"])) in new and new[k]["id"] != o["id"]]
+
+
+def _rates_used(r: dict) -> list[dict]:
+    return [{"id": x["id"], "category": x["category"], "item": x["item"], "country": x["country"], "month": x["month"],
+             "value": x["value"], "unit": x["unit"], "status": x["status"], "approved_by": x["approved_by"],
+             "is_example": x["is_example"]} for x in r["rates_used"]]
+
+
+def rm_summary(d: dict) -> dict:
+    """What the part panel shows about RM: latest version, whether it is out of date, or why there is none."""
+    versions = rm_versions(d["id"])
+    latest = versions[0] if versions else None
+    out = {"applicable": False, "problem": "", "outdated": "", "rate_changes": [], "latest": latest,
+           "versions": len(versions), "overridable": [], "weights": None}
+    why = rm_eligibility(d)
+    if why:
+        out["problem"] = why
+        return out
+    out["applicable"] = True
+    out["overridable"] = rm_cost.overridable(_rm_family(d))
+    try:
+        r = _rm_compute(d["id"])
+    except (RMNotApplicable, RegisterError, rm_cost.RMError) as exc:
+        out["problem"] = str(exc)
+        return out
+    n = r["named"]
+    out["weights"] = {k: n.get(k) for k in ("gross_g", "returns_g", "input_g", "material_yield_pct")}
+    if r["missing"]:
+        out["problem"] = " ".join(r["missing"])
+    elif latest is None:
+        out["outdated"] = "The RM cost has not been calculated yet."
+    elif latest["key"] != r["key"]:
+        strip = lambda k: {a: b for a, b in k.items() if a not in ("rates", "as_of")}
+        changes = _rate_changes(latest["rates_used"] or [], _rates_used(r))
+        if strip(latest["key"]) == strip(r["key"]) and (changes or latest["key"]["as_of"] != r["key"]["as_of"]):
+            out["outdated"] = f"Newer approved rates exist than the ones used in version {latest['version']}."
+            out["rate_changes"] = changes
+        else:
+            out["outdated"] = (f"Inputs, master data or formulas changed since version {latest['version']}.")
+    return out
+
+
+def compute_rm(part_id: int, reason: str = "calculated") -> dict:
+    """Work out the RM cost and store it as a new version unless nothing changed."""
+    try:
+        r = _rm_compute(part_id)
+    except RMNotApplicable as exc:
+        raise RegisterError(str(exc)) from None
+    except rm_cost.RMError as exc:
+        raise RegisterError(str(exc)) from None
+    if r["missing"]:
+        raise RegisterError("RM cost not stored: " + " ".join(r["missing"]))
+    n = r["named"]
+    with db.engine().begin() as conn:
+        last = conn.execute(select(db.rm_costs).where(db.rm_costs.c.part_id == part_id)
+                            .order_by(db.rm_costs.c.version.desc()).limit(1)).mappings().first()
+        if last and last["key"] == r["key"]:
+            return {"stored": False, "version": last["version"], "message": f"Already up to date (version {last['version']})."}
+        version = (last["version"] if last else 0) + 1
+        rid = conn.execute(db.rm_costs.insert().values(
+            part_id=part_id, version=version, revision_id=r["revision"]["id"], rev=r["revision"]["rev"],
+            family=r["family"], process=r["process"], material=r["material"], country=r["country"],
+            currency=r["currency"], as_of=r["as_of"], inputs=r["key"]["inputs"], key=r["key"],
+            net_weight_g=r["key"]["net_weight_g"], gross_weight_g=n.get("gross_g"), net_rm_cost=r["value"],
+            net_rm_cost_inr=r["value_inr"], rates_used=_rates_used(r), trace=r, reason=reason,
+            created_by=user())).inserted_primary_key[0]
+        conn.execute(db.parts.update().where(db.parts.c.id == part_id).values(rm_cost_id=rid, rm_cost_inr=r["value_inr"]))
+        _log(conn, "part", part_id, "rm_cost_calculated", {
+            "version": version, "net RM cost (INR)": round(r["value_inr"], 4), "material": r["material"],
+            "country": r["country"], "costing month": r["as_of"], "reason": reason,
+            "rate versions": ", ".join(f"#{x['id']}" for x in r["rates_used"])})
+    return {"stored": True, "version": version, "message": f"RM cost version {version} stored."}
+
+
+def refresh_rm(part_ids, reason: str) -> None:
+    """Recalculate after a change. A part that cannot be costed yet is skipped; it never blocks the change itself."""
+    for pid in dict.fromkeys(part_ids):
+        try:
+            compute_rm(pid, reason)
+        except (RegisterError, rm_cost.RMError, RMNotApplicable):
+            pass
+
+
+def recalculate_project(project_id: int, reason: str = "recalculated with the latest approved rates") -> dict:
+    with db.engine().connect() as conn:
+        ids = [r for (r,) in conn.execute(select(db.parts.c.id).where(and_(db.parts.c.project_id == project_id,
+                                                                         db.parts.c.is_assembly.is_(False))))]
+    done = same = 0
+    skipped = []
+    for pid in ids:
+        try:
+            res = compute_rm(pid, reason)
+        except RegisterError as exc:
+            if rm_eligibility(part_detail(pid, with_rm=False)) == "":
+                skipped.append({"part_id": pid, "why": str(exc)})
+            continue
+        done += res["stored"]
+        same += not res["stored"]
+    return {"new_versions": done, "unchanged": same, "problems": skipped}
+
+
+def set_rm_inputs(part_id: int, rm_inputs: dict | None, country: str | None = None, costing_month: str | None = None,
+                  reason: str = "RM inputs saved") -> dict:
+    """Save the typed inputs / country / month of a part and recalculate (e.g. from the Estimate page)."""
+    data = {"rm_inputs": rm_inputs or {}}
+    if country is not None:
+        data["country"] = country
+    if costing_month is not None:
+        data["costing_month"] = costing_month
+    update_part(part_id, data, refresh=False)
+    try:
+        res = compute_rm(part_id, reason)
+    except RegisterError as exc:
+        res = {"stored": False, "version": None, "message": str(exc)}
+    return res | {"part": part_detail(part_id)}
+
+
+def rm_trace(part_id: int, version: int | None = None) -> dict:
+    """The stored trace of a version, or (no version given and none stored) a live dry run."""
+    if version is not None or rm_versions(part_id):
+        with db.engine().connect() as conn:
+            q = select(db.rm_costs).where(db.rm_costs.c.part_id == part_id)
+            q = q.where(db.rm_costs.c.version == version) if version is not None else q.order_by(db.rm_costs.c.version.desc())
+            row = conn.execute(q.limit(1)).mappings().first()
+        if not row:
+            raise RegisterError(f"Part {part_id} has no RM cost version {version}.")
+        return row["trace"] | {"version": row["version"], "stored": True, "created_by": row["created_by"],
+                               "created_at": row["created_at"].isoformat(timespec="seconds")}
+    try:
+        return _rm_compute(part_id) | {"version": None, "stored": False}
+    except (RMNotApplicable, rm_cost.RMError) as exc:
+        raise RegisterError(str(exc)) from None
+
+
+def _node_source_text(node: dict) -> str:
+    from .trace import source_text
+    return source_text(node)
+
+
+def export_rm_excel(part_id: int, version: int | None = None) -> bytes:
+    d = part_detail(part_id, with_rm=False)
+    tr = rm_trace(part_id, version)
+    nodes = tr["nodes"]
+    wb = Workbook()
+    wb.properties.title = f"Design to Cost — RM cost {d['part_code']}"
+    wb.properties.creator = "Design to Cost"
+
+    def sheet(title, head, rows, first=False):
+        ws = wb.active if first else wb.create_sheet()
+        ws.title = title
+        ws.append(head)
+        for c in ws[1]:
+            c.font = Font(bold=True, color="FFFFFF")
+            c.fill = HEADER_FILL
+        for r in rows:
+            ws.append(r)
+            if len(r) and r[-1] == "EXAMPLE":
+                for c in ws[ws.max_row]:
+                    c.fill = EXAMPLE_FILL
+        for i, h in enumerate(head, start=1):
+            ws.column_dimensions[chr(64 + i)].width = min(max([len(str(h))] + [len(str(r[i - 1])) for r in rows]) + 2, 70)
+        ws.freeze_panes = "A2"
+
+    example = any(x.get("is_example") for x in tr["rates_used"])
+    sheet("Summary", ["Item", "Value"], [
+        ["Part code", d["part_code"]], ["Part name", d["name"]], ["Revision", tr.get("revision", {}).get("rev", "")],
+        ["Material", tr["material"]], ["Process", tr.get("process", d["process"])], ["Producing country", tr["country"]],
+        ["Costing month", tr["as_of"]], ["RM cost version", tr["version"] if tr["version"] else "not stored (live preview)"],
+        [f"Net RM cost per part ({tr['currency']})", tr["value"]], ["Net RM cost per part (INR)", tr["value_inr"]],
+        ["Rate versions used", ", ".join(f"#{x['id']}" for x in tr["rates_used"])],
+        ["Includes EXAMPLE values", "yes - replace them on the Rates page" if example else "no"],
+        ["Calculated by / when", f"{tr.get('created_by', '')} {tr.get('created_at', '')}".strip()]], first=True)
+    sheet("Steps", ["Step", "Formula", "Value", "Unit"],
+          [[n["label"], n["formula"], n["value"], n["unit"]] for n in nodes.values() if n["kind"] == "calculated"])
+    sheet("Inputs", ["Input", "Value", "Unit", "Comes from", ""],
+          [[n["label"], n["value"], n["unit"], _node_source_text(n),
+            "EXAMPLE" if (n.get("source") or {}).get("rate", {}).get("is_example") else ""]
+           for n in nodes.values() if n["kind"] == "input"])
+    sheet("Rates used", ["Version id", "Category", "Item", "Country", "Month", "Value", "Unit", "Status", "Approved by", ""],
+          [[x["id"], x["category"], x["item"], x["country"], x["month"], x["value"], x["unit"], x["status"],
+            x["approved_by"], "EXAMPLE" if x["is_example"] else ""] for x in tr["rates_used"]])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def export_rm_pdf(part_id: int, version: int | None = None) -> bytes:
+    from .pdf_report import rm_cost_pdf
+    return rm_cost_pdf(part_detail(part_id, with_rm=False), rm_trace(part_id, version))
 
 
 # ---------- BOM ----------
@@ -922,6 +1274,7 @@ def import_commit(token: str, project_id: int, variant_id: int | None, items: di
                                        "insert surface is covered by the body")
                 linked += 1
     shutil.rmtree(folder, ignore_errors=True)
+    refresh_rm([i for i in ids.values() if i], "imported from a 3D file")
     return {"created": len(created), "new_revisions": len(revised), "unchanged": len(set(unchanged)),
             "inserts_linked": linked, "part_ids": [i for i in ids.values() if i]}
 
@@ -1166,12 +1519,33 @@ def bulk_upload(project_id: int, excel: bytes, uploads: list[tuple[str, bytes]])
                     _set_insert_link(conn, body, rec["pid"], rec["insert_quantity"], notes=f"Excel row {rec['row']}")
                 except RegisterError as exc:
                     raise RegisterError(f"Nothing was saved. Parts row {rec['row']}: {exc}") from None
+    refresh_rm([r["pid"] for r in records], "imported from Excel")
     return {"rows": report, "inserts_linked": sum(1 for r in records if r["insert_of"]), "created": sum(r["result"] == "created" for r in report),
             "new_revisions": sum(r["result"] == "new revision" for r in report),
             "file_missing": sum(r["file"] == "File missing" for r in report)}
 
 
 # ---------- dashboard ----------
+
+def _rm_rollup(bom: list[dict]) -> dict:
+    """RM cost of a variant: total quantity × latest net RM cost of every costed part in its BOM (inserts excluded)."""
+    lines = [b for b in bom if b["kind"] == "bom" and not b["is_assembly"]]
+    ids = {b["child_part_id"] for b in lines}
+    if not ids:
+        return {"rm_cost_inr": None, "rm_parts_costed": 0, "rm_parts_missing": 0}
+    costed = register_setup.sourcing()
+    with db.engine().connect() as conn:
+        rm = {r["id"]: r["rm_cost_inr"] for r in conn.execute(
+            select(db.parts.c.id, db.parts.c.rm_cost_inr).where(db.parts.c.id.in_(ids))).mappings()}
+    total, have, missing = 0.0, 0, 0
+    for b in lines:
+        if rm.get(b["child_part_id"]) is not None:
+            total += b["total_quantity"] * rm[b["child_part_id"]]
+            have += 1
+        elif costed.get(b["sourcing"], {}).get("is_costed"):
+            missing += 1
+    return {"rm_cost_inr": total if have else None, "rm_parts_costed": have, "rm_parts_missing": missing}
+
 
 def dashboard(project_id: int) -> dict:
     project = get_project(project_id)
@@ -1184,6 +1558,8 @@ def dashboard(project_id: int) -> dict:
         missing = conn.execute(select(func.count()).select_from(db.parts.outerjoin(r, r.c.id == db.parts.c.current_revision_id))
                                .where(and_(db.parts.c.project_id == project_id, r.c.file_id.is_(None)))).scalar()
         total = sum(by_status.values())
+        rm_costed = conn.execute(select(func.count()).where(and_(db.parts.c.project_id == project_id,
+                                                                  db.parts.c.rm_cost_inr.is_not(None)))).scalar()
         targets = conn.execute(select(func.count(), func.sum(db.parts.c.target_piece_cost_inr))
                                .where(and_(db.parts.c.project_id == project_id,
                                            db.parts.c.target_piece_cost_inr.is_not(None)))).one()
@@ -1191,7 +1567,7 @@ def dashboard(project_id: int) -> dict:
     for v in project["variants"]:
         bom = variant_bom(v["id"])
         variants.append(v | {"bom_lines": len(bom), "unique_parts": len({b["child_part_id"] for b in bom}),
-                             "bom_cost_inr": None})
+                             "bom_cost_inr": None} | _rm_rollup(bom))
     procs, srcs = register_setup.processes(), register_setup.sourcing()
     corrections = sum(by_status.get(s["code"], 0) for s in statuses if s.get("is_open_correction"))
     return {
@@ -1205,7 +1581,10 @@ def dashboard(project_id: int) -> dict:
         "parts_with_target": targets[0], "target_piece_cost_sum_inr": targets[1],
         "capex": {"budget_inr": project["capex_budget_inr"], "tool_cost_inr": None, "machine_cost_inr": None},
         "open_corrections": corrections,
-        "not_costed_note": "Costs appear here from the part-costing and tool-costing stages (roadmap stages 4 and 8).",
+        "parts_rm_costed": rm_costed,
+        "not_costed_note": "RM cost is the raw-material cost only (quantity × net RM cost per part, from the latest stored "
+                           "version). Process cost, tools and the full BOM cost come from the part-costing and "
+                           "tool-costing stages (roadmap stages 4 and 8).",
     }
 
 
@@ -1225,7 +1604,7 @@ def export_parts_excel(**filters) -> bytes:
     wb.properties.creator = "Design to Cost"
     cols = ["part_code", "name", "project_code", "rev", "material", "process", "sourcing", "status", "annual_volume",
             "programme_life_years", "target_piece_cost_inr", "unit_price", "price_currency", "price_source", "price_month",
-            "volume_cm3", "bbox_mm", "file", "updated_at"]
+            "volume_cm3", "bbox_mm", "file", "country", "net_rm_cost_inr", "updated_at"]
     ws.append(cols)
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF")
@@ -1236,7 +1615,7 @@ def export_parts_excel(**filters) -> bytes:
         ws.append([r["part_code"], r["name"], r["project_code"], r["rev"], r["material"], r["process"], r["sourcing"],
                    r["status"], r["annual_volume"], r["programme_life_years"], r["target_piece_cost_inr"],
                    r["unit_price"], r["price_currency"], r["price_source"], r["price_month"], g.get("volume_cm3"), f"{b.get('length')} x {b.get('width')} x {b.get('height')}" if b else "",
-                   "yes" if r["file_id"] else "File missing", r["updated_at"]])
+                   "yes" if r["file_id"] else "File missing", r["country"], r["rm_cost_inr"], r["updated_at"]])
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
     buf = io.BytesIO()

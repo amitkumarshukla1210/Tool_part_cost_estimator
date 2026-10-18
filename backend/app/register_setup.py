@@ -13,6 +13,7 @@
     register_settings
         part_code_pattern  used when a part code is left blank, e.g. {project}-{seq:04d}
         storage_folder     where CAD files and thumbnails are kept (relative to the app folder or absolute)
+        default_country    producing country of a part's RM cost when the part has none set
 """
 
 from __future__ import annotations
@@ -83,7 +84,7 @@ TABLES = {
     ]},
 }
 REQUIRED_SETTINGS = ("part_code_pattern", "storage_folder", "insert_detect_min_share", "insert_probe_offset_mm",
-                     "insert_probe_points", "insert_default_sourcing", "insert_default_process")
+                     "insert_probe_points", "insert_default_sourcing", "insert_default_process", "default_country")
 NUMBER_SETTINGS = ("insert_detect_min_share", "insert_probe_offset_mm", "insert_probe_points")
 
 # Geometry values a process suggestion rule can use (measured from the STEP file).
@@ -143,6 +144,14 @@ def _check(clean: dict) -> None:
     if settings["insert_default_process"] not in {r["code"] for r in clean["processes"]}:
         raise RegisterSetupError(f"Register settings: insert_default_process '{settings['insert_default_process']}' "
                                  "is not a Process code.")
+    from . import costing_setup
+    settings["default_country"] = settings["default_country"].strip().upper()
+    for r in clean["register_settings"]:
+        if r["key"] == "default_country":
+            r["value"] = settings["default_country"]
+    if settings["default_country"] not in costing_setup.countries():
+        raise RegisterSetupError(f"Register settings: default_country '{settings['default_country']}' is not a code in "
+                                 "Countries, machines & formulas → Countries.")
     pattern = settings["part_code_pattern"]
     try:
         sample = pattern.format(project="PRJ", seq=1)

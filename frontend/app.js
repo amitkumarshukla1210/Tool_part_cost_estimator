@@ -4,8 +4,10 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 const $ = (id) => document.getElementById(id);
 const fmt = (n, d = 2) => Number(n).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 
-// Material presets (density, RM rate, scrap value) come from the master data file.
+// Material presets (density) come from the master data file; their RATES come from the approved rate library.
 let materials = [];
+let rmMeta = null;
+let registerInfo = null;
 
 async function loadMaterials() {
   try {
@@ -13,6 +15,9 @@ async function loadMaterials() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail);
     materials = data.Materials;
+    rmMeta = await (await fetch("/api/rm/meta")).json();
+    $("country").innerHTML = rmMeta.countries
+      .map((c) => `<option value="${c.code}" ${c.code === rmMeta.default_country ? "selected" : ""}>${c.name} (${c.currency})</option>`).join("");
   } catch (err) {
     setStatus(`Master data could not be loaded: ${err.message}`, true);
   }
@@ -36,7 +41,7 @@ $("material").addEventListener("change", () => {
   if (chosenMaterial()) $("density").value = chosenMaterial().density_g_cm3;
 });
 $("density").addEventListener("input", () => ($("material").value = ""));
-loadMaterials();
+const loaded = loadMaterials().then(openRegisteredPart);
 
 // ---------- 3D viewer ----------
 const container = $("viewer");
@@ -138,7 +143,7 @@ $("form").addEventListener("submit", async (e) => {
     if (!res.ok) throw new Error(data.detail || res.statusText);
     showResults(data.metrics);
     resetMould();
-    startStageB(data, chosenMaterial());
+    await startStageB(data, chosenMaterial());
     showMesh(data.mesh);
     setStatus(`${data.file_name} · ${data.part_type_label}`);
     $("fileInfo").textContent = `${data.file_name} · ${data.part_type_label} · density ${data.metrics.density_g_cm3} g/cm³`;
@@ -194,6 +199,12 @@ const LABELS = {
 const formB = $("formB");
 let analysis = null; // last Stage A response
 let timerB = null;
+let baseline = {}; // what the form showed after loading: only edited fields are sent, so defaults stay "master data"
+let lastB = null; // last RM result (its trace opens in the traceability panel)
+let lastCurrency = "";
+
+const ESTIMATED = ["thickness_mm", "blank_length_mm", "blank_width_mm"];
+const RATE_VARIABLE = { material_rate_per_kg: "material_rate", scrap_rate_per_kg: "scrap_rate" };
 
 async function startStageB(data, material) {
   analysis = data;
@@ -209,13 +220,9 @@ async function startStageB(data, material) {
     el.textContent = LABELS[el.dataset.label][type] ?? "";
   });
 
-  // Fresh defaults for each analysed part. Rates come from the chosen
-  // material; with density typed by hand, the last rates entered are kept.
-  for (const [key, value] of Object.entries(defaultsB[type])) formB.elements[key].value = value;
-  if (material) {
-    formB.elements.material_rate_per_kg.value = material.rate_per_kg;
-    formB.elements.scrap_rate_per_kg.value = material.scrap_rate_per_kg;
-  }
+  // Fresh defaults (from Master data → Parameters) for each analysed part. Rates stay empty: the approved library rate is used.
+  for (const input of formB.elements) if (input.name) input.value = "";
+  for (const [key, value] of Object.entries(defaultsB[type])) if (formB.elements[key]) formB.elements[key].value = value;
   if (data.sheet_metal) {
     formB.elements.thickness_mm.value = data.sheet_metal.thickness_mm;
     formB.elements.blank_length_mm.value = data.sheet_metal.blank_mm.length;
@@ -223,9 +230,11 @@ async function startStageB(data, material) {
     $("sheetHint").textContent =
       "Thickness and flat blank size were estimated from the 3D model. Check them against the drawing or flat pattern.";
   }
+  baseline = Object.fromEntries([...formB.elements].filter((i) => i.name).map((i) => [i.name, i.value]));
+  applyRegisteredInputs();
 
   $("stageB").hidden = false;
-  calculateB();
+  await calculateB();
   startStageC(data);
 }
 
@@ -237,13 +246,23 @@ formB.addEventListener("input", () => {
     if (analysis.metrics.part_type === "sheet_metal") calculateC();
   }, 300);
 });
+$("country").addEventListener("change", () => analysis && calculateB());
+$("asOf").addEventListener("change", () => analysis && calculateB());
 
 async function calculateB() {
   const m = analysis.metrics;
-  const body = { part_type: m.part_type, net_weight_g: m.net_weight_g, density_g_cm3: m.density_g_cm3 };
+  const body = { part_type: m.part_type, net_weight_g: m.net_weight_g, density_g_cm3: m.density_g_cm3,
+    material: chosenMaterial()?.material ?? registered?.material ?? "", country: $("country").value, estimated: [] };
+  if ($("asOf").value.trim()) body.as_of = $("asOf").value.trim();
   for (const input of formB.querySelectorAll("label:not([hidden]) input")) {
     if (input.value === "") continue;
-    body[input.name] = input.type === "number" ? Number(input.value) : input.value;
+    const same = input.value === baseline[input.name];
+    if (ESTIMATED.includes(input.name)) {
+      body[input.name] = Number(input.value);
+      if (same) body.estimated.push(input.name); // still the value estimated from the 3D file
+    } else if (!same) {
+      body[input.name] = input.type === "number" ? Number(input.value) : input.value; // only what you changed
+    }
   }
 
   try {
@@ -254,7 +273,9 @@ async function calculateB() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(errorText(data.detail));
-    $("statusB").textContent = "";
+    lastB = data;
+    lastCurrency = data.currency;
+    $("statusB").textContent = data.missing.join(" ");
     $("resultsB").hidden = false;
     showResultsB(data);
   } catch (err) {
@@ -271,24 +292,120 @@ function errorText(detail) {
 
 const grams = (g) => (g >= 1000 ? `${fmt(g / 1000, 3)} kg` : `${fmt(g, 2)} g`);
 
+// A value that opens the traceability panel on click.
+const traced = (id, text) => `<button type="button" class="tv" data-node="${id}">${text}</button>`;
+
 function showResultsB(r) {
+  const n = r.nodes;
   const money = (v) => `${r.currency} ${fmt(v, 2)}`;
-  $("b-net").textContent = grams(r.net_weight_g);
-  $("b-gross").textContent = grams(r.gross_weight_g);
-  $("b-returns").textContent = grams(r.returns_scrap_g);
-  $("b-loss").textContent = r.process_loss_g === undefined ? "" : grams(r.process_loss_g);
-  $("b-input").textContent = grams(r.material_input_g);
-  $("b-yield").textContent = `${fmt(r.material_yield_pct, 1)} %`;
+  const set = (el, node, text) => ($(el).innerHTML = n[node] ? traced(node, text) : text);
+  set("b-net", "in:net_weight_g", grams(r.net_weight_g));
+  set("b-gross", "calc:gross_g", grams(r.gross_weight_g));
+  set("b-returns", "calc:returns_g", grams(r.returns_scrap_g));
+  $("b-loss").innerHTML = r.process_loss_g === undefined ? "" : traced("calc:loss_g", grams(r.process_loss_g));
+  set("b-input", "calc:input_g", grams(r.material_input_g));
+  set("b-yield", "calc:material_yield_pct", `${fmt(r.material_yield_pct, 1)} %`);
   if (r.nesting) {
-    const n = r.nesting;
-    $("b-nest").textContent = `${n.per_sheet}  (${n.along} × ${n.across}${n.rotated ? ", blank turned 90°" : ""})`;
-    $("b-sheet").textContent = `${fmt(r.sheet_weight_kg, 2)} kg · ${fmt(r.sheet_utilisation_pct, 1)} % used`;
+    const k = r.nesting;
+    set("b-nest", "in:blanks_per_sheet", `${k.per_sheet}  (${k.along} × ${k.across}${k.rotated ? ", blank turned 90°" : ""})`);
+    set("b-sheet", "calc:sheet_weight_g", `${fmt(r.sheet_weight_kg, 2)} kg · ${fmt(r.sheet_utilisation_pct, 1)} % used`);
   }
-  const priced = r.inputs.material_rate_per_kg > 0;
-  $("b-rm").textContent = priced ? money(r.rm_cost) : "enter material rate";
-  $("b-credit").textContent = priced || r.scrap_credit ? `− ${money(r.scrap_credit)}` : "";
-  $("b-net-rm").textContent = priced ? money(r.net_rm_cost) : "—";
+  const rate = n["in:material_rate"];
+  const rs = rate?.source;
+  $("b-rate").innerHTML = r.priced || rs?.type === "user"
+    ? traced("in:material_rate", `${money(rate.value)} / kg`) +
+      (rs?.type === "rate" ? ` <span class="note">${rs.rate.month}${rs.rate.is_example ? ' <span class="badge badge-example">EXAMPLE</span>' : ""}</span>`
+        : ' <span class="note">your input</span>')
+    : "no approved rate";
+  if (r.priced) {
+    set("b-rm", "calc:rm_cost", money(r.rm_cost));
+    set("b-credit", "calc:scrap_credit", `− ${money(r.scrap_credit)}`);
+    $("b-net-rm").innerHTML = traced(r.root, money(r.net_rm_cost)) + (r.currency !== "INR" ? ` <span class="note">${fmt(r.value_inr, 2)} INR</span>` : "");
+  } else {
+    $("b-rm").textContent = "needs a material rate";
+    $("b-credit").textContent = "";
+    $("b-net-rm").textContent = "—";
+  }
 }
+
+$("resultsB").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-node]");
+  if (b && lastB) window.TracePanel.open(lastB, b.dataset.node);
+});
+
+// ---------- open a registered part / save back to it ----------
+let registered = null;
+
+async function openRegisteredPart() {
+  const id = Number(new URLSearchParams(location.search).get("part"));
+  if (!id) return;
+  const banner = (text, msg = "", kind = "") => {
+    $("partBanner").hidden = false;
+    $("partBannerText").textContent = text;
+    $("partBannerStatus").textContent = msg;
+    $("partBannerStatus").className = `status ${kind}`;
+  };
+  try {
+    registerInfo = await (await fetch("/api/register-meta")).json();
+    registered = await (await fetch(`/api/parts/${id}`)).json();
+    if (registered.detail) throw new Error(registered.detail);
+    const family = registerInfo.processes.find((x) => x.code === registered.process)?.part_type;
+    if (!registered.file_id) throw new Error("This part has no 3D file yet. Upload a revision on the Parts page.");
+    if (!family) throw new Error("RM for this process comes in a later stage; choose a moulding, casting or sheet-metal process on the Parts page.");
+    banner(`Estimating registered part ${registered.part_code} · ${registered.name} (rev ${registered.rev})`, "Loading its 3D file…");
+    const blob = await (await fetch(`/api/files/${registered.file_id}`)).blob();
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], `${registered.part_code}.step`));
+    $("file").files = dt.files;
+    $("partType").value = family;
+    fillMaterials();
+    const idx = materials.findIndex((m) => m.material === registered.material && m.part_type === family);
+    if (idx >= 0) {
+      $("material").value = String(idx);
+      $("density").value = materials[idx].density_g_cm3;
+    }
+    $("country").value = registered.country || registered.effective_country;
+    $("asOf").value = registered.costing_month || "";
+    $("savePart").hidden = false;
+    $("form").requestSubmit();
+    banner(`Estimating registered part ${registered.part_code} · ${registered.name} (rev ${registered.rev})`,
+      "Its stored inputs are filled in. Change anything, then use Save to part.");
+  } catch (err) {
+    banner("Could not open the registered part", err.message, "error");
+  }
+}
+
+// Stored per-part inputs go into the form after the first analysis.
+function applyRegisteredInputs() {
+  if (!registered?.rm_inputs) return;
+  for (const [variable, value] of Object.entries(registered.rm_inputs)) {
+    const name = Object.keys(RATE_VARIABLE).find((k) => RATE_VARIABLE[k] === variable) ?? variable;
+    if (formB.elements[name]) formB.elements[name].value = value;
+  }
+}
+
+$("savePartBtn").addEventListener("click", async () => {
+  const inputs = {};
+  for (const input of formB.querySelectorAll("label:not([hidden]) input")) {
+    if (input.value === "" || input.value === baseline[input.name]) continue;
+    inputs[RATE_VARIABLE[input.name] ?? input.name] = Number(input.value);
+  }
+  const status = $("partBannerStatus");
+  status.textContent = "Saving…";
+  try {
+    const res = await fetch(`/api/parts/${registered.id}/rm-cost`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rm_inputs: inputs, country: $("country").value === rmMeta.default_country ? "" : $("country").value,
+        costing_month: $("asOf").value.trim(), reason: "saved from the Estimate page" }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(errorText(data.detail));
+    status.className = "status ok";
+    status.innerHTML = `${data.message} <a class="link" href="/parts?part=${registered.id}">Open the part</a>`;
+  } catch (err) {
+    status.className = "status error";
+    status.textContent = err.message;
+  }
+});
 
 // ---------- Stage C: cavities & number of tools ----------
 const LABELS_C = {
@@ -478,7 +595,7 @@ async function calculateMould() {
 }
 
 function showMould(r) {
-  const cur = formB.elements.currency.value || "";
+  const cur = lastCurrency;
   const money = (v) => `${cur} ${int(v)}`;
   const L = r.layout;
   const b = r.base;

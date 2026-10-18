@@ -180,7 +180,7 @@ def test_api_save_and_approve_and_edit_draft():
 def test_excel_export_and_import_as_drafts():
     xlsx = client.get("/api/rates/download")
     ws = load_workbook(io.BytesIO(xlsx.content))["Rates"]
-    assert ws.max_row - 1 == len([1 for _ in rates.history("forex", "USD")]) + 547
+    assert ws.max_row - 1 == len([1 for _ in rates.history("forex", "USD")]) + 591
     new = io.BytesIO()
     from openpyxl import Workbook
     wb = Workbook()

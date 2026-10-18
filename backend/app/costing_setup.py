@@ -4,11 +4,13 @@
     machines         technical data per machine (power, area, life, residual,
                      maintenance); prices and consumables are country rates
     labour_grades    skill levels (operator, toolmaker, ...)
-    cost_formulas    every step of the MHR and labour-rate calculation as a
-                     formula, per scope ("mhr" or "labour")
+    cost_formulas    every step of the MHR, labour-rate and raw-material (RM) cost
+                     calculation as a formula, per scope ("mhr", "labour",
+                     "rm_plastic", "rm_die_casting", "rm_foundry", "rm_sheet_metal")
     formula_inputs   where each formula variable comes from: a country rate
-                     (category + item, "{machine}" / "{grade}" filled in) or a
-                     machine field
+                     (category + item, "{machine}" / "{grade}" / "{material}" filled
+                     in), a machine field, a Parameters row of the part's family, or
+                     a value of the part itself (net weight, density, sheet blank, ...)
 
 Changing these rows changes the calculation logic without touching code.
 """
@@ -18,11 +20,25 @@ from __future__ import annotations
 from . import formula
 from .table_set import TableSet, col
 
-SCOPES = ("mhr", "labour")
-SOURCES = ("rate", "machine")
+RM_FAMILIES = ("plastic", "die_casting", "foundry", "sheet_metal")
+SCOPES = ("mhr", "labour") + tuple(f"rm_{f}" for f in RM_FAMILIES)
+SOURCES = ("rate", "machine", "parameter", "part")
 MACHINE_FIELDS = ("power_kw", "load_factor_pct", "floor_area_m2", "life_years", "residual_pct",
                   "maintenance_pct", "tonnage_t", "length_mm", "width_mm")
-RESULT_OF = {"mhr": "Machine hour rate", "labour": "Labour rate"}
+RESULT_OF = {"mhr": "Machine hour rate", "labour": "Labour rate"} | {f"rm_{f}": "Net RM cost per part" for f in RM_FAMILIES}
+# Values of the part itself an RM formula can use (source = part).
+PART_ITEMS = {
+    "net_weight_g": "Net part weight (g): CAD volume × material density (body only for insert-moulded parts)",
+    "density_g_cm3": "Material density (g/cm³) from Master data → Materials",
+    "thickness_mm": "Sheet thickness (mm): most common wall of the 3D model",
+    "blank_length_mm": "Flat blank length (mm): estimated from the 3D model",
+    "blank_width_mm": "Flat blank width (mm): estimated from the 3D model",
+    "blanks_per_sheet": "Blanks per sheet: best straight-grid nesting of the blank on the usable sheet",
+}
+# Part values you may type over per part (the others are measured or worked out).
+OVERRIDABLE_PART_ITEMS = ("thickness_mm", "blank_length_mm", "blank_width_mm")
+# Variables the nesting search needs when a scope uses blanks_per_sheet.
+NESTING_VARIABLES = ("sheet_length_mm", "sheet_width_mm", "gap_mm", "edge_mm", "blank_length_mm", "blank_width_mm")
 
 
 class SetupError(ValueError):
@@ -122,6 +138,21 @@ def _check(clean: dict) -> None:
             raise SetupError(f"Formula inputs row {i}: a rate input needs a rate category and item.")
         if r["source"] == "machine" and r["item"] not in MACHINE_FIELDS:
             raise SetupError(f"Formula inputs row {i}: machine field must be one of {', '.join(MACHINE_FIELDS)}.")
+        if r["source"] in ("parameter", "part") and not r["scope"].startswith("rm_"):
+            raise SetupError(f"Formula inputs row {i}: source '{r['source']}' is only for the RM scopes (rm_...).")
+        if r["source"] == "parameter" and not r["item"]:
+            raise SetupError(f"Formula inputs row {i}: a parameter input needs the parameter name in 'item' "
+                             "(a row of Master data → Parameters).")
+        if r["source"] == "part" and r["item"] not in PART_ITEMS:
+            raise SetupError(f"Formula inputs row {i}: part value must be one of {', '.join(PART_ITEMS)}.")
+    for scope in SCOPES:
+        rows = [r for r in clean["formula_inputs"] if r["scope"] == scope]
+        if any(r["source"] == "part" and r["item"] == "blanks_per_sheet" for r in rows):
+            have = {r["variable"] for r in rows}
+            lack = [v for v in NESTING_VARIABLES if v not in have]
+            if lack:
+                raise SetupError(f"Formula inputs: scope '{scope}' uses blanks_per_sheet, so the nesting also needs "
+                                 f"the variables {', '.join(lack)}.")
     for scope in SCOPES:
         rows = [(i, r) for i, r in enumerate(clean["cost_formulas"], start=2) if r["scope"] == scope]
         if not rows:
@@ -150,9 +181,14 @@ def _help() -> list:
         ["variable", "meaning"],
         ["Cost formulas", "One row per calculation step. A formula may use the scope's Formula inputs and the names "
                           "of other formulas in the same scope. Mark exactly one row per scope as the final result."],
-        ["Formula inputs", "source = rate: the country rate with this category and item ({machine} and {grade} are "
-                           "filled in). source = machine: a field of the Machines sheet. Money inputs are converted "
-                           "to the producing country's currency with the forex rate of the month."],
+        ["Formula inputs", "source = rate: the country rate with this category and item ({machine}, {grade} and "
+                           "{material} are filled in). source = machine: a field of the Machines sheet. Money inputs "
+                           "are converted to the producing country's currency with the forex rate of the month."],
+        ["source = parameter", "RM scopes only: the Master data → Parameters row with this name for the part's family "
+                               "(e.g. runner_pct). You can type over it per part; that is then traced as your input."],
+        ["source = part", "RM scopes only: a value of the part: " + "; ".join(f"{k} = {v}" for k, v in PART_ITEMS.items())],
+        ["RM scopes", "rm_plastic, rm_die_casting, rm_foundry, rm_sheet_metal: gross weight, yield, RM cost and scrap "
+                      "credit. Units written with {cur} are money in the producing country's currency."],
         ["functions", "ceil, floor, round, min, max, abs, sqrt; 'a if condition else b'; and, or, not"],
     ]
 
@@ -161,7 +197,7 @@ SET = TableSet("Countries, machines & formulas", TABLES, error=SetupError, check
 
 
 def schema() -> dict:
-    return SET.schema() | {"machine_fields": list(MACHINE_FIELDS)}
+    return SET.schema() | {"machine_fields": list(MACHINE_FIELDS), "part_items": PART_ITEMS}
 
 
 def tables() -> dict:
