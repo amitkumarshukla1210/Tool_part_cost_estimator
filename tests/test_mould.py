@@ -88,7 +88,7 @@ def test_edits_change_the_result():
     for r in data["sizing_rules"]:
         if r["part_type"] == "plastic" and r["parameter"] == "insert_wall_mm":
             r["value"], r["is_example"] = 40, False
-    big = dict(data["mould_bases"][-9], size_code="7080", length_mm=800, width_mm=700,
+    big = dict([b for b in data["mould_bases"] if b["part_type"] == "plastic"][-1], size_code="7080", length_mm=800, width_mm=700,
                max_insert_length_mm=640, max_insert_width_mm=540)
     data["mould_bases"].append(big)
     assert client.put("/api/mould-db", json=data).status_code == 200

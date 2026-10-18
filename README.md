@@ -554,6 +554,21 @@ Open **Harness & PCB** in the header and upload a file:
 The XML reader follows the KBL / VEC structure by element names and was built and tested with small hand-made samples, not with your real exports:
 check the first real file and tell me what differs. Costing is in the next section.
 
+## EPS (thermocole) moulds and PET stretch blow moulding (roadmap stages 18 and 19)
+
+Two more part types run through the same stages as injection moulding; pick the material and the process follows (*Master data → Materials*, part type `eps` or `blow`):
+
+- **EPS shape moulding (thermocole)**, process `eps_moulding`: foam weight = CAD volume × foam density (e.g. 20 kg/m³ = 0.020 g/cm³); bead cost per kg with trim and fines;
+  **tool** = aluminium cavity and core blocks in a steam chest (Mould bases series *Steam chest*), steam vents (count from the surface area), fill guns, ejectors, valves and fittings; the
+  **steam pressure** times the projected area sets the locking force that picks the EPS moulding machine; **steam** per kg of part is added to the part cost (Parameters `steam_kg_per_kg_part`, rate `utility / steam_per_kg`).
+- **PET stretch blow moulding (bottles)**, process `stretch_blow_moulding`: bottle weight = **outer surface × average wall × density** (a bottle is a thin shell, so the CAD volume is not used; wall = Parameters `blow_wall_mm`, or type `wall_mm` under RM inputs for the part);
+  **tool** = blow mould (aluminium cavity halves, base and neck inserts, vents, cooling, stretch rod and blow nozzle per cavity) in a blow-mould holder; blow pressure × projected area picks the stretch blow machine; the
+  **preform** is an ordinary plastic part (*PET preform grade*, injection moulding, high cavity count) and its injection conversion is added to the bottle's cost as a share of the resin cost (Parameters `preform_conversion_pct`, example 28 %):
+  cost the preform as its own part to replace that share by your real preform price.
+
+All new rows are EXAMPLE values (machines EPS-1000/1400/1800 and ISBM-2C/4C/6C/8C, materials, aluminium 7075 / 6061, bases, BOM rules, cycle times, steam and resin rates for 9 countries, HS 3923). The country comparison and landed cost, the part cost and the project view work
+for them unchanged. The concept and simulation cards (opening direction, undercuts, wall and draft maps) are for plastic injection and die casting only.
+
 ## Server mode (roadmap stage 17)
 
 By default the app runs on one PC without a login. For a team, run it once on a server:

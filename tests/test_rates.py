@@ -153,7 +153,7 @@ def test_bad_setup_is_rejected(change, message):
 def test_api_overview_and_errors():
     r = client.get("/api/mhr", params={"country": "IN", "as_of": MONTH})
     body = r.json()
-    assert r.status_code == 200 and len(body["machines"]) == 26 and len(body["labour"]) == 4
+    assert r.status_code == 200 and len(body["machines"]) == 33 and len(body["labour"]) == 4
     assert all("error" not in m for m in body["machines"])
     # a month with no approved rates still renders, with the reason per row
     old = client.get("/api/mhr", params={"country": "IN", "as_of": "2020-01"}).json()
@@ -180,7 +180,7 @@ def test_api_save_and_approve_and_edit_draft():
 def test_excel_export_and_import_as_drafts():
     xlsx = client.get("/api/rates/download")
     ws = load_workbook(io.BytesIO(xlsx.content))["Rates"]
-    assert ws.max_row - 1 == len([1 for _ in rates.history("forex", "USD")]) + 591 + 748 + 36 + 97 + 126   # 126 = new machine prices, consumables, wire conversion, bare-board rates (stage 15); 97 = freight, duty, import rates (stage 11); 748 = country material/tool-steel/process rates seeded in stage 3; 36 = toolmaker terms (stage 4)
+    assert ws.max_row - 1 == len([1 for _ in rates.history("forex", "USD")]) + 591 + 748 + 36 + 97 + 126 + 256   # 256 = EPS and stretch blow materials, machines, tool aluminium, steam and duty rates (stages 18, 19); 126 = new machine prices, consumables, wire conversion, bare-board rates (stage 15); 97 = freight, duty, import rates (stage 11); 748 = country material/tool-steel/process rates seeded in stage 3; 36 = toolmaker terms (stage 4)
     new = io.BytesIO()
     from openpyxl import Workbook
     wb = Workbook()

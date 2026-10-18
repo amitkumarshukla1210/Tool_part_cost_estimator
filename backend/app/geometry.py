@@ -21,6 +21,8 @@ PART_TYPES = {
     "die_casting": "Pressure die casting",
     "foundry": "Foundry / sand / gravity casting",
     "sheet_metal": "Sheet metal",
+    "eps": "EPS (thermocole) shape moulding",
+    "blow": "PET stretch blow moulding (bottles)",
 }
 
 # Tessellation tolerance (mm) used for projected area and the 3D viewer.

@@ -42,6 +42,8 @@ TERMS = {
     "die_casting": {"cavity": "cavities", "tool": "dies", "shot": "shots"},
     "foundry": {"cavity": "castings per mould", "tool": "pattern sets", "shot": "moulds"},
     "sheet_metal": {"cavity": "parts per stroke", "tool": "die sets", "shot": "strokes"},
+    "eps": {"cavity": "cavities", "tool": "moulds", "shot": "shots"},
+    "blow": {"cavity": "cavities", "tool": "blow moulds", "shot": "shots"},
 }
 
 
@@ -54,7 +56,7 @@ def plastic_cycle_estimate(wall_mm: float) -> float:
 
 
 class CapacityInput(BaseModel):
-    part_type: Literal["plastic", "die_casting", "foundry", "sheet_metal"]
+    part_type: Literal["plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow"]
     footprint_length_mm: float = Field(gt=0, description="Part size across the parting plane, or blank length")
     footprint_width_mm: float = Field(gt=0)
 

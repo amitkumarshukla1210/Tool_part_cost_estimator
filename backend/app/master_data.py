@@ -29,7 +29,7 @@ from openpyxl.utils import get_column_letter
 
 DEFAULT_PATH = Path(__file__).resolve().parents[2] / "master_data" / "master_data.xlsx"
 
-PART_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal")
+PART_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow")
 
 # Sheet name -> columns, and which columns must be numbers.
 SHEETS = {

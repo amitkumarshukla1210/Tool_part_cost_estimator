@@ -44,7 +44,7 @@ def default_country() -> str:
 
 
 class GrossWeightInput(BaseModel):
-    part_type: Literal["plastic", "die_casting", "foundry", "sheet_metal"]
+    part_type: Literal["plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow"]
     net_weight_g: float = Field(gt=0)
     density_g_cm3: float = Field(gt=0)
     material: str = ""
