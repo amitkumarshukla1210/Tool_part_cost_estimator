@@ -11,7 +11,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -374,7 +374,7 @@ def rates_updates():
 def rates_fetch_now():
     """Fetch the free official sources now; everything arrives as Drafts on the Rate review page."""
     from . import rate_update
-    return rate_update.run_update(user=rates.settings().get("approver_name") or "local user")
+    return rate_update.run_update(user=register.user())
 
 
 @app.get("/api/rates/review")
@@ -1079,6 +1079,125 @@ def import_page():
 @app.get("/help")
 def help_page():
     return FileResponse(FRONTEND_DIR / "help.html")
+
+
+# ---------- server mode: logins and roles (roadmap stage 17) ----------
+
+from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
+from . import auth  # noqa: E402
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    """Local mode: nothing changes. Server mode: every page and API call needs a login; roles decide who may change what."""
+
+    async def dispatch(self, request, call_next):
+        if not auth.server_mode() or not auth.needs_login(request.url.path):
+            return await call_next(request)
+        user = auth.user_of(request.cookies.get(auth.COOKIE))
+        path = request.url.path
+        if user is None:
+            if path.startswith("/api/"):
+                return JSONResponse({"detail": "Please log in."}, status_code=401)
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse("/login", status_code=303)
+        why = auth.allowed(user, request.method, path)
+        if why:
+            return JSONResponse({"detail": why}, status_code=403)
+        token = auth.set_current(user)
+        try:
+            return await call_next(request)
+        finally:
+            auth.reset(token)
+
+
+app.add_middleware(AuthMiddleware)
+
+
+@app.exception_handler(auth.AuthError)
+def auth_error_handler(_, exc: auth.AuthError):
+    return JSONResponse({"detail": str(exc)}, status_code=exc.status)
+
+
+@app.on_event("startup")
+def _server_startup():
+    if auth.server_mode():
+        projects_db.engine()
+        auth.bootstrap_admin()
+
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/auth/login")
+def auth_login(inp: LoginIn):
+    token, user = auth.login(inp.username, inp.password)
+    res = JSONResponse({"user": user})
+    res.set_cookie(auth.COOKIE, token, httponly=True, samesite="lax", max_age=auth.SESSION_HOURS * 3600,
+                   secure=os.environ.get("DTC_COOKIE_SECURE", "").lower() in ("1", "true", "yes"))
+    return res
+
+
+@app.post("/api/auth/logout")
+def auth_logout(request: Request):
+    auth.logout(request.cookies.get(auth.COOKIE))
+    res = JSONResponse({"ok": True})
+    res.delete_cookie(auth.COOKIE)
+    return res
+
+
+@app.get("/api/auth/me")
+def auth_me():
+    u = auth.current()
+    return {"mode": "server" if auth.server_mode() else "local", "user": u}
+
+
+@app.post("/api/auth/password")
+def auth_password(data: dict):
+    auth.change_password(auth.current(), data.get("old", ""), data.get("new", ""))
+    return {"ok": True}
+
+
+@app.get("/api/server/health")
+def server_health():
+    """Mode, database kind and storage check, for a load balancer or a quick look. No data is shown."""
+    url = projects_db.database_url()
+    storage = register_setup.storage_root()
+    try:
+        storage.mkdir(parents=True, exist_ok=True)
+        probe = storage / ".write-test"
+        probe.write_text("ok")
+        probe.unlink()
+        writable = True
+    except OSError:
+        writable = False
+    return {"mode": "server" if auth.server_mode() else "local", "database": url.split(":", 1)[0].split("+")[0], "storage_writable": writable}
+
+
+@app.get("/api/users")
+def users_list():
+    return auth.list_users()
+
+
+@app.post("/api/users")
+def users_create(data: dict):
+    return auth.create_user(data.get("username", ""), data.get("password", ""), data.get("role", "engineer"), data.get("name", ""))
+
+
+@app.put("/api/users/{uid}")
+def users_update(uid: int, data: dict):
+    return auth.update_user(uid, data, auth.current())
+
+
+@app.get("/login")
+def login_page():
+    return FileResponse(FRONTEND_DIR / "login.html")
+
+
+@app.get("/users")
+def users_page():
+    return FileResponse(FRONTEND_DIR / "users.html")
 
 
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")

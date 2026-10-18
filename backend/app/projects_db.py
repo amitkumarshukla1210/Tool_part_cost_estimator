@@ -277,6 +277,26 @@ bom_extract_lines = Table(
     Index("ix_bom_extract_lines", "extract_id", "position"),
 )
 
+users = Table(
+    "users", meta,
+    Column("id", Integer, primary_key=True),
+    Column("username", String(80), nullable=False, unique=True),
+    Column("name", String(200), default=""),
+    Column("password_hash", String(300), nullable=False),
+    Column("role", String(20), nullable=False),        # viewer, engineer, approver, admin
+    Column("active", Boolean, default=True),
+    Column("created_at", DateTime, default=now),
+    Column("last_login", DateTime),
+)
+
+sessions = Table(
+    "sessions", meta,
+    Column("token_hash", String(64), primary_key=True),
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("expires_at", DateTime, nullable=False),
+    Column("created_at", DateTime, default=now),
+)
+
 history = Table(
     "history", meta,
     Column("id", Integer, primary_key=True),

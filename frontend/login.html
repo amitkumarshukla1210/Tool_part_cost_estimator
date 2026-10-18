@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design to Cost — Log in</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header><div class="header-inner"><a class="brand" href="/"><img src="/theme/logo.png" alt="Design to Cost logo" />
+    <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span></a></div></header>
+  <main>
+    <section class="page-body"><div class="container" style="max-width:420px">
+      <form class="card" id="loginForm">
+        <h2>Log in</h2>
+        <label>User name <input name="username" autocomplete="username" required autofocus /></label>
+        <label>Password <input type="password" name="password" autocomplete="current-password" required /></label>
+        <p class="status error" id="loginStatus" role="alert"></p>
+        <button type="submit" class="btn btn-primary">Log in</button>
+      </form>
+    </div></section>
+  </main>
+  <script>
+    document.getElementById("loginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const f = Object.fromEntries(new FormData(e.target));
+      const res = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(f) });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok) location.href = new URLSearchParams(location.search).get("next") || "/dashboard";
+      else document.getElementById("loginStatus").textContent = body.detail || "Login failed.";
+    });
+  </script>
+</body>
+</html>
