@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
-from backend.app import costing_setup, register, rm_cost
+from backend.app import costing_setup, rates, register, rm_cost
 from backend.app import projects_db as db
 from backend.app.main import app
 
@@ -160,7 +160,8 @@ def test_missing_rate_gives_a_clear_message_and_stores_nothing():
 def test_other_country_uses_its_own_rates_and_currency():
     pid = add_part(project())
     client.put(f"/api/parts/{pid}", json={"country": "CN"})
-    assert "No approved rate" in detail(pid)["rm"]["problem"]              # no CN material rates yet (stage 3)
+    assert detail(pid)["rm"]["problem"] == ""                              # stage 3 seeded CN material rates
+    assert rates.lookup("material", "ABS", "CN", "2026-10")["currency"] == "CNY"
     approver()
     new_rate("ABS", 14, country="CN", month="2026-10")
     new_rate("ABS", 0, category="material_scrap", country="CN", month="2026-10")
@@ -229,6 +230,7 @@ def test_search_filter_dashboard_rollup_and_exports():
     var = dash["variants"][0]
     ra, rb = detail(a)["rm_cost_inr"], detail(b)["rm_cost_inr"]
     assert var["rm_cost_inr"] == pytest.approx(2 * ra + 3 * rb) and var["rm_parts_costed"] == 2
+    assert var["rm_is_example"] is True and dash["rm_is_example"] is True          # seeded rates are EXAMPLES
     assert client.get(f"/api/projects/{p['id']}/dashboard.pdf").content[:4] == b"%PDF"
 
     xl = client.get(f"/api/parts/{a}/rm-cost/export.xlsx")
@@ -240,7 +242,7 @@ def test_search_filter_dashboard_rollup_and_exports():
     assert "Rate library #" in inputs["Material rate"] and "EXAMPLE" in inputs["Material rate"]
     assert client.get(f"/api/parts/{a}/rm-cost/export.pdf").content[:4] == b"%PDF"
     parts_xlsx = load_workbook(io.BytesIO(client.get("/api/parts/export.xlsx", params={"project_id": p["id"]}).content))
-    assert "net_rm_cost_inr" in [c.value for c in parts_xlsx.active[1]]
+    assert "net_rm_cost_inr" in [c.value for c in parts_xlsx.active[2]]   # row 1 is the example-rate banner
 
 
 def test_project_recalculation_uses_the_latest_rates():
@@ -292,3 +294,43 @@ def test_setup_checks_for_rm_formulas():
     with pytest.raises(costing_setup.SetupError, match="nesting also needs"):
         costing_setup.write(setup | {"formula_inputs": bad})
     assert rm_cost.overridable("plastic")[0]["variable"]
+
+
+# ---------- example-rate warning ----------
+
+WARNING = "Uses example rates – not for negotiation"
+
+
+def test_cost_with_example_rates_shows_the_warning_everywhere():
+    p = project()
+    a = add_part(p, code="PC-1")                         # ABS: the seeded material rate is an EXAMPLE
+    row = client.get("/api/parts", params={"project_id": p["id"]}).json()
+    assert row["rows"][0]["rm_is_example"] is True and row["example_warning"] == WARNING
+
+    wb = load_workbook(io.BytesIO(client.get(f"/api/parts/{a}/rm-cost/export.xlsx").content))
+    for ws in wb.worksheets:                              # banner on the first row of EVERY sheet
+        assert ws["A1"].value == WARNING, ws.title
+    parts = load_workbook(io.BytesIO(client.get("/api/parts/export.xlsx", params={"project_id": p["id"]}).content))
+    assert parts.active["A1"].value == WARNING
+
+    from backend.app import pdf_report, register
+    shown = []
+    real = pdf_report._example_banner
+    pdf_report._example_banner = lambda ss, detail="": shown.append(detail) or real(ss, detail)
+    try:
+        pdf = pdf_report.rm_cost_pdf(register.part_detail(a, with_rm=False), register.rm_trace(a))
+    finally:
+        pdf_report._example_banner = real
+    assert pdf[:4] == b"%PDF" and len(shown) == 1             # the red banner is in the RM sheet PDF
+
+
+def test_cost_with_only_approved_real_rates_has_no_warning():
+    approver()
+    new_rate("ABS", 190)                                  # real (not example) rate replaces the seed
+    new_rate("ABS", 20, category="material_scrap")
+    p = project()
+    a = add_part(p, code="PC-1")
+    assert client.get("/api/parts", params={"project_id": p["id"]}).json()["rows"][0]["rm_is_example"] is False
+    assert client.get(f"/api/projects/{p['id']}/dashboard").json()["rm_is_example"] is False
+    wb = load_workbook(io.BytesIO(client.get(f"/api/parts/{a}/rm-cost/export.xlsx").content))
+    assert all(ws["A1"].value != WARNING for ws in wb.worksheets)

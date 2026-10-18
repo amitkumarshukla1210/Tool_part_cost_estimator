@@ -61,12 +61,13 @@ function render() {
     tile("Parts with RM cost", fmt(d.parts_rm_costed), "raw material only") +
     tile("Parts with target", fmt(d.parts_with_target), d.target_piece_cost_sum_inr != null ? `sum of targets ${inr(d.target_piece_cost_sum_inr)}` : "");
   $("notCosted").textContent = d.not_costed_note;
+  $("exampleBanner").innerHTML = d.rm_is_example ? window.exampleBanner("The RM cost of at least one variant uses EXAMPLE rates (marked •).") : "";
 
   $("variants").innerHTML = `<thead><tr><th>Variant</th><th>Name</th><th class="num">Annual volume</th><th class="num">BOM lines</th>
     <th class="num">Unique parts</th><th class="num">Target BOM cost</th><th class="num">RM cost (raw material only)</th><th class="num">RM vs target</th><th class="num">Parts without RM</th><th></th></tr></thead><tbody>` +
     (d.variants.length ? d.variants.map((v, i) => `<tr class="clickable" data-v="${i}"><td>${esc(v.code)}</td><td>${esc(v.name)}</td>
       <td class="calc num">${fmt(v.annual_volume)}</td><td class="calc num">${v.bom_lines}</td><td class="calc num">${v.unique_parts}</td>
-      <td class="calc num">${inr(v.target_bom_cost_inr)}</td><td class="calc num">${inr(v.rm_cost_inr)}</td>
+      <td class="calc num">${inr(v.target_bom_cost_inr)}</td><td class="calc num">${inr(v.rm_cost_inr)}${v.rm_is_example ? ' <span class="example-mark" title="Uses example rates">•</span>' : ""}</td>
       <td class="calc num">${v.rm_cost_inr != null && v.target_bom_cost_inr ? fmt((v.rm_cost_inr / v.target_bom_cost_inr) * 100, 1) + " % of target" : "—"}</td>
       <td class="calc num">${v.rm_parts_missing ? `<span class="badge missing">${v.rm_parts_missing}</span>` : v.rm_parts_costed ? "0" : "—"}</td>
       <td><button type="button" class="btn btn-outline small" data-edit="${i}">Edit</button></td></tr>`).join("")

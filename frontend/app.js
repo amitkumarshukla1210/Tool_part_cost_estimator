@@ -310,6 +310,7 @@ function showResultsB(r) {
     set("b-nest", "in:blanks_per_sheet", `${k.per_sheet}  (${k.along} × ${k.across}${k.rotated ? ", blank turned 90°" : ""})`);
     set("b-sheet", "calc:sheet_weight_g", `${fmt(r.sheet_weight_kg, 2)} kg · ${fmt(r.sheet_utilisation_pct, 1)} % used`);
   }
+  $("b-example").innerHTML = (r.rates_used || []).some((x) => x.is_example) ? window.exampleBanner("Replace the EXAMPLE rates on the Rates page.") : "";
   const rate = n["in:material_rate"];
   const rs = rate?.source;
   $("b-rate").innerHTML = r.priced || rs?.type === "user"
@@ -600,10 +601,9 @@ function showMould(r) {
   const L = r.layout;
   const b = r.base;
   const examples = r.example_lines + (r.sizing_rules_are_examples ? 1 : 0);
-  $("m-examples").hidden = !examples;
-  $("m-examples").textContent =
-    `${r.example_lines} of ${r.lines.length} BOM lines` + (r.sizing_rules_are_examples ? " and the sizing rules" : "") +
-    " still use EXAMPLE placeholder values (marked •). Replace them in Master data → Mould & die database.";
+  $("m-examples").innerHTML = examples
+    ? window.exampleBanner(`${r.example_lines} of ${r.lines.length} BOM lines` + (r.sizing_rules_are_examples ? " and the sizing rules" : "") +
+      " use EXAMPLE placeholder values (marked •). Replace them in Master data → Mould &amp; die database.") : "";
   $("m-layout").textContent = `${L.rows} × ${L.cols}` + (L.empty ? ` (${L.empty} empty position)` : "");
   $("m-insert").textContent = `${fmt(L.each_l, 0)} × ${fmt(L.each_w, 0)} × ${fmt(L.half_h, 0)} mm`;
   $("m-pocket").textContent = `${fmt(L.pocket_l, 0)} × ${fmt(L.pocket_w, 0)} mm`;

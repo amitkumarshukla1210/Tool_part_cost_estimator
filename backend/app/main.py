@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from .geometry import PART_TYPES, analyze, blank_estimate, load_step, sheet_thickness, tessellate
-from . import (capacity, costing_setup, file_store, gross_weight, master_data, mould, mould_db, rate_engine, rates,
+from . import (capacity, costing_setup, country_rates, file_store, gross_weight, master_data, mould, mould_db, rate_engine, rates,
                register, register_setup, rm_cost)
 from . import projects_db
 
@@ -257,6 +257,23 @@ class StatusIn(BaseModel):
 @app.get("/api/rates")
 def rates_current(as_of: Optional[str] = None, country: Optional[str] = None, category: Optional[str] = None):
     return {"as_of": as_of or rates.current_month(), "rows": rates.current(as_of, country, category)}
+
+
+@app.get("/api/rates/grid")
+def rates_grid(as_of: Optional[str] = None):
+    """Material and process rates as an item × country grid (roadmap stage 3)."""
+    return country_rates.grid(as_of)
+
+
+class ProposeIn(BaseModel):
+    month: Optional[str] = None
+
+
+@app.post("/api/rates/propose-from-index")
+def rates_propose(inp: ProposeIn):
+    """Drafts for countries that have no rate yet: base-country value × country index ÷ forex."""
+    country_rates.sync_base(inp.month)
+    return country_rates.propose(inp.month)
 
 
 @app.get("/api/rates/history")

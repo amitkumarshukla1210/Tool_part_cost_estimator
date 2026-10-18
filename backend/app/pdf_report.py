@@ -13,6 +13,8 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from .trace import EXAMPLE_WARNING
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -22,6 +24,16 @@ def _theme() -> dict:
     return {k: get(v) for k, v in {"ink": "ink", "brand": "brand-dark", "head": "table-head-dark",
                                    "head_text": "table-head-dark-text", "alt": "table-row-alt",
                                    "calc": "calc-cell-bg", "grey": "grey", "border": "grey-border"}.items()}
+
+
+def _example_banner(ss, detail: str = "") -> Table:
+    """Red warning box for a cost that uses EXAMPLE rates."""
+    text = f"<font color='#ffffff'><b>{EXAMPLE_WARNING}</b></font>" + (f"<br/><font color='#ffffff' size=7>{detail}</font>" if detail else "")
+    t = Table([[Paragraph(text, ss["Normal"])]], colWidths=[None])
+    t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#b91c1c")),
+                           ("LEFTPADDING", (0, 0), (-1, -1), 8), ("TOPPADDING", (0, 0), (-1, -1), 5),
+                           ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
+    return t
 
 
 def _table(rows, theme, widths=None, total_rows=()):
@@ -69,6 +81,8 @@ def dashboard_pdf(d: dict) -> bytes:
     story = [head, Spacer(1, 4 * mm), Paragraph("PROJECT SUMMARY", kicker),
              Paragraph(f"{p['code']} · {p['name']}", h1),
              Paragraph(f"Customer: {p.get('customer') or '—'} · CAPEX budget: {_money(p.get('capex_budget_inr'))}", note)]
+    if any(v.get("rm_is_example") for v in d["variants"]):
+        story += [Spacer(1, 2 * mm), _example_banner(ss, "The RM cost of at least one variant includes EXAMPLE rates.")]
 
     story += [Paragraph("Parts", h2), _table([
         ["Parts", "File missing", "With target cost", "Open corrections"],
@@ -118,7 +132,7 @@ def rm_cost_pdf(part: dict, tr: dict) -> bytes:
              Paragraph(f"Rev {tr.get('revision', {}).get('rev', '—')} · {tr['material']} · {tr['country']} · costing month "
                        f"{tr['as_of']} · " + (f"version {tr['version']}" if tr["version"] else "live preview, not stored"), note)]
     if example:
-        story += [Paragraph("<font color='#b45309'>Includes EXAMPLE rates. Replace them on the Rates page.</font>", note)]
+        story += [Spacer(1, 2 * mm), _example_banner(ss, "Replace the EXAMPLE rates marked below on the Rates page first.")]
     story += [Paragraph("Result", h2), _table([
         ["", cur, "INR"], ["Net RM cost per part", num(tr["value"]), num(tr["value_inr"])]], theme, [90 * mm, 40 * mm, 40 * mm], [1])]
     steps = [[wrap(n["label"]), wrap(n["formula"]), num(n["value"]), n["unit"]] for n in tr["nodes"].values()

@@ -106,3 +106,9 @@ footer { margin-top: 0; }
   .grid2 .span2 { grid-column: auto; }
   .brand-text .tagline { font-size: 10.5px; }
 }
+
+/* ===== Example-rate warning (costs that use EXAMPLE rates) ===== */
+.example-banner { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 12px; padding: 9px 14px; border-radius: 6px;
+  background: #b91c1c; color: #fff; font-size: 13.5px; }
+.example-banner span { font-size: 12px; opacity: 0.92; }
+.example-banner:empty { display: none; }

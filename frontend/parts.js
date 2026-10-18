@@ -52,6 +52,8 @@ async function search() {
   $("count").textContent = res.total ? `${offset + 1}–${Math.min(offset + PAGE, res.total)} of ${fmt(res.total)} parts` : "No parts";
   $("prev").disabled = offset === 0;
   $("next").disabled = offset + PAGE >= res.total;
+  $("exampleBanner").innerHTML = res.rows.some((r) => r.rm_is_example)
+    ? window.exampleBanner("Rows marked • have an RM cost that uses EXAMPLE rates.") : "";
   $("table").innerHTML = `<thead><tr><th></th><th>Part code</th><th>Name</th><th>Rev</th><th>Project</th><th>Process</th>
     <th>Material</th><th>Status</th><th>Sourcing</th><th class="num">Volume (cm³)</th><th class="num">Net RM cost (INR)</th><th>File</th></tr></thead><tbody>` +
     (res.rows.length ? res.rows.map((r) => `<tr class="clickable" data-id="${r.id}"><td>${thumb(r.thumbnail_file_id)}</td>
@@ -60,7 +62,7 @@ async function search() {
       <td>${esc(r.material)}</td><td><span class="badge status">${esc(nameOf(meta.statuses, r.status))}</span></td>
       <td>${esc(nameOf(meta.sourcing, r.sourcing))}</td>
       <td class="calc num">${r.geometry?.volume_cm3 != null ? fmt(r.geometry.volume_cm3, 2) : "—"}</td>
-      <td class="calc num">${r.rm_cost_inr != null ? fmt(r.rm_cost_inr, 2) : "—"}</td>
+      <td class="calc num">${r.rm_cost_inr != null ? fmt(r.rm_cost_inr, 2) : "—"}${r.rm_is_example ? ' <span class="example-mark" title="Uses example rates">•</span>' : ""}</td>
       <td>${r.file_id ? "STEP" : '<span class="badge missing">File missing</span>'}</td></tr>`).join("")
       : '<tr><td colspan="12" class="empty">No parts match. Import parts on the Import page.</td></tr>') + "</tbody>";
 }
@@ -152,6 +154,7 @@ function rmBlock(p) {
   const amount = (id, unit, d = 2) => (node(id) ? tv(id, `${fmt(node(id).value, d)} ${unit}`) : "—");
   const example = v?.is_example ? ' <span class="badge badge-example" title="Some rates used are placeholders">EXAMPLE rates</span>' : "";
   let html = `<h3 class="block-title">Raw-material (RM) cost</h3>`;
+  if (v?.is_example) html += window.exampleBanner("Replace the EXAMPLE rates on the Rates page before using this cost.");
   if (rm.problem) html += `<p class="warn">${esc(rm.problem)}</p>`;
   if (rm.outdated) {
     html += `<p class="warn">${esc(rm.outdated)}
