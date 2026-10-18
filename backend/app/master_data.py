@@ -42,7 +42,7 @@ NUMERIC = {
 # Columns of older versions that are no longer read (material rates moved to the rate library).
 RETIRED = {"Materials": {"rate_per_kg": "the RM rate", "scrap_rate_per_kg": "the scrap value"}}
 # Parameters whose value is text or a comma list; every other parameter is a number.
-TEXT_PARAMETERS = {"currency", "trial_machine_process"}
+TEXT_PARAMETERS = {"currency", "trial_machine_process", "operator_grade"}
 LIST_PARAMETERS = {"standard_cavities"}
 
 _cache: dict = {"key": None, "data": None}

@@ -633,6 +633,37 @@ def parts_status(part_id: int, inp: StatusChangeIn):
     return register.design_loop(part_id)
 
 
+@app.get("/api/parts/{part_id}/piece-cost")
+def parts_piece_cost(part_id: int):
+    """Part cost: latest stored version, versions, outdated flag and the live (traced) result (roadmap stage 8)."""
+    return register.piece_summary(part_id)
+
+
+@app.post("/api/parts/{part_id}/piece-cost")
+def parts_piece_compute(part_id: int, data: dict):
+    """Store a new part cost version. With `piece_inputs` they are saved on the part first."""
+    reason = data.get("reason") or "calculated"
+    if "piece_inputs" in data:
+        return register.set_piece_inputs(part_id, data["piece_inputs"], reason)
+    return register.compute_piece(part_id, reason)
+
+
+@app.get("/api/parts/{part_id}/piece-cost/trace")
+def parts_piece_trace(part_id: int, version: Optional[int] = None):
+    return register.piece_trace(part_id, version)
+
+
+@app.get("/api/parts/{part_id}/piece-cost/export.xlsx")
+def parts_piece_xlsx(part_id: int, version: Optional[int] = None):
+    return _xlsx(register.piece_excel(part_id, version), f"part_cost_{part_id}.xlsx")
+
+
+@app.get("/api/parts/{part_id}/piece-cost/export.pdf")
+def parts_piece_pdf(part_id: int, version: Optional[int] = None):
+    return Response(register.piece_pdf(part_id, version), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="part_cost_{part_id}.pdf"'})
+
+
 @app.get("/api/parts/{part_id}/simulation")
 def parts_simulation(part_id: int):
     """Simulation & analysis v1: maps, cycle time, clamp force, machine, corrections required (roadmap stage 6)."""

@@ -127,7 +127,7 @@ def test_money_rate_in_other_currency_is_converted():
 def test_formulas_are_editable_data():
     setup = costing_setup.tables()
     for f in setup["cost_formulas"]:
-        if f["name"] == "overhead":
+        if f["scope"] == "mhr" and f["name"] == "overhead":
             f["formula"] = "machine_cost * overhead_pct / 100 * 2"
     costing_setup.write(setup)
     r = rate_engine.mhr("VMC-850", "IN", MONTH)

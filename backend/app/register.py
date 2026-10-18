@@ -206,7 +206,7 @@ def update_variant(vid: int, data: dict) -> dict:
 
 PART_FIELDS = ("name", "material", "process", "sourcing", "status", "annual_volume", "programme_life_years",
                "target_piece_cost_inr", "notes", "unit_price", "price_currency", "price_source", "price_month",
-               "price_is_example", "dimensions", "country", "costing_month", "rm_inputs", "tool_country", "tool_inputs")
+               "price_is_example", "dimensions", "country", "costing_month", "rm_inputs", "tool_country", "tool_inputs", "piece_inputs")
 
 
 def next_part_code(conn, project_code: str) -> str:
@@ -317,6 +317,8 @@ def _part_values(data, where="Part"):
             out[k] = _rm_inputs(v, where)
         elif k == "tool_inputs":
             out[k] = _tool_inputs(v, where)
+        elif k == "piece_inputs":
+            out[k] = _piece_inputs(v, where)
         elif k == "price_is_example":
             out[k] = v is True or str(v).strip().lower() in ("1", "true", "yes", "on", "example")
         elif k == "dimensions":
@@ -1201,6 +1203,145 @@ TOOL_INPUTS = {"cavities": "Cavities per tool", "hot_runner": "Hot runner", "sli
                "lifters_per_cavity": "Lifters per cavity", "inserts_per_cavity": "Small inserts per cavity",
                "warranty": "Warranty / spares included"}
 TOOL_FLAGS = ("hot_runner", "warranty")
+
+
+def _piece_inputs(v, where):
+    """Part-cost inputs typed per part: {cycle_s, cavities, secondary_ops_pct}."""
+    from .piece_cost import PIECE_TYPED
+    if v in (None, "", {}):
+        return None
+    out = {}
+    for k, val in v.items():
+        if val in (None, ""):
+            continue
+        if k not in PIECE_TYPED:
+            raise RegisterError(f"{where}: '{k}' is not a part-cost input ({', '.join(PIECE_TYPED)}).")
+        n = _num(val, f"{where}: {PIECE_TYPED[k].lower()}", required=True)
+        if n < 0 or (k != "secondary_ops_pct" and n <= 0):
+            raise RegisterError(f"{where}: {PIECE_TYPED[k].lower()} must be more than 0.")
+        out[k] = n
+    return out or None
+
+
+def piece_versions(part_id: int) -> list[dict]:
+    with db.engine().connect() as conn:
+        rows = conn.execute(select(*[c for c in db.piece_costs.c if c.name != "trace"])
+                            .where(db.piece_costs.c.part_id == part_id).order_by(db.piece_costs.c.version.desc())).mappings().all()
+    return [_plain(r) for r in rows]
+
+
+def piece_live(part_id: int) -> dict:
+    from . import piece_cost
+    try:
+        return piece_cost.run(part_id)
+    except piece_cost.PieceError as exc:
+        raise RegisterError(str(exc)) from None
+
+
+def piece_summary(part_id: int) -> dict:
+    """Latest stored part cost, whether it is out of date, and the live result (or why there is none)."""
+    versions = piece_versions(part_id)
+    latest = versions[0] if versions else None
+    out = {"latest": latest, "versions": versions, "problem": "", "outdated": "", "live": None}
+    try:
+        r = piece_live(part_id)
+    except RegisterError as exc:
+        out["problem"] = str(exc)
+        return out
+    out["live"] = r
+    if latest is None:
+        out["outdated"] = "The part cost has not been stored yet."
+    elif latest["key"] != r["key"]:
+        same = {k: v for k, v in latest["key"].items() if k not in ("rates", "as_of")} == {k: v for k, v in r["key"].items() if k not in ("rates", "as_of")}
+        out["outdated"] = (f"Newer approved rates exist than the ones used in part cost version {latest['version']}." if same
+                           else f"RM / tool cost, inputs or revision changed since part cost version {latest['version']}.")
+    return out
+
+
+def compute_piece(part_id: int, reason: str = "calculated") -> dict:
+    """Store the part cost as a new version unless nothing changed. Stored versions are never changed."""
+    r = piece_live(part_id)
+    if r["missing"]:
+        raise RegisterError("Part cost not stored: " + " ".join(r["missing"]))
+    with db.engine().begin() as conn:
+        last = conn.execute(select(db.piece_costs).where(db.piece_costs.c.part_id == part_id)
+                            .order_by(db.piece_costs.c.version.desc()).limit(1)).mappings().first()
+        if last and last["key"] == r["key"]:
+            return {"stored": False, "version": last["version"], "message": f"Part cost already up to date (version {last['version']})."}
+        version = (last["version"] if last else 0) + 1
+        conn.execute(db.piece_costs.insert().values(
+            part_id=part_id, version=version, revision_id=r["revision"]["id"], rev=r["revision"]["rev"], country=r["country"],
+            currency=r["currency"], as_of=r["as_of"], key=r["key"], piece_cost=r["value"], piece_cost_inr=r["value_inr"],
+            rates_used=_rates_used(r), trace=r, reason=reason, created_by=user()))
+        conn.execute(db.parts.update().where(db.parts.c.id == part_id).values(piece_cost_inr=r["value_inr"]))
+        _log(conn, "part", part_id, "piece_cost_calculated", {"version": version, "part cost (INR)": round(r["value_inr"], 4),
+             "machine": r["machine"], "country": r["country"], "costing month": r["as_of"], "reason": reason,
+             "rate versions": ", ".join(f"#{x['id']}" for x in r["rates_used"])})
+    return {"stored": True, "version": version, "message": f"Part cost version {version} stored."}
+
+
+def set_piece_inputs(part_id: int, inputs: dict | None, reason: str = "part-cost inputs saved") -> dict:
+    update_part(part_id, {"piece_inputs": inputs or {}}, refresh=False)
+    return compute_piece(part_id, reason)
+
+
+def piece_trace(part_id: int, version: int | None = None) -> dict:
+    """A stored part cost version's trace, else the live result."""
+    if version is None and not piece_versions(part_id):
+        return piece_live(part_id) | {"version": None, "stored": False}
+    with db.engine().connect() as conn:
+        q = select(db.piece_costs).where(db.piece_costs.c.part_id == part_id)
+        q = q.where(db.piece_costs.c.version == version) if version is not None else q.order_by(db.piece_costs.c.version.desc())
+        row = conn.execute(q.limit(1)).mappings().first()
+    if not row:
+        raise RegisterError(f"Part {part_id} has no part cost version {version}.")
+    return row["trace"] | {"version": row["version"], "stored": True, "created_by": row["created_by"],
+                           "created_at": row["created_at"].isoformat(timespec="seconds")}
+
+
+def _trace_rows(tr: dict) -> tuple[list, list, list]:
+    """(steps, inputs, rates) rows of a trace for Excel / PDF."""
+    from .trace import source_text
+    n = tr["nodes"]
+    steps = [[n[s["node"]]["label"], n[s["node"]].get("formula", ""), n[s["node"]]["value"], n[s["node"]]["unit"]] for s in tr["steps"]]
+    inputs = [[n[i["node"]]["label"], n[i["node"]]["value"], n[i["node"]]["unit"], source_text(n[i["node"]])] for i in tr["inputs"]]
+    rts = [[x["id"], x["category"], x["item"], x["country"], x["month"], x["value"], x["unit"], x["status"],
+            "EXAMPLE" if x.get("is_example") else ""] for x in tr["rates_used"]]
+    return steps, inputs, rts
+
+
+def piece_excel(part_id: int, version: int | None = None) -> bytes:
+    """Part cost sheet: Summary, Steps, Inputs (with sources), Rates used. Full backup data."""
+    tr, d = piece_trace(part_id, version), part_detail(part_id, with_rm=False)
+    steps, inputs, rts = _trace_rows(tr)
+    wb = Workbook()
+    wb.properties.title = f"Design to Cost — Part cost {d['part_code']}"
+    for i, (name, head, rows) in enumerate((
+            ("Summary", ["Item", "Value"], [["Part", f"{d['part_code']} · {d['name']}"], ["Revision", tr["revision"]["rev"]],
+                                             ["Country", tr["country"]], ["Costing month", tr["as_of"]], ["Machine", tr["machine"]],
+                                             [f"Part cost ({tr['currency']})", tr["value"]], ["Part cost (INR)", tr["value_inr"]],
+                                             ["Version", tr.get("version") or "live, not stored"],
+                                             ["Example rates", "yes: not for negotiation" if tr["is_example"] else "no"]]),
+            ("Steps", ["Step", "Formula", "Value", "Unit"], steps),
+            ("Inputs", ["Input", "Value", "Unit", "Source"], inputs),
+            ("Rates used", ["Rate #", "Category", "Item", "Country", "Month", "Value", "Unit", "Status", "Example"], rts))):
+        ws = wb.active if i == 0 else wb.create_sheet()
+        ws.title = name
+        ws.append(head)
+        for c in ws[1]:
+            c.font = Font(bold=True, color="FFFFFF")
+            c.fill = HEADER_FILL
+        for r in rows:
+            ws.append(r)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def piece_pdf(part_id: int, version: int | None = None) -> bytes:
+    from .pdf_report import piece_cost_pdf
+    tr, d = piece_trace(part_id, version), part_detail(part_id, with_rm=False)
+    return piece_cost_pdf(tr, d, *_trace_rows(tr))
 
 
 def _tool_inputs(v, where):
