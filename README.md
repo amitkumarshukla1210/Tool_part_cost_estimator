@@ -433,6 +433,15 @@ Thailand, Vietnam, Germany, USA) for the costing month. Choose what to see, in t
 
 ---
 
+## Mould concept v1 (roadmap stage 5)
+
+On a part's panel (plastic / die casting) open **Mould concept** and press *Analyse*. The 3D model is ray-cast along X, Y and Z:
+faces shadowed along the opening direction are undercuts. The axis with the least undercut is proposed; undercut regions
+facing outward become **slides**, inward ones **lifters** (plastic only). *Use … in the tool cost* saves them as the part's
+slides / lifters and recalculates. Gate, runner, cooling, ejection and insert proposals are the first matching row of
+**Mould & die database → Concept rules**; thresholds are `undercut_*` rows of Sizing rules. All are EXAMPLE values and
+all results are proposals to check.
+
 ## Rates page: country rate library, MHR & labour rates
 
 Open **Rates** in the header. Pick the **producing country** and the **costing month**.
