@@ -25,12 +25,27 @@ from .table_set import TableSet, col
 
 RM_FAMILIES = ("plastic", "die_casting", "foundry", "sheet_metal")
 TOOL_SCOPES = ("tool_clamp", "tool")
-SCOPES = ("mhr", "labour") + tuple(f"rm_{f}" for f in RM_FAMILIES) + TOOL_SCOPES
-SOURCES = ("rate", "machine", "parameter", "part", "tool")
+SCOPES = ("mhr", "labour") + tuple(f"rm_{f}" for f in RM_FAMILIES) + TOOL_SCOPES + ("piece",)
+SOURCES = ("rate", "machine", "parameter", "part", "tool", "piece")
 MACHINE_FIELDS = ("power_kw", "load_factor_pct", "floor_area_m2", "life_years", "residual_pct",
                   "maintenance_pct", "tonnage_t", "length_mm", "width_mm")
 RESULT_OF = ({"mhr": "Machine hour rate", "labour": "Labour rate"} | {f"rm_{f}": "Net RM cost per part" for f in RM_FAMILIES}
-             | {"tool_clamp": "Clamp force for the try-out machine", "tool": "Tool cost per tool"})
+             | {"tool_clamp": "Clamp force for the try-out machine", "tool": "Tool cost per tool", "piece": "Part cost per piece"})
+# Values worked out by the part cost engine (piece_cost.py) that the piece formulas can use (source = piece);
+# the Insert moulding rules (Part register setup) can be used by their key as well.
+PIECE_ITEMS = {
+    "rm_cost": "Net RM cost per part: latest RM cost version of the current revision",
+    "cycle_s": "Cycle time (s): typed on the part, else Parameters → cycle_time_s",
+    "cavities": "Cavities per tool: typed, else the latest tool cost version",
+    "mhr": "Machine hour rate of the machine the tool's clamp force selects (full MHR trace)",
+    "labour_rate": "Labour rate of Parameters → operator_grade (full labour-rate trace)",
+    "secondary_ops_pct": "Secondary operations as % of the process cost: typed, else Parameters",
+    "insert_cost": "Σ insert quantity × insert price per piece (bought-out), in the producing country's currency",
+    "inserts_per_part": "Moulded-in inserts per part",
+    "tool_capex": "Tool CAPEX of the latest tool cost version, in the producing country's currency",
+    "lifetime_volume": "Annual volume × programme years (parts over the tool's programme)",
+    "total_weight_kg": "Part weight body + inserts (kg)",
+}
 # Values worked out by the tool cost engine that the tool formulas can use (source = tool).
 TOOL_ITEMS = {
     "cavities": "Cavities per tool",
@@ -174,9 +189,13 @@ def _check(clean: dict) -> None:
             raise SetupError(f"Formula inputs row {i}: a rate input needs a rate category and item.")
         if r["source"] == "machine" and r["item"] not in MACHINE_FIELDS:
             raise SetupError(f"Formula inputs row {i}: machine field must be one of {', '.join(MACHINE_FIELDS)}.")
+        if r["scope"] == "piece" and r["source"] not in ("piece", "parameter", "rate"):
+            raise SetupError(f"Formula inputs row {i}: scope piece takes sources piece, parameter and rate.")
+        if r["source"] == "piece" and r["scope"] != "piece":
+            raise SetupError(f"Formula inputs row {i}: source 'piece' is only for scope piece.")
         if r["source"] == "part" and not r["scope"].startswith("rm_"):
             raise SetupError(f"Formula inputs row {i}: source 'part' is only for the RM scopes (rm_...).")
-        if r["source"] == "parameter" and not (r["scope"].startswith("rm_") or r["scope"] in TOOL_SCOPES):
+        if r["source"] == "parameter" and not (r["scope"].startswith("rm_") or r["scope"] in TOOL_SCOPES + ("piece",)):
             raise SetupError(f"Formula inputs row {i}: source 'parameter' is only for the RM and tool scopes.")
         if r["source"] == "tool" and r["scope"] not in TOOL_SCOPES:
             raise SetupError(f"Formula inputs row {i}: source 'tool' is only for the tool scopes ({', '.join(TOOL_SCOPES)}).")
@@ -235,6 +254,8 @@ def _help() -> list:
                         "packing, transport, warranty and the tool cost per tool, in the tool country's currency. "
                         "{material} is the part material (trial shots)."],
         ["source = tool", "Tool scopes only: a value of the tool cost engine: " + "; ".join(f"{k} = {v}" for k, v in TOOL_ITEMS.items())],
+        ["source = piece", "Scope piece only: a value of the part cost engine: " + "; ".join(f"{k} = {v}" for k, v in PIECE_ITEMS.items())
+                           + "; and any key of Part register setup → Insert moulding rules"],
         ["functions", "ceil, floor, round, min, max, abs, sqrt; 'a if condition else b'; and, or, not"],
     ]
 

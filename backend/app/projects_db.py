@@ -100,6 +100,9 @@ parts = Table(
     Column("tool_cost_id", Integer),
     Column("tool_cost_inr", Float),      # per tool
     Column("tool_capex_inr", Float),     # per tool × tools over the programme
+    # part (piece) cost (stage 8): typed inputs (cycle, cavities, secondary ops %), latest version
+    Column("piece_inputs", JSON),
+    Column("piece_cost_inr", Float),
     Column("created_by", String(100), default=""),
     Column("created_at", DateTime, default=now),
     Column("updated_at", DateTime, default=now, onupdate=now),
@@ -204,6 +207,28 @@ tool_costs = Table(
     Column("created_at", DateTime, default=now),
     UniqueConstraint("part_id", "version"),
     Index("ix_tool_costs_part", "part_id"),
+)
+
+piece_costs = Table(
+    "piece_costs", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("revision_id", ForeignKey("revisions.id")),
+    Column("rev", String(20), default=""),
+    Column("country", String(10), nullable=False),
+    Column("currency", String(10), nullable=False),
+    Column("as_of", String(7), nullable=False),
+    Column("key", JSON),                               # RM / tool versions, typed inputs and rates it depends on
+    Column("piece_cost", Float),
+    Column("piece_cost_inr", Float),
+    Column("rates_used", JSON),
+    Column("trace", JSON),
+    Column("reason", String(300), default=""),
+    Column("created_by", String(100), default=""),
+    Column("created_at", DateTime, default=now),
+    UniqueConstraint("part_id", "version"),
+    Index("ix_piece_costs_part", "part_id"),
 )
 
 history = Table(

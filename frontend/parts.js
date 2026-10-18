@@ -94,6 +94,7 @@ async function openPart(id) {
   part.toolTrace = part.tool?.versions || (part.tool?.applicable && !part.tool.problem)
     ? await api(`/api/parts/${id}/tool-cost/trace`).catch(() => null) : null;
   part.toolVersions = part.tool?.versions ? await api(`/api/parts/${id}/tool-cost`).catch(() => []) : [];
+  part.piece = part.is_assembly || !part.tool?.applicable ? null : await api(`/api/parts/${id}/piece-cost`).catch(() => null);
   part.loop = part.is_assembly ? null : await api(`/api/parts/${id}/design-loop`).catch(() => null);
   renderPart();
   $("panel").hidden = false;
@@ -397,6 +398,7 @@ function renderPart() {
     ${loopBlock(p)}
     ${rmBlock(p)}
     ${toolBlock(p)}
+    ${pieceBlock(p)}
     ${insertsBlock(p)}
     ${mouldedIntoBlock(p)}
 
@@ -632,6 +634,61 @@ $("panelBody").addEventListener("input", async (e) => {
     const res = await api(`/api/parts?q=${encodeURIComponent(e.target.value)}&limit=15`).catch(() => null);
     if (res) $("codeList").innerHTML = res.rows.filter((r) => r.id !== part.id && !r.is_assembly)
       .map((r) => `<option value="${esc(r.part_code)}">${esc(r.name)}</option>`).join("");
+  }
+});
+
+// part (piece) cost: live traced result, typed inputs, stored versions, downloads
+function pieceBlock(p) {
+  const s = p.piece;
+  if (!s) return "";
+  let html = `<h3 class="block-title">Part cost</h3>`;
+  if (s.problem) return html + `<p class="note">${esc(s.problem)}</p>`;
+  const tr = s.live, cur = tr.currency;
+  const v = (n) => `<span class="clickable calc" data-piecetrace="${esc(n)}">${fmt(tr.nodes[n].value, 4)}</span>`;
+  html += `${tr.is_example ? '<p class="note"><span class="badge badge-example">EXAMPLE</span> Uses example rates – not for negotiation.</p>' : ""}
+    ${s.outdated ? `<p class="note"><b>${esc(s.outdated)}</b></p>` : ""}
+    <div class="table-wrap"><table class="cost-table"><tbody>
+      ${tr.steps.map((x) => `<tr class="${x.is_result ? "total" : ""}"><td>${esc(tr.nodes[x.node].label)}</td><td class="num">${v(x.node)} ${esc(tr.nodes[x.node].unit)}</td></tr>`).join("")}
+      <tr class="total"><td>Part cost per piece (INR)</td><td class="num">${v("result:inr")}</td></tr></tbody></table></div>
+    <p class="note">Machine ${esc(tr.machine)} · operator grade ${esc(tr.grade)} · RM version ${tr.rm_version} · tool version ${tr.tool_version} ·
+      ${esc(tr.country)} · ${esc(tr.as_of)}. Click any value for its formula, inputs and rate versions.
+      ${s.latest ? `<a class="link" href="/api/parts/${p.id}/piece-cost/export.xlsx">Excel</a> · <a class="link" href="/api/parts/${p.id}/piece-cost/export.pdf">PDF</a>` : ""}</p>
+    <form id="pieceForm" class="card grid2">
+      <label>Cycle time (s) <input type="number" min="0" step="any" name="cycle_s" value="${p.piece_inputs?.cycle_s ?? ""}" placeholder="Parameters" /></label>
+      <label>Cavities <input type="number" min="1" step="1" name="cavities" value="${p.piece_inputs?.cavities ?? ""}" placeholder="tool cost" /></label>
+      <label>Secondary operations (% of process) <input type="number" min="0" step="any" name="secondary_ops_pct" value="${p.piece_inputs?.secondary_ops_pct ?? ""}" placeholder="Parameters" /></label>
+      <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary small">Save and store part cost</button></div>
+      <p class="status span2" id="pieceStatus"></p></form>`;
+  if (s.versions.length) html += `<details class="card add-insert"><summary class="btn btn-outline small">Part cost versions (${s.versions.length})</summary>
+    <div class="table-wrap"><table class="cost-table"><thead><tr><th>Ver</th><th>Rev</th><th>Country</th><th>Month</th><th class="num">${esc(cur)}</th><th class="num">INR</th><th>Why</th><th>By / when</th></tr></thead><tbody>
+    ${s.versions.map((x) => `<tr class="clickable" data-pieceversion="${x.version}"><td><b>${x.version}</b></td><td>${esc(x.rev)}</td><td>${esc(x.country)}</td><td>${esc(x.as_of)}</td>
+      <td class="calc num">${fmt(x.piece_cost, 4)}</td><td class="calc num">${fmt(x.piece_cost_inr, 4)}</td><td>${esc(x.reason)}</td>
+      <td>${esc(x.created_by)} · ${esc(x.created_at.slice(0, 16).replace("T", " "))}</td></tr>`).join("")}</tbody></table></div></details>`;
+  return html;
+}
+
+$("panelBody").addEventListener("submit", async (e) => {
+  if (e.target.id !== "pieceForm") return;
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const inputs = {};
+  for (const k of ["cycle_s", "cavities", "secondary_ops_pct"]) if (f.get(k) !== "") inputs[k] = Number(f.get(k));
+  try {
+    const r = await api(`/api/parts/${part.id}/piece-cost`, { method: "POST", body: JSON.stringify({ piece_inputs: inputs, reason: "changed in the part panel" }) });
+    await openPart(part.id);
+    status($("pieceStatus"), r.message, "ok");
+  } catch (err) {
+    status($("pieceStatus"), err.message, "error");
+  }
+});
+
+$("panelBody").addEventListener("click", async (e) => {
+  const n = e.target.closest("[data-piecetrace]");
+  if (n) window.TracePanel.open(part.piece.live, n.dataset.piecetrace);
+  const pv = e.target.closest("[data-pieceversion]");
+  if (pv) {
+    const tr = await api(`/api/parts/${part.id}/piece-cost/trace?version=${pv.dataset.pieceversion}`);
+    window.TracePanel.open(tr, tr.root);
   }
 });
 

@@ -465,6 +465,18 @@ revision upload* (e.g. Corrections required → Revised when the corrected model
 *Put this result in the Design loop form* proposes Corrections required (with the corrections as the comment) or
 Simulation OK. Tick two revisions to compare them side by side, including their latest RM and tool cost.
 
+## Part cost (roadmap stage 8)
+
+On a part's panel, **Part cost** shows the piece cost once the RM and tool cost of the current revision exist:
+RM + process cost ((MHR of the machine the tool's clamp force selects + operators × operator labour rate) ÷ parts
+per hour) + secondary operations + inserts (BOP price × quantity + handling) + rejection (with the inserts lost) +
+overhead + profit + packing + tool amortisation (tool CAPEX ÷ annual volume × programme years) + logistics
+(weight × transport rate). Insert loading time per shot is added to the cycle. Click any value for its trace,
+down to the electricity rate inside the MHR. Type over cycle time, cavities or secondary operations %, then
+*Save and store* for a new numbered version (old versions never change); Excel and PDF carry the full backup.
+The steps are Cost formulas of scope **piece**, their inputs Formula inputs of that scope (Parameters, the rate
+library or values worked out by the app: see the Formula help sheet). All are EXAMPLE values.
+
 ## Rates page: country rate library, MHR & labour rates
 
 Open **Rates** in the header. Pick the **producing country** and the **costing month**.
