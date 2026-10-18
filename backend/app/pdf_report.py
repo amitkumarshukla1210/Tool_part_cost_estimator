@@ -227,3 +227,40 @@ def tool_cost_pdf(tr: dict, part: dict | None = None) -> bytes:
     story += [Spacer(1, 4 * mm), Paragraph("© Design to Cost", note)]
     doc.build(story)
     return buf.getvalue()
+
+
+def simulation_pdf(res: dict, pictures: list, part: dict, rev: str) -> bytes:
+    """Simulation & analysis report: corrections required, coloured maps, results with their formulas."""
+    theme = _theme()
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=14 * mm, rightMargin=14 * mm, topMargin=12 * mm,
+                            bottomMargin=12 * mm, title=f"Design to Cost — Simulation {part['part_code']}", author="Design to Cost")
+    ss = getSampleStyleSheet()
+    h1 = ParagraphStyle("h1", parent=ss["Title"], textColor=theme["ink"], fontSize=18, alignment=0, spaceAfter=2)
+    h2 = ParagraphStyle("h2", parent=ss["Heading2"], textColor=theme["ink"], fontSize=11, spaceBefore=10, spaceAfter=4)
+    note = ParagraphStyle("n", parent=ss["Normal"], textColor=theme["grey"], fontSize=7.5)
+    cell = ParagraphStyle("c", parent=ss["Normal"], fontSize=7.5, leading=9)
+    wrap = lambda t: Paragraph(str(t).replace("&", "&amp;").replace("<", "&lt;"), cell)
+    m = res["machine"]
+    story = [Paragraph("SIMULATION &amp; ANALYSIS", ParagraphStyle("k", parent=ss["Normal"], textColor=theme["brand"], fontSize=8)),
+             Paragraph(f"{part['part_code']} · {part['name']}", h1),
+             Paragraph(f"Rev {rev} · {res['part_type'].replace('_', ' ')} · opening direction {res['opening_axis'].upper()} · "
+                       f"wall {res['wall_mm']:.2f} mm · {date.today().isoformat()} · analytical estimate, not a flow simulation", note)]
+    if res["is_example"]:
+        story += [Spacer(1, 2 * mm), _example_banner(ss, "Simulation rules are EXAMPLE values.")]
+    story.append(Paragraph("Corrections required" if res["corrections"] else "No corrections required", h2))
+    for c in res["corrections"]:
+        story.append(Paragraph(f"<font color='#b91c1c'>■</font> {c}", ss["Normal"]))
+    story.append(Paragraph("Maps", h2))
+    story.append(Table([[Image(io.BytesIO(png), 85 * mm, 69 * mm) for _, png in pictures]]))
+    mp = res["maps"]
+    story += [Paragraph("Results", h2), _table([["", "Value"],
+        ["Low draft area (cm²)", f"{mp['draft_low_cm2']:.1f}"], ["Sink-risk area (cm²)", f"{mp['sink_risk_cm2']:.1f}"],
+        ["Thin-wall area (cm²)", f"{mp['thin_cm2']:.1f}"], ["Undercut area (cm²)", f"{mp['undercut_cm2']:.1f}"],
+        ["Cycle time (s)", f"{res['results']['cycle_s']:.1f}"], ["Clamp force (t)", f"{res['results']['clamp_t']:.1f}"],
+        ["Machine", f"{m['machine_id']} ({m['tonnage_t']:g} t)" if m["machine_id"] else "none large enough"]], theme, [80 * mm, 50 * mm])]
+    story += [Paragraph("Calculation steps (Mould &amp; die database → Simulation rules)", h2),
+              _table([["Step", "Formula", "Value", "Unit"]] + [[wrap(x["label"] or x["name"]), wrap(x["formula"]), f"{x['value']:,.3f}", x["unit"]]
+                                                          for x in res["steps"]], theme, [70 * mm, 120 * mm, 30 * mm, 20 * mm])]
+    doc.build(story)
+    return buf.getvalue()

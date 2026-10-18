@@ -16,7 +16,7 @@ import operator
 
 FUNCTIONS = {
     "ceil": math.ceil, "floor": math.floor, "round": round,
-    "min": min, "max": max, "abs": abs, "sqrt": math.sqrt,
+    "min": min, "max": max, "abs": abs, "sqrt": math.sqrt, "log": math.log, "exp": math.exp,
 }
 
 VARIABLE_HELP = {
