@@ -617,6 +617,22 @@ def parts_concept(part_id: int):
         raise HTTPException(400, str(exc)) from None
 
 
+class StatusChangeIn(BaseModel):
+    status: str
+    comment: str = ""
+
+
+@app.get("/api/parts/{part_id}/design-loop")
+def parts_design_loop(part_id: int):
+    return register.design_loop(part_id)
+
+
+@app.post("/api/parts/{part_id}/status")
+def parts_status(part_id: int, inp: StatusChangeIn):
+    register.set_status(part_id, inp.status, inp.comment)
+    return register.design_loop(part_id)
+
+
 @app.get("/api/parts/{part_id}/simulation")
 def parts_simulation(part_id: int):
     """Simulation & analysis v1: maps, cycle time, clamp force, machine, corrections required (roadmap stage 6)."""
