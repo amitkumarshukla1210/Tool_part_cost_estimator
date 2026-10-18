@@ -2,7 +2,7 @@
 const { $, esc, fmt, api, status } = window.DTC;
 let ex = null;
 const COLS = [["category", "Category"], ["ref", "Ref / designators"], ["part_number", "Part number"], ["maker", "Maker"], ["description", "Description"],
-  ["qty", "Qty"], ["unit", "Unit"], ["length_mm", "Length mm"], ["wire_type", "Wire type"], ["cross_section_mm2", "mm²"], ["colour", "Colour"],
+  ["qty", "Qty"], ["unit", "Unit"], ["length_mm", "Length mm (wires: total)"], ["wire_type", "Wire type"], ["cross_section_mm2", "mm²"], ["colour", "Colour"],
   ["package", "Package"], ["mount", "Mount"]];
 
 async function loadList(select) {
@@ -10,7 +10,7 @@ async function loadList(select) {
   $("extract").innerHTML = list.map((e) => `<option value="${e.id}">#${e.id} · ${esc(e.name)} (${esc(e.kind)}, ${e.line_count} lines, ${esc(e.status)})</option>`).join("") || "<option value=''>No extract yet</option>";
   if (select) $("extract").value = select;
   if (list.length) await open(Number($("extract").value));
-  else { ex = null; $("out").innerHTML = ""; ["reviewBtn", "xlsx", "del"].forEach((id) => ($(id).hidden = true)); }
+  else { ex = null; $("out").innerHTML = ""; ["reviewBtn", "xlsx", "del"].forEach((id) => ($(id).hidden = true)); showCostControls(false); }
 }
 
 async function open(id) {
@@ -18,7 +18,48 @@ async function open(id) {
   render();
 }
 
+async function costSetup() {
+  const setup = await api("/api/costing-setup");
+  $("costCountry").innerHTML = setup.countries.map((c) => `<option value="${esc(c.code)}">${esc(c.name)} (${esc(c.currency)})</option>`).join("");
+  $("costCountry").value = "IN";
+}
+function showCostControls(on) {
+  ["costTitle", "costForm"].forEach((id) => ($(id).hidden = !on));
+  if (!on) $("cost").innerHTML = "";
+}
+$("costForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const q = new URLSearchParams({ country: $("costCountry").value, ...($("costMonth").value ? { month: $("costMonth").value } : {}) }).toString();
+  status($("status"), "Calculating…");
+  try {
+    const c = await api(`/api/bom-extracts/${ex.id}/cost?${q}`);
+    status($("status"), "");
+    $("costXlsx").href = `/api/bom-extracts/${ex.id}/cost.xlsx?${q}`;
+    $("costPdf").href = `/api/bom-extracts/${ex.id}/cost.pdf?${q}`;
+    $("costXlsx").hidden = $("costPdf").hidden = false;
+    const n = c.nodes, v = (k) => `<span class="clickable calc" data-trace="${esc(k)}">${fmt(n[k].value, 4)}</span>`;
+    window.lastCost = c;
+    $("cost").innerHTML = `${c.is_example || c.library_examples ? '<p class="note"><span class="badge badge-example">EXAMPLE</span> Uses example rates or library prices – not for negotiation.</p>' : ""}
+      ${c.priced ? "" : `<div class="warn"><b>Not fully priced</b>: these count as 0 until they are in <i>Master data → Part register setup → Part library</i>:<ul>${c.missing.map((m) => `<li>${esc(m)}</li>`).join("")}</ul></div>`}
+      ${!c.reviewed || c.low_confidence_lines ? `<p class="note">The BOM is ${c.reviewed ? "reviewed" : "<b>not reviewed</b>"} and has ${c.low_confidence_lines} line(s) to check.</p>` : ""}
+      <div class="table-wrap"><table class="cost-table"><tbody>
+        ${c.steps.map((s) => `<tr class="${s.is_result ? "total" : ""}"><td>${esc(n[s.node].label)}</td><td class="num">${v(s.node)} ${esc(n[s.node].unit)}</td></tr>`).join("")}
+        <tr class="total"><td>Cost in INR</td><td class="num">${v("result:inr")}</td></tr></tbody></table></div>
+      <h4>Priced lines</h4><div class="table-wrap"><table class="cost-table"><thead><tr><th>Category</th><th>Part</th><th>Description</th><th class="num">Qty</th><th class="num">Cost</th><th>Basis</th></tr></thead><tbody>
+        ${c.lines.map((l) => `<tr><td>${esc(l.category)}</td><td>${esc(l.part_number || l.ref)}</td><td>${esc(l.description)}</td><td class="calc num">${fmt(l.qty, 2)}</td>
+          <td class="calc num">${l.cost == null ? '<span class="badge missing">not priced</span>' : fmt(l.cost, 4)}</td><td>${esc(l.basis)}</td></tr>`).join("")}</tbody></table></div>
+      <p class="note">Click a value for its formula, inputs and rate versions.</p>`;
+  } catch (err) {
+    status($("status"), err.message, "error");
+  }
+});
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("#cost [data-trace]");
+  if (t && window.lastCost) window.TracePanel.open(window.lastCost, t.dataset.trace);
+});
+
 function render() {
+  showCostControls(true);
   const s = ex.summary;
   ["reviewBtn", "xlsx", "del"].forEach((id) => ($(id).hidden = false));
   $("xlsx").href = `/api/bom-extracts/${ex.id}/export.xlsx`;
@@ -84,6 +125,7 @@ $("uploadForm").addEventListener("submit", async (e) => {
   }
 });
 (async () => {
+  await costSetup();
   const projects = await api("/api/projects").catch(() => []);
   $("project").innerHTML = '<option value="">None</option>' + projects.map((p) => `<option value="${p.id}">${esc(p.code)} · ${esc(p.name)}</option>`).join("");
   loadList();

@@ -552,7 +552,21 @@ Open **Harness & PCB** in the header and upload a file:
   yellow; editing a line sets it to 1. Add or remove lines, *Mark reviewed* (reopened by any later edit), export to Excel. Changes are in the history.
 
 The XML reader follows the KBL / VEC structure by element names and was built and tested with small hand-made samples, not with your real exports:
-check the first real file and tell me what differs. Nothing is priced yet (stage 15).
+check the first real file and tell me what differs. Costing is in the next section.
+
+## Harness & PCB costing (roadmap stage 15)
+
+On the **Harness & PCB** page, below the BOM, choose the producing country and month and press **Calculate cost**:
+- **Harness**: wires = total length × price per metre from the **Part library** (matched by part number), else copper content (cross-section × 8.96 g/cm³)
+  × (copper rate + conversion rate per kg of copper) from the approved rates of the country; connectors, terminals, seals, sleeves, tapes, clips, ... = quantity ×
+  Part library price; **processing** = driver (wires, crimps, connectors, wire length, sleeves, ...) × seconds ÷ 3600 × (MHR of the machine + operators × labour rate).
+- **PCB**: components from the Part library, **bare board** = area (typed or from the pick-and-place extents) × rate per cm² of its layer count (rate category `pcb_board`) × (1 + panel waste),
+  assembly processes (SMT placements, THT placements, test) with their machine MHR and labour.
+- Then rejection, overhead, profit and packing (Cost formulas of scope `harness` / `pcb`). Click any value for its trace, down to the electricity rate in a machine hour rate.
+
+Master data: **Part register setup → Part library** (price per piece or per metre, currency, source, month) and **Harness and PCB processes** (driver, seconds, machine, labour grade,
+operators); new EXAMPLE machines (cut-and-strip, crimp press, SMT line, test bench) and rates for 9 countries. **A part that is not in the library is listed as "not priced" and
+counts as 0** until you add it: nothing is guessed. Distributor price APIs (Octopart, Mouser, Digi-Key) are not used. A wire line's length is the total length of its wires.
 
 ## Rates page: country rate library, MHR & labour rates
 

@@ -25,12 +25,14 @@ from .table_set import TableSet, col
 
 RM_FAMILIES = ("plastic", "die_casting", "foundry", "sheet_metal")
 TOOL_SCOPES = ("tool_clamp", "tool")
-SCOPES = ("mhr", "labour") + tuple(f"rm_{f}" for f in RM_FAMILIES) + TOOL_SCOPES + ("piece",)
+PIECE_SCOPES = ("piece", "harness", "pcb")     # costed by piece_cost.py / electro_cost.py; source "piece" = a value the engine works out
+SCOPES = ("mhr", "labour") + tuple(f"rm_{f}" for f in RM_FAMILIES) + TOOL_SCOPES + PIECE_SCOPES
 SOURCES = ("rate", "machine", "parameter", "part", "tool", "piece")
 MACHINE_FIELDS = ("power_kw", "load_factor_pct", "floor_area_m2", "life_years", "residual_pct",
                   "maintenance_pct", "tonnage_t", "length_mm", "width_mm")
 RESULT_OF = ({"mhr": "Machine hour rate", "labour": "Labour rate"} | {f"rm_{f}": "Net RM cost per part" for f in RM_FAMILIES}
-             | {"tool_clamp": "Clamp force for the try-out machine", "tool": "Tool cost per tool", "piece": "Part cost per piece"})
+             | {"tool_clamp": "Clamp force for the try-out machine", "tool": "Tool cost per tool", "piece": "Part cost per piece",
+                                                                    "harness": "Harness cost", "pcb": "PCB assembly cost"})
 # Values worked out by the part cost engine (piece_cost.py) that the piece formulas can use (source = piece);
 # the Insert moulding rules (Part register setup) can be used by their key as well.
 PIECE_ITEMS = {
@@ -189,13 +191,13 @@ def _check(clean: dict) -> None:
             raise SetupError(f"Formula inputs row {i}: a rate input needs a rate category and item.")
         if r["source"] == "machine" and r["item"] not in MACHINE_FIELDS:
             raise SetupError(f"Formula inputs row {i}: machine field must be one of {', '.join(MACHINE_FIELDS)}.")
-        if r["scope"] == "piece" and r["source"] not in ("piece", "parameter", "rate"):
-            raise SetupError(f"Formula inputs row {i}: scope piece takes sources piece, parameter and rate.")
-        if r["source"] == "piece" and r["scope"] != "piece":
-            raise SetupError(f"Formula inputs row {i}: source 'piece' is only for scope piece.")
+        if r["scope"] in PIECE_SCOPES and r["source"] not in ("piece", "parameter", "rate"):
+            raise SetupError(f"Formula inputs row {i}: scope {r['scope']} takes sources piece, parameter and rate.")
+        if r["source"] == "piece" and r["scope"] not in PIECE_SCOPES:
+            raise SetupError(f"Formula inputs row {i}: source 'piece' is only for the scopes {', '.join(PIECE_SCOPES)}.")
         if r["source"] == "part" and not r["scope"].startswith("rm_"):
             raise SetupError(f"Formula inputs row {i}: source 'part' is only for the RM scopes (rm_...).")
-        if r["source"] == "parameter" and not (r["scope"].startswith("rm_") or r["scope"] in TOOL_SCOPES + ("piece",)):
+        if r["source"] == "parameter" and not (r["scope"].startswith("rm_") or r["scope"] in TOOL_SCOPES + PIECE_SCOPES):
             raise SetupError(f"Formula inputs row {i}: source 'parameter' is only for the RM and tool scopes.")
         if r["source"] == "tool" and r["scope"] not in TOOL_SCOPES:
             raise SetupError(f"Formula inputs row {i}: source 'tool' is only for the tool scopes ({', '.join(TOOL_SCOPES)}).")

@@ -65,10 +65,19 @@
         </div>
         <p id="status" class="status" role="status"></p>
         <div id="out"></div>
+        <h3 class="block-title" id="costTitle" hidden>Cost</h3>
+        <form class="card toolbar" id="costForm" hidden>
+          <label>Producing country <select name="country" id="costCountry"></select></label>
+          <label>Costing month <input name="month" id="costMonth" placeholder="2026-10" size="8" /></label>
+          <button type="submit" class="btn btn-primary">Calculate cost</button>
+          <a class="btn btn-outline" id="costXlsx" hidden>Cost Excel</a><a class="btn btn-outline" id="costPdf" hidden>Cost PDF</a>
+        </form>
+        <div id="cost"></div>
       </div>
     </section>
   </main>
   <footer><div class="container"><p class="footnote">© Design to Cost</p></div></footer>
+  <script src="/static/trace.js"></script>
   <script src="/static/common.js"></script>
   <script src="/static/bom.js"></script>
 </body>

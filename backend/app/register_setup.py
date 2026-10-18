@@ -60,6 +60,29 @@ TABLES = {
         col("sort_order", "Order", "number"),
         col("notes", "Notes", required=False),
     ]},
+    "part_library": {"title": "Part library (harness and PCB parts)", "unique": ("part_number",), "columns": [
+        col("part_number", "Part number (MPN)"),
+        col("maker", "Maker", required=False),
+        col("description", "Description", required=False),
+        col("unit", "Price per", "unit", ("pcs", "m")),
+        col("unit_price", "Price per unit", "number"),
+        col("currency", "Currency"),
+        col("source", "Source (quote, catalogue)", required=False),
+        col("month", "Price month (2026-10)", required=False),
+        col("is_example", "Example", "bool"),
+    ]},
+    "electro_processes": {"title": "Harness and PCB processes", "unique": ("scope", "code"), "columns": [
+        col("scope", "Of", "scope", ("harness", "pcb")),
+        col("code", "Process"),
+        col("description", "Description", required=False),
+        col("driver", "Counted per (driver)"),
+        col("seconds", "Seconds per driver unit", "number"),
+        col("machine_id", "Machine (Machines sheet)", required=False),
+        col("labour_grade", "Labour grade"),
+        col("operators", "Operators", "number"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes", required=False),
+    ]},
     "sourcing_types": {"title": "Sourcing", "unique": ("code",), "columns": [
         col("code", "Code"),
         col("name", "Sourcing"),
@@ -227,6 +250,10 @@ def processes() -> dict:
 
 def statuses() -> list[dict]:
     return sorted(tables()["part_statuses"], key=lambda r: r["sort_order"])
+
+
+def electro_processes(scope: str) -> list[dict]:
+    return [r for r in tables()["electro_processes"] if r["scope"] == scope]
 
 
 def capex_milestones() -> list[dict]:
