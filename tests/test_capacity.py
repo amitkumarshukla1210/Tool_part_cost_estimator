@@ -82,3 +82,22 @@ def test_api_capacity_and_hints():
     assert process["wall_thickness_mm"] == pytest.approx(2.5)
     assert process["footprint_mm"] == {"length": 120.0, "width": 80.0}
     assert process["cycle_time_s_estimate"] == pytest.approx(20.5)
+
+
+@pytest.mark.parametrize("oee", [50, 75, 100])
+def test_oee_applied_once(oee):
+    """Regression guard: OEE must reduce capacity once, not twice."""
+    r = calculate(CapacityInput(part_type="plastic", footprint_length_mm=120, footprint_width_mm=80,
+                                annual_volume=1_000_000, cycle_time_s=25, oee_pct=oee))
+    planned = 300 * 2 * 8
+    assert r["planned_hours_per_year"] == planned
+    assert r["available_hours_per_year"] == pytest.approx(planned * oee / 100)
+    assert r["cavities_needed"] == pytest.approx(1_000_000 * 25 / 3600 / (planned * oee / 100), abs=1e-3)
+    # Utilisation × machines × cavities gives back the cavities needed only if
+    # OEE is counted once on each side.
+    util = r["machine_utilisation_pct"] / 100
+    assert util * r["tools_for_capacity"] * r["cavities_per_tool"] == pytest.approx(r["cavities_needed"], rel=2e-3)
+    # Halving OEE doubles the cavities needed (a double count would quadruple it).
+    half = calculate(CapacityInput(part_type="plastic", footprint_length_mm=120, footprint_width_mm=80,
+                                   annual_volume=1_000_000, cycle_time_s=25, oee_pct=oee / 2))
+    assert half["cavities_needed"] == pytest.approx(2 * r["cavities_needed"], rel=1e-3)

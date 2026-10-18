@@ -166,7 +166,8 @@
 
         <table id="resultsC">
           <tbody>
-            <tr><th>Production hours / year (after OEE)</th><td id="c-hours"></td></tr>
+            <tr><th>Planned hours / year</th><td id="c-planned"></td></tr>
+            <tr><th>Productive hours / year (× OEE, once)</th><td id="c-hours"></td></tr>
             <tr><th>Output needed</th><td id="c-pph"></td></tr>
             <tr><th><span data-c="cavity-cap"></span> needed</th><td id="c-needed"></td></tr>
             <tr><th>Fit on <span data-c="plate-lc"></span></th><td id="c-fit"></td></tr>
@@ -181,6 +182,49 @@
             <tr><th>Machine utilisation</th><td id="c-util"></td></tr>
           </tbody>
         </table>
+      </div>
+
+      <div id="stageM" class="stage-block" hidden>
+        <h2>Mould / die size &amp; BOM <span class="tag">preview</span></h2>
+        <p class="note">
+          Cavities + part size → insert size → standard mould base → BOM, all from the
+          <a href="/master-data?set=mould">mould &amp; die database</a>.
+        </p>
+        <form id="formM" class="grid2">
+          <label>Cavities per tool
+            <input type="number" name="cavities" step="1" min="1" /></label>
+          <label class="check"><input type="checkbox" name="hot_runner" /> Hot runner</label>
+          <label>Slides per cavity
+            <input type="number" name="slides_per_cavity" step="1" min="0" value="0" /></label>
+          <label>Lifters per cavity
+            <input type="number" name="lifters_per_cavity" step="1" min="0" value="0" /></label>
+          <label>Small inserts per cavity
+            <input type="number" name="inserts_per_cavity" step="1" min="0" value="0" /></label>
+        </form>
+        <p id="statusM" class="status-error" role="status"></p>
+        <div id="resultsM" hidden>
+          <p class="warn" id="m-examples"></p>
+          <table>
+            <tbody>
+              <tr><th>Cavity layout</th><td id="m-layout"></td></tr>
+              <tr><th>Insert per cavity (L × W × H per half)</th><td id="m-insert"></td></tr>
+              <tr><th>Insert pocket</th><td id="m-pocket"></td></tr>
+              <tr class="total"><th>Mould base</th><td id="m-base"></td></tr>
+              <tr><th>Base plates A / B · stack height</th><td id="m-plates"></td></tr>
+              <tr><th>Base weight</th><td id="m-weight"></td></tr>
+            </tbody>
+          </table>
+          <h3>BOM</h3>
+          <div class="scroll-x">
+            <table class="small bom">
+              <thead><tr><th>Element</th><th>Qty</th><th>Material</th><th>Hours</th><th>Cost</th></tr></thead>
+              <tbody id="m-bom"></tbody>
+              <tfoot id="m-total"></tfoot>
+            </table>
+          </div>
+          <p class="note" id="m-split"></p>
+          <p class="note" id="m-warnings"></p>
+        </div>
       </div>
     </section>
 

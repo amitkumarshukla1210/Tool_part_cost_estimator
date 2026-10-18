@@ -15,21 +15,18 @@
   </header>
 
   <div class="md">
-    <section class="md-intro">
-      <h2>Master data</h2>
-      <p>
-        Every rate, default and rule the estimator uses is stored in one Excel file,
-        <code>master_data/master_data.xlsx</code>. Edit it here and click <b>Save</b>, or download it,
-        change it in Excel and upload it again. New values are used by the next calculation.
-      </p>
-    </section>
+    <div class="datasets" role="tablist" aria-label="Data set">
+      <button role="tab" data-dataset="general" aria-selected="true">
+        <b>General master data</b><span>Rates, defaults, materials, machines · Excel file</span>
+      </button>
+      <button role="tab" data-dataset="mould">
+        <b>Mould &amp; die database</b><span>Bases, tool steels, BOM rules, process rates · SQLite</span>
+      </button>
+    </div>
+    <p class="md-intro" id="intro"></p>
 
     <div class="md-toolbar">
-      <div class="tabs" role="tablist">
-        <button role="tab" data-sheet="Parameters" aria-selected="true">Parameters</button>
-        <button role="tab" data-sheet="Materials">Materials</button>
-        <button role="tab" data-sheet="Machines">Machines</button>
-      </div>
+      <div class="tabs" role="tablist" id="tabs"></div>
       <label class="inline">Part type
         <select id="filter">
           <option value="">All</option>
@@ -41,9 +38,21 @@
         </select>
       </label>
       <label class="inline grow">Search
-        <input type="search" id="search" placeholder="parameter, material or machine" />
+        <input type="search" id="search" placeholder="name, description or notes" />
       </label>
+      <label class="check"><input type="checkbox" id="examplesOnly" /> Examples only</label>
     </div>
+
+    <details class="help" id="formulaHelp" hidden>
+      <summary>How to write rules</summary>
+      <p>
+        Rules work like an Excel formula without cells, e.g. <code>max(4, ceil(cavities * projected_area_cm2 / 8))</code>
+        or <code>cavities if hot_runner else 0</code>. Use + − * / ( ), comparisons, <code>a if condition else b</code>,
+        <code>and</code> / <code>or</code> / <code>not</code> and <code>ceil, floor, round, min, max, abs, sqrt</code>.
+        Line cost = quantity × (bought-out cost + weight × material rate/kg + hours × process rate/h).
+      </p>
+      <dl id="variables"></dl>
+    </details>
 
     <div class="md-table-wrap">
       <table class="md-table" id="table"></table>
@@ -51,8 +60,9 @@
 
     <div class="md-actions">
       <button type="button" id="addRow" class="secondary">+ Add row</button>
+      <span id="counts" class="counts"></span>
       <span class="spacer"></span>
-      <a class="button secondary" href="/api/master-data/download" id="download">Download Excel</a>
+      <a class="button secondary" id="download">Download Excel</a>
       <label class="button secondary" for="upload">Upload Excel</label>
       <input type="file" id="upload" accept=".xlsx" hidden />
       <button type="button" id="revert" class="secondary" disabled>Undo changes</button>

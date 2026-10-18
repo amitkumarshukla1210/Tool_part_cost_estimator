@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .geometry import PART_TYPES, analyze, blank_estimate, load_step, sheet_thickness, tessellate
-from . import capacity, gross_weight, master_data
+from . import capacity, gross_weight, master_data, mould, mould_db
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 MAX_UPLOAD_MB = 100
@@ -143,7 +143,49 @@ async def master_data_upload(file: UploadFile = File(...)):
     return master_data.tables()
 
 
+@app.get("/api/mould-db/schema")
+def mould_db_schema():
+    return mould_db.schema()
+
+
+@app.get("/api/mould-db")
+def mould_db_get():
+    return mould_db.tables()
+
+
+@app.put("/api/mould-db")
+def mould_db_put(data: dict):
+    mould_db.write(data)
+    return mould_db.tables()
+
+
+@app.get("/api/mould-db/download")
+def mould_db_download():
+    return Response(
+        mould_db.to_excel(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="mould_db.xlsx"'},
+    )
+
+
+@app.post("/api/mould-db/upload")
+async def mould_db_upload(file: UploadFile = File(...)):
+    if not (file.filename or "").lower().endswith(".xlsx"):
+        raise HTTPException(400, "Please upload an Excel .xlsx file.")
+    mould_db.from_excel(await file.read())
+    return mould_db.tables()
+
+
+@app.post("/api/mould/estimate")
+def mould_estimate(inp: mould.MouldInput):
+    try:
+        return mould.estimate(inp)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @app.exception_handler(master_data.MasterDataError)
+@app.exception_handler(mould_db.MouldDbError)
 def master_data_error(request, exc):
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 

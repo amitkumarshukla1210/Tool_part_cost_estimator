@@ -134,6 +134,7 @@ $("form").addEventListener("submit", async (e) => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || res.statusText);
     showResults(data.metrics);
+    resetMould();
     startStageB(data, chosenMaterial());
     showMesh(data.mesh);
     setStatus(`${data.file_name} · ${data.part_type_label}`);
@@ -381,8 +382,10 @@ async function calculateC() {
 }
 
 function showResultsC(r) {
+  startMould(r);
   const t = r.terms;
   const lay = r.layout;
+  $("c-planned").textContent = `${int(r.planned_hours_per_year)} h`;
   $("c-hours").textContent = `${int(r.available_hours_per_year)} h`;
   $("c-pph").textContent = `${fmt(r.required_parts_per_hour, 1)} parts / h`;
   $("c-needed").textContent = fmt(r.cavities_needed, 2);
@@ -396,4 +399,102 @@ function showResultsC(r) {
   $("c-dies").textContent = `${r.total_dies}  (${r.dies_per_set} per set)`;
   $("c-mh").textContent = `${int(r.machine_hours_per_year)} h`;
   $("c-util").textContent = `${fmt(r.machine_utilisation_pct, 1)} %` + (r.tools_for_capacity > 1 ? ` across ${r.tools_for_capacity} machines` : "");
+}
+
+// ---------- Mould / die size & BOM (from the mould database) ----------
+const formM = $("formM");
+let timerM = null;
+let lastCavities = null;
+
+// A new part starts from its own Stage C cavities and no side actions.
+function resetMould() {
+  formM.reset();
+  formM.elements.cavities.value = "";
+  lastCavities = null;
+  $("resultsM").hidden = true;
+}
+
+function startMould(stageC) {
+  const type = analysis.metrics.part_type;
+  if (!["plastic", "die_casting"].includes(type)) {
+    $("stageM").hidden = true;
+    return;
+  }
+  // Follow Stage C until the user types their own cavity count.
+  if (formM.elements.cavities.value === "" || Number(formM.elements.cavities.value) === lastCavities) {
+    formM.elements.cavities.value = stageC.cavities_per_tool;
+  }
+  lastCavities = stageC.cavities_per_tool;
+  formM.elements.hot_runner.closest("label").hidden = type !== "plastic";
+  formM.elements.lifters_per_cavity.closest("label").hidden = type !== "plastic";
+  $("stageM").hidden = false;
+  clearTimeout(timerM);
+  timerM = setTimeout(calculateMould, 200);
+}
+
+formM.addEventListener("input", () => {
+  clearTimeout(timerM);
+  timerM = setTimeout(calculateMould, 300);
+});
+
+async function calculateMould() {
+  const m = analysis.metrics;
+  const f = analysis.process.footprint_mm;
+  const body = {
+    part_type: m.part_type,
+    cavities: Number(formM.elements.cavities.value),
+    part_length_mm: f.length,
+    part_width_mm: f.width,
+    part_height_mm: m.bbox_axes_mm[m.pull_direction],
+    projected_area_cm2: m.projected_area_cm2,
+    part_weight_g: m.net_weight_g,
+    hot_runner: formM.elements.hot_runner.checked && m.part_type === "plastic",
+  };
+  for (const k of ["slides_per_cavity", "lifters_per_cavity", "inserts_per_cavity"]) {
+    body[k] = formM.elements[k].closest("label").hidden ? 0 : Number(formM.elements[k].value || 0);
+  }
+  try {
+    const res = await fetch("/api/mould/estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(errorText(data.detail));
+    $("statusM").textContent = "";
+    $("resultsM").hidden = false;
+    showMould(data);
+  } catch (err) {
+    $("statusM").textContent = err.message;
+    $("resultsM").hidden = true;
+  }
+}
+
+function showMould(r) {
+  const cur = formB.elements.currency.value || "";
+  const money = (v) => `${cur} ${int(v)}`;
+  const L = r.layout;
+  const b = r.base;
+  const examples = r.example_lines + (r.sizing_rules_are_examples ? 1 : 0);
+  $("m-examples").hidden = !examples;
+  $("m-examples").textContent =
+    `${r.example_lines} of ${r.lines.length} BOM lines` + (r.sizing_rules_are_examples ? " and the sizing rules" : "") +
+    " still use EXAMPLE placeholder values (marked •). Replace them in Master data → Mould & die database.";
+  $("m-layout").textContent = `${L.rows} × ${L.cols}` + (L.empty ? ` (${L.empty} empty position)` : "");
+  $("m-insert").textContent = `${fmt(L.each_l, 0)} × ${fmt(L.each_w, 0)} × ${fmt(L.half_h, 0)} mm`;
+  $("m-pocket").textContent = `${fmt(L.pocket_l, 0)} × ${fmt(L.pocket_w, 0)} mm`;
+  $("m-base").textContent =
+    `${b.series} ${b.size_code} · ${b.width_mm} × ${b.length_mm} mm` + (r.base_turned ? " (layout turned 90°)" : "");
+  $("m-plates").textContent = `${b.a_plate_mm} / ${b.b_plate_mm} mm · ${b.stack_height_mm} mm`;
+  $("m-weight").textContent = `${fmt(b.weight_kg, 0)} kg`;
+  $("m-bom").innerHTML = r.lines
+    .map((l) => `<tr class="${l.is_example ? "example" : ""}"><td>${l.element}</td><td>${fmt(l.quantity, l.quantity % 1 ? 2 : 0)}</td>` +
+      `<td>${l.material || ""}</td><td>${l.hours ? fmt(l.hours, 1) : ""}</td><td>${money(l.total)}</td></tr>`)
+    .join("");
+  $("m-total").innerHTML =
+    `<tr><td>Total</td><td></td><td></td><td>${fmt(r.totals.hours, 0)}</td><td>${money(r.totals.total)}</td></tr>`;
+  $("m-split").textContent =
+    `Material ${money(r.totals.material_cost)} · bought-out ${money(r.totals.bought_out_cost)} · ` +
+    `process ${money(r.totals.process_cost)}`;
+  $("m-warnings").textContent = r.warnings.join(" ");
 }

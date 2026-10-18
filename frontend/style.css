@@ -97,6 +97,14 @@ tr.pull td { background: var(--highlight); font-weight: 600; }
 #statusB, .status-error { margin: 8px 0 0; min-height: 1.2em; font-size: 0.85rem; color: var(--error); }
 tr.total th, tr.total td { border-top: 2px solid var(--text); font-weight: 700; color: var(--text); }
 [hidden] { display: none !important; }
+.tag { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; background: #fff4ce; color: #8a6d00; padding: 2px 6px; border-radius: 4px; vertical-align: middle; }
+.warn { background: #fff4ce; color: #6b5500; border-radius: 6px; padding: 8px 10px; font-size: 0.82rem; margin: 8px 0; }
+.grid2 label.check { display: flex; gap: 6px; align-items: center; align-content: normal; }
+.grid2 label.check input { width: auto; }
+.scroll-x { overflow-x: auto; }
+table.bom td:nth-child(n+2), table.bom th:nth-child(n+2) { text-align: right; white-space: nowrap; }
+table.bom tr.example td:first-child::after { content: " •"; color: #c99700; }
+table.bom tfoot td { font-weight: 700; border-top: 2px solid var(--text); }
 
 .viewer {
   position: sticky;

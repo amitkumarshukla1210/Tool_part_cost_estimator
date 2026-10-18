@@ -3,7 +3,7 @@
 Uses the part footprint from Stage A (or the flat blank from Stage B for
 sheet metal) plus volume and process inputs.
 
-    available h/yr   = days × shifts × hours per shift × OEE
+    available h/yr   = days × shifts × hours per shift × OEE   (OEE used once)
     parts per hour   = annual volume ÷ available h/yr
     cavities needed  = parts per hour × cycle time (s) ÷ 3600
     cavities / tool  = needed, rounded up to a standard layout, but no more
@@ -95,7 +95,10 @@ def choose_cavities(part_type: str, needed: float, limit: int) -> int:
 
 
 def calculate(inp: CapacityInput) -> dict:
-    hours = inp.working_days * inp.shifts_per_day * inp.hours_per_shift * inp.oee_pct / 100
+    # OEE is applied exactly once: planned hours -> productive hours.
+    oee = inp.oee_pct / 100
+    planned_hours = inp.working_days * inp.shifts_per_day * inp.hours_per_shift
+    hours = planned_hours * oee
     parts_per_hour = inp.annual_volume / hours
     needed = parts_per_hour * inp.cycle_time_s / 3600
 
@@ -126,12 +129,14 @@ def calculate(inp: CapacityInput) -> dict:
     tools_life = math.ceil(programme_shots / inp.tool_life_shots)
     tool_sets = max(tools_capacity, tools_life)
 
-    machine_hours = shots_per_year * inp.cycle_time_s / 3600 / (inp.oee_pct / 100)
-    available_per_machine = hours / (inp.oee_pct / 100)  # calendar hours before OEE loss
+    # Machine time booked = pure run time grossed up for OEE losses, compared
+    # with the planned (not OEE-reduced) hours of the machines in use.
+    machine_hours = shots_per_year * inp.cycle_time_s / 3600 / oee
 
     return {
         "part_type": inp.part_type,
         "terms": TERMS[inp.part_type],
+        "planned_hours_per_year": round(planned_hours, 1),
         "available_hours_per_year": round(hours, 1),
         "required_parts_per_hour": round(parts_per_hour, 2),
         "cavities_needed": round(needed, 3),
@@ -139,7 +144,7 @@ def calculate(inp: CapacityInput) -> dict:
         "layout": {k: layout[k] for k in ("along", "across", "rotated")},
         "cavities_per_tool": cavities,
         "limited_by": limited_by,
-        "output_per_tool_per_hour": round(cavities * 3600 / inp.cycle_time_s * inp.oee_pct / 100, 1),
+        "output_per_tool_per_hour": round(cavities * 3600 / inp.cycle_time_s * oee, 1),
         "tools_for_capacity": tools_capacity,
         "shots_per_year": shots_per_year,
         "programme_shots": programme_shots,
@@ -148,6 +153,6 @@ def calculate(inp: CapacityInput) -> dict:
         "dies_per_set": inp.operations,
         "total_dies": tool_sets * inp.operations,
         "machine_hours_per_year": round(machine_hours, 1),
-        "machine_utilisation_pct": round(100 * machine_hours / (available_per_machine * tools_capacity), 1),
+        "machine_utilisation_pct": round(100 * machine_hours / (planned_hours * tools_capacity), 1),
         "inputs": inp.model_dump(),
     }
