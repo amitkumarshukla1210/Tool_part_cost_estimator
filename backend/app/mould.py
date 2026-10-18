@@ -22,7 +22,7 @@ SIZING_KEYS = ("insert_wall_mm", "insert_gap_mm", "insert_backing_mm", "plate_fl
 
 
 class MouldInput(BaseModel):
-    part_type: Literal["plastic", "die_casting", "foundry", "sheet_metal"]
+    part_type: Literal["plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow"]
     cavities: int = Field(gt=0, le=256)
     part_length_mm: float = Field(gt=0)
     part_width_mm: float = Field(gt=0)

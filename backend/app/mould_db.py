@@ -23,7 +23,7 @@ from . import costing_db, formula
 from .table_set import TableSet, col
 
 DEFAULT_PATH = costing_db.DEFAULT_PATH
-PART_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal")
+PART_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow")
 CATEGORIES = ("made", "bought_out", "process")
 # What a process rate is charged per (the unit of the rate in the library is "<currency>/<basis>").
 BASES = ("kg", "cm²", "mm", "m²", "unit")

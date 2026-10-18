@@ -27,7 +27,7 @@ from . import costing_setup, formula, master_data, mould, mould_db, rate_engine,
 from .rm_cost import _parameter_row
 from .trace import EXAMPLE_WARNING, Trace
 
-PART_TYPES = ("plastic", "die_casting")
+PART_TYPES = ("plastic", "die_casting", "eps", "blow")
 LATER = {"sheet_metal": "Tool cost of sheet-metal dies comes with roadmap stages 9 and 10.",
          "foundry": "Tool cost of foundry patterns and core boxes comes in a later stage."}
 GROUP_LABEL = {"cutting": "Raw material cutting", "machining": "Machining (CNC, EDM, wire cut, grinding, drilling)",

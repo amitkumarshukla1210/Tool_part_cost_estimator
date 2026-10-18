@@ -23,7 +23,7 @@ from __future__ import annotations
 from . import formula
 from .table_set import TableSet, col
 
-RM_FAMILIES = ("plastic", "die_casting", "foundry", "sheet_metal")
+RM_FAMILIES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow")
 TOOL_SCOPES = ("tool_clamp", "tool")
 PIECE_SCOPES = ("piece", "harness", "pcb")     # costed by piece_cost.py / electro_cost.py; source "piece" = a value the engine works out
 SCOPES = ("mhr", "labour") + tuple(f"rm_{f}" for f in RM_FAMILIES) + TOOL_SCOPES + PIECE_SCOPES

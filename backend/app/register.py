@@ -234,7 +234,7 @@ def material_families(material: str) -> list[str]:
 def suggest_process(metrics: dict | None, material: str = "", insert_count: float = 0) -> dict:
     """Suggest a process: material first, then the geometry rules, then inserts. Returns the reason step by step."""
     family_label = {"plastic": "a plastic", "die_casting": "a die-casting alloy", "foundry": "a foundry casting material",
-                    "sheet_metal": "a sheet-metal grade"}
+                    "sheet_metal": "a sheet-metal grade", "eps": "an EPS (thermocole) bead grade", "blow": "a PET bottle resin"}
     procs = register_setup.processes()
     label = lambda c: procs[c]["name"] if c in procs else c
     if metrics and metrics.get("assembly"):
@@ -684,8 +684,22 @@ def _geometry_trace(part_id: int, rev_id: int | None = None):
     if density:
         t.add_input("density", f"Density of {d['material']}", density, "g/cm³", dsrc)
         label = "Body weight (plastic / metal, without inserts)" if d["inserts"] else "Net weight"
-        t.compute("weight", label, "volume * density", "g", names={"volume": volume_node, "density": "density"},
-                  description="Volume from the CAD file × material density from master data")
+        proc = register_setup.processes().get(d["process"]) or {}
+        if proc.get("part_type") == "blow":
+            # a bottle is a thin shell: the CAD volume is the outer envelope, so weight = outer surface × average wall × density
+            typed = (d["rm_inputs"] or {}).get("wall_mm")
+            wall = typed if typed else master_data.parameters("blow").get("blow_wall_mm")
+            if not wall:
+                raise RegisterError("Master data → Parameters has no 'blow_wall_mm' for blow, and no wall thickness is typed under RM inputs.")
+            t.add_input("wall", "Average wall thickness", wall, "mm",
+                        {"type": "user", "note": f"Typed under RM inputs for {d['part_code']}"} if typed else
+                        {"type": "master", "sheet": "Parameters", "row": "blow / blow_wall_mm"})
+            t.compute("weight", "Net bottle weight (shell)", "surface * wall / 10 * density", "g",
+                      names={"surface": "surface", "wall": "wall", "density": "density"},
+                      description="Outer surface area × average wall thickness × resin density (the CAD volume is not used for a hollow bottle)")
+        else:
+            t.compute("weight", label, "volume * density", "g", names={"volume": volume_node, "density": "density"},
+                      description="Volume from the CAD file × material density from master data")
         nodes.insert(0, "weight")
     else:
         warnings.append("Set the part's material to calculate its weight (density from master data).")
