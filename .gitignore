@@ -7,3 +7,6 @@ venv/
 # Project data and CAD files: your company data, never committed
 data/
 storage/
+
+# Backups made by backup.py / update.py
+backups/
