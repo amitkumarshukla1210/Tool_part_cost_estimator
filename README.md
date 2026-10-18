@@ -660,6 +660,30 @@ Use *Examples only* in the Rate library to work through them.
 
 ---
 
+## Update, correct and back up (read this before every update)
+
+**Where your work lives.** Your projects, parts and costs are in `data/` and your CAD files in `storage/`; both are **never** in GitHub. Your rates, machines, formulas and other master data are in
+`master_data/` **and are in GitHub**, so a new download would replace your edits with the example values. Always back up first.
+
+```
+python backup.py                         # zips master_data/, data/ and the CAD storage folder into backups/dtc-backup-<time>.zip (keep a copy elsewhere too)
+python backup.py --restore latest        # puts the newest backup back (what is there now is zipped first as dtc-before-restore-<time>.zip)
+python backup.py --restore latest --only data,storage     # only part of it: master_data, data, storage
+python update.py                         # backup, then git pull
+```
+
+**The correction workflow.**
+1. Report the problem (page, what you did, what you expected, what you saw; the exact error text or a screenshot).
+2. The fix arrives as a pull request on GitHub with the tests that were run; after you merge it, update your PC.
+3. **If you cloned the project with git** (recommended): `python update.py`. It backs up, fetches, and pulls. If you changed `master_data/` and the new version leaves it alone, yours is kept. If **both** changed
+   it, `update.py` stops without changing anything and tells you why: choose `--keep-mine` (your master data stays; the new example rows are missing) or `--take-new` (the new master data is used; yours is in the backup), or send the backup
+   to have the new rows merged into your file. Then `pip install -r requirements.txt` and restart the app.
+4. **If you downloaded a ZIP**: run `python backup.py`, unzip the new version over the folder, run `python backup.py --restore latest --only data,storage`, and put your `master_data/` back with
+   `python backup.py --restore latest --only master_data` when you have edited it (new example rows then need a merge: send me the backup).
+5. Check one known part (compare with its last cost) before you rely on the new version.
+
+There is no limit on the number of corrections; each one is a new pull request. With PostgreSQL (server mode) back up the database with `pg_dump` as well.
+
 ## Full roadmap
 
 Stages A–C, the rate library and MHR engine, the part register (stages 1 and 1b), the RM cost on the register (stage 2), the material & process rates by country (stage 3) and the tool cost engine (stage 4) are done.
