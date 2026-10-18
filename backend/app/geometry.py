@@ -133,3 +133,47 @@ def analyze(shape: cq.Shape, part_type: str, density_g_cm3: float, mesh=None) ->
         projected_area_cm2=round(proj[pull] / 100.0, 4),
         pull_direction=pull,
     )
+
+
+def sheet_thickness(shape: cq.Shape) -> float:
+    """Estimate sheet thickness in mm from opposite parallel planar faces.
+
+    In a sheet-metal part most of the area is in pairs of flat faces that
+    face each other at a distance equal to the thickness. Every such pair
+    votes with its smaller area, and the distance with the most votes wins.
+    Falls back to 2 × volume / surface area if no pair is found.
+    """
+    planes = []
+    for face in shape.Faces():
+        if face.geomType() != "PLANE":
+            continue
+        n = face.normalAt()
+        planes.append((n, face.Center(), face.Area()))
+
+    votes: dict[float, float] = {}
+    for i, (n1, c1, a1) in enumerate(planes):
+        for n2, c2, a2 in planes[i + 1:]:
+            if n1.dot(n2) > -0.999:
+                continue
+            gap = abs((c2 - c1).dot(n1))
+            if gap > 1e-3:
+                key = round(gap, 2)
+                votes[key] = votes.get(key, 0.0) + min(a1, a2)
+    if votes:
+        return max(votes, key=votes.get)
+    return 2 * shape.Volume() / shape.Area()
+
+
+def blank_estimate(volume_mm3: float, bbox_mm: dict, thickness_mm: float) -> dict:
+    """Suggest a rectangular flat blank (mm) for a sheet-metal part.
+
+    A flat part (height ≈ thickness) uses its L × W directly. A bent part
+    keeps its width and gets the developed length from flat area / width.
+    Holes punched out of the part make this slightly short, so the result
+    is a starting point for the user to correct.
+    """
+    length, width, height = bbox_mm["length"], bbox_mm["width"], bbox_mm["height"]
+    if height <= thickness_mm * 1.05:
+        return {"length": round(length, 1), "width": round(width, 1)}
+    flat_area = volume_mm3 / thickness_mm
+    return {"length": round(max(flat_area / width, length), 1), "width": round(width, 1)}

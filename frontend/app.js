@@ -119,8 +119,13 @@ function showMesh(mesh) {
   partGroup.add(helper, new THREE.AxesHelper(diag * 0.25));
   scene.add(partGroup);
 
+  // Distance at which the part's bounding sphere fits the narrower of the
+  // two view angles, so tall or narrow windows don't crop the part.
+  const vFov = THREE.MathUtils.degToRad(camera.fov);
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+  const dist = (diag / 2 / Math.sin(Math.min(vFov, hFov) / 2)) * 1.1;
   controls.target.copy(center);
-  camera.position.copy(center).add(new THREE.Vector3(1, -1.4, 0.9).normalize().multiplyScalar(diag * 1.6));
+  camera.position.copy(center).add(new THREE.Vector3(1, -1.4, 0.9).normalize().multiplyScalar(dist));
   camera.near = diag / 1000;
   camera.far = diag * 100;
   camera.updateProjectionMatrix();
@@ -144,6 +149,7 @@ $("form").addEventListener("submit", async (e) => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || res.statusText);
     showResults(data.metrics);
+    startStageB(data);
     showMesh(data.mesh);
     setStatus(`${data.file_name} · ${data.part_type_label}`);
   } catch (err) {
@@ -176,4 +182,110 @@ function showResults(m) {
     )
     .join("");
   $("results").hidden = false;
+}
+
+// ---------- Stage B: gross weight & RM cost ----------
+const LABELS = {
+  process_loss_pct: { plastic: "Purge / start-up loss (%)", die_casting: "Melt loss (%)", foundry: "Melt loss (%)" },
+  scrap_rate_per_kg: {
+    plastic: "Regrind / scrap value per kg",
+    die_casting: "Returns (runner, biscuit, overflow) value per kg",
+    foundry: "Returns (gating, risers) value per kg",
+    sheet_metal: "Scrap (skeleton, holes) value per kg",
+  },
+  returns: {
+    plastic: "Runner / sprue",
+    die_casting: "Biscuit, runners & overflows",
+    foundry: "Gating & risers",
+    sheet_metal: "Skeleton & punched-out scrap",
+  },
+};
+
+const formB = $("formB");
+let analysis = null; // last Stage A response
+let defaultsB = null;
+let timerB = null;
+
+async function startStageB(data) {
+  analysis = data;
+  const type = data.metrics.part_type;
+  defaultsB ??= await (await fetch("/api/gross-weight/defaults")).json();
+
+  // Only show the inputs and result rows that belong to this part type.
+  document.querySelectorAll("#stageB [class*='t-']").forEach((el) => {
+    el.hidden = !el.classList.contains(`t-${type}`);
+  });
+  document.querySelectorAll("#stageB [data-label]").forEach((el) => {
+    el.textContent = LABELS[el.dataset.label][type] ?? "";
+  });
+
+  // Fresh defaults for each analysed part; rates and currency are kept.
+  for (const [key, value] of Object.entries(defaultsB[type])) formB.elements[key].value = value;
+  if (data.sheet_metal) {
+    formB.elements.thickness_mm.value = data.sheet_metal.thickness_mm;
+    formB.elements.blank_length_mm.value = data.sheet_metal.blank_mm.length;
+    formB.elements.blank_width_mm.value = data.sheet_metal.blank_mm.width;
+    $("sheetHint").textContent =
+      "Thickness and flat blank size were estimated from the 3D model. Check them against the drawing or flat pattern.";
+  }
+
+  $("stageB").hidden = false;
+  calculateB();
+}
+
+formB.addEventListener("input", () => {
+  clearTimeout(timerB);
+  timerB = setTimeout(calculateB, 300);
+});
+
+async function calculateB() {
+  const m = analysis.metrics;
+  const body = { part_type: m.part_type, net_weight_g: m.net_weight_g, density_g_cm3: m.density_g_cm3 };
+  for (const input of formB.querySelectorAll("label:not([hidden]) input")) {
+    if (input.value === "") continue;
+    body[input.name] = input.type === "number" ? Number(input.value) : input.value;
+  }
+
+  try {
+    const res = await fetch("/api/gross-weight", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(errorText(data.detail));
+    $("statusB").textContent = "";
+    $("resultsB").hidden = false;
+    showResultsB(data);
+  } catch (err) {
+    $("statusB").textContent = err.message;
+    $("resultsB").hidden = true;
+  }
+}
+
+function errorText(detail) {
+  // FastAPI sends a list of field errors for invalid inputs.
+  if (Array.isArray(detail)) return detail.map((d) => `${d.loc.at(-1)}: ${d.msg}`).join("; ");
+  return detail || "Calculation failed";
+}
+
+const grams = (g) => (g >= 1000 ? `${fmt(g / 1000, 3)} kg` : `${fmt(g, 2)} g`);
+
+function showResultsB(r) {
+  const money = (v) => `${r.currency} ${fmt(v, 2)}`;
+  $("b-net").textContent = grams(r.net_weight_g);
+  $("b-gross").textContent = grams(r.gross_weight_g);
+  $("b-returns").textContent = grams(r.returns_scrap_g);
+  $("b-loss").textContent = r.process_loss_g === undefined ? "" : grams(r.process_loss_g);
+  $("b-input").textContent = grams(r.material_input_g);
+  $("b-yield").textContent = `${fmt(r.material_yield_pct, 1)} %`;
+  if (r.nesting) {
+    const n = r.nesting;
+    $("b-nest").textContent = `${n.per_sheet}  (${n.along} × ${n.across}${n.rotated ? ", blank turned 90°" : ""})`;
+    $("b-sheet").textContent = `${fmt(r.sheet_weight_kg, 2)} kg · ${fmt(r.sheet_utilisation_pct, 1)} % used`;
+  }
+  const priced = r.inputs.material_rate_per_kg > 0;
+  $("b-rm").textContent = priced ? money(r.rm_cost) : "enter material rate";
+  $("b-credit").textContent = priced || r.scrap_credit ? `− ${money(r.scrap_credit)}` : "";
+  $("b-net-rm").textContent = priced ? money(r.net_rm_cost) : "—";
 }
