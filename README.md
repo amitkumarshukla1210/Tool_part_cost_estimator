@@ -489,6 +489,16 @@ press. The die type follows the part's process (progressive / multi-stage); the 
 Everything is data in **Mould & die database → Sheet materials, Sheet operations, Sheet rules, Sheet checks** and the sheet-metal
 Parameters; all rows are EXAMPLE values.
 
+## Sheet-metal tools II (roadmap stage 10)
+
+The **Sheet-metal tools** block also shows the **blank** and the **progressive strip layout**. A flat part gets its real outline and
+holes; a bent part the developed rectangle (the blank estimate: bend lines and hole positions need a real unfolder, e.g. the FreeCAD
+SheetMetal workbench). The strip is worked out for the blank fed along its length and along its width; the better material
+utilisation is shown: pitch = blank along the feed + bridge, strip width = blank across + 2 edge margins, stations = operations +
+idle stations, pilots. The formulas are **Mould & die database → Strip rules** and sheet-metal Parameters (EXAMPLE values).
+Downloads: **Blank DXF** and **Strip DXF** (CUT layer, dimensions) and the **Tool pack PDF** (dimensioned blank, strip layout, simplified
+stage sketches, forces). The stage sketches show the flat blank (with holes once pierced), not formed shapes.
+
 ## Rates page: country rate library, MHR & labour rates
 
 Open **Rates** in the header. Pick the **producing country** and the **costing month**.
