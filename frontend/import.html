@@ -62,8 +62,10 @@
         <div id="preview" hidden>
           <h3 class="block-title" id="previewTitle">Parts found</h3>
           <p class="warn" id="lookalikes" hidden></p>
+          <p class="warn" id="insertsFound" hidden></p>
           <p class="note">Tick the parts to register. Repeated parts are grouped with their quantity. Leave a part code blank to generate one
-            (<span id="pattern"></span>). The process is a suggestion from the geometry (rules in Master data → Part register setup); please check it.</p>
+            (<span id="pattern"></span>). The process is suggested from the material first (Master data → Materials), then the geometry rules
+            (Master data → Part register setup); choose the material and the suggestion updates. Click “why?” for the reason, and please check it.</p>
           <div class="table-wrap" style="max-height: 620px"><table class="cost-table" id="tree"></table></div>
           <form class="card toolbar" id="commitForm" style="margin-top: 14px">
             <label>Rev no. for new files (blank = A / next) <input name="rev" maxlength="20" /></label>
@@ -81,7 +83,8 @@
         <div class="steps">
           <div class="card"><h3>1 · Download the template</h3>
             <p class="note">Columns: part code, name, rev, file name, material, process, sourcing, volume, programme life, target cost,
-              variant, parent part code, quantity, what changed. The Help sheet explains each column.</p>
+              variant, parent part code, quantity, what changed, and for moulded-in inserts: the part it goes into, quantity and
+              bought-out price. The Help sheet explains each column.</p>
             <a class="btn btn-outline" href="/api/import/template.xlsx">Download Excel template</a></div>
           <div class="card"><h3>2 · Fill it in</h3>
             <p class="note">One row per part. A part code that already exists becomes a new revision. Rows whose file is not uploaded are

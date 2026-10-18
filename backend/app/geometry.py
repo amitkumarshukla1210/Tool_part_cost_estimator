@@ -135,14 +135,23 @@ def analyze(shape: cq.Shape, part_type: str, density_g_cm3: float, mesh=None) ->
     )
 
 
-def wall_stats(shape: cq.Shape) -> tuple[float, float]:
-    """(most common wall thickness in mm, share of the surface that is such parallel face pairs)."""
+def wall_stats(shape: cq.Shape) -> tuple[float, float, int]:
+    """(most common wall thickness in mm, share of the surface at that thickness, number of bends).
+
+    Pairs of opposite flat faces vote for the wall with their smaller area. A bend is
+    either a pair of coaxial cylinder faces whose radii differ by that wall (a radiused
+    bend), or, for sharp-cornered models, a change in direction between the face pairs
+    at that wall (an L-bracket has two directions, so one bend). The share leaves out
+    the narrow edge strips of a sheet (faces no wider than about 1.2 × the wall), so a
+    thick, small bracket still reads as sheet-like.
+    """
     planes = []
     for face in shape.Faces():
         if face.geomType() != "PLANE":
             continue
         planes.append((face.normalAt(), face.Center(), face.Area()))
     votes: dict[float, float] = {}
+    pair_dirs: dict[float, list] = {}
     for i, (n1, c1, a1) in enumerate(planes):
         for n2, c2, a2 in planes[i + 1:]:
             if n1.dot(n2) > -0.999:
@@ -151,11 +160,46 @@ def wall_stats(shape: cq.Shape) -> tuple[float, float]:
             if gap > 1e-3:
                 key = round(gap, 2)
                 votes[key] = votes.get(key, 0.0) + min(a1, a2)
+                pair_dirs.setdefault(key, []).append(n1)
     area = shape.Area() or 1.0
     if not votes:
-        return 2 * shape.Volume() / area, 0.0
+        return 2 * shape.Volume() / area, 0.0, 0
     best = max(votes, key=votes.get)
-    return best, min(1.0, 2 * votes[best] / area)
+    covered = votes[best]
+
+    # radiused bends: coaxial cylinders, radii differing by the wall
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    cylinders = []
+    for face in shape.Faces():
+        if face.geomType() == "CYLINDER":
+            cyl = BRepAdaptor_Surface(face.wrapped).Cylinder()
+            ax = cyl.Axis()
+            d, o = ax.Direction(), ax.Location()
+            cylinders.append(((d.X(), d.Y(), d.Z()), (o.X(), o.Y(), o.Z()), cyl.Radius(), face.Area()))
+    bends = 0
+    for i, (d1, o1, r1, a1) in enumerate(cylinders):
+        for d2, o2, r2, a2 in cylinders[i + 1:]:
+            if abs(sum(x * y for x, y in zip(d1, d2))) < 0.999:
+                continue
+            off = [b - a for a, b in zip(o1, o2)]
+            along = sum(x * y for x, y in zip(off, d1))
+            dist = sum((x - along * y) ** 2 for x, y in zip(off, d1)) ** 0.5
+            if dist < 1e-3 and abs(abs(r1 - r2) - best) <= max(0.05 * best, 0.01):
+                bends += 1
+                covered += min(a1, a2)
+
+    if not bends:  # sharp corners: count the distinct directions of the wall pairs
+        dirs = []
+        for n in pair_dirs[best]:
+            if not any(abs(n.dot(m)) > 0.999 for m in dirs):
+                dirs.append(n)
+        bends = max(0, len(dirs) - 1)
+    edge = 0.0
+    for face in shape.Faces():
+        perimeter = sum(e.Length() for e in face.Edges())
+        if face.Area() <= 0.6 * perimeter * best:  # a strip: area ≈ length × width, perimeter ≈ 2 × length
+            edge += face.Area()
+    return best, min(1.0, 2 * covered / max(area - edge, 1e-9)), bends
 
 
 def sheet_thickness(shape: cq.Shape) -> float:

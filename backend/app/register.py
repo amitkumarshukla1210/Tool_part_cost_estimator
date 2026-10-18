@@ -6,6 +6,10 @@ Rules
 - A new file for an existing part code is a NEW revision; old revisions, files
   and history are kept.
 - Every change writes a history record: what changed (old → new), who, when.
+- Process suggestion: material first (its family in Master data → Materials), then
+  geometry rules, then moulded-in inserts; the reason is returned with every suggestion.
+- Moulded-in inserts are parts of their own (usually bought-out) linked to the body
+  part with a quantity. They are not BOM children: the body is one moulded part.
 """
 
 from __future__ import annotations
@@ -80,6 +84,34 @@ def _project_values(data, where="Project"):
             raise RegisterError(f"{where}: code must not be empty.")
     if "name" in out and not out["name"]:
         raise RegisterError(f"{where}: name must not be empty.")
+    if out.get("price_month") and not (len(out["price_month"]) == 7 and out["price_month"][4] == "-"
+                                       and out["price_month"].replace("-", "").isdigit()):
+        raise RegisterError(f"{where}: price month '{out['price_month']}' must look like 2026-10.")
+    return out
+
+
+def _dimensions(v, where):
+    """{"shape": code, <dimension>: mm, ...} checked against Part register setup → Insert shapes."""
+    if v in (None, "", {}):
+        return None
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except ValueError:
+            raise RegisterError(f"{where}: dimensions are not readable.") from None
+    shapes = register_setup.insert_shapes()
+    shape = str(v.get("shape") or "").strip()
+    if not shape:
+        return None
+    if shape not in shapes:
+        raise RegisterError(f"{where}: shape '{shape}' is not in Part register setup → Insert shapes "
+                            f"({', '.join(shapes)}).")
+    out = {"shape": shape}
+    for d in shapes[shape]["dims"]:
+        n = _num(v.get(d), f"{where}: {d}", required=True)
+        if n <= 0:
+            raise RegisterError(f"{where}: {d} must be more than 0.")
+        out[d] = n
     return out
 
 
@@ -171,7 +203,8 @@ def update_variant(vid: int, data: dict) -> dict:
 # ---------- parts & revisions ----------
 
 PART_FIELDS = ("name", "material", "process", "sourcing", "status", "annual_volume", "programme_life_years",
-               "target_piece_cost_inr", "notes")
+               "target_piece_cost_inr", "notes", "unit_price", "price_currency", "price_source", "price_month",
+               "price_is_example", "dimensions")
 
 
 def next_part_code(conn, project_code: str) -> str:
@@ -185,22 +218,75 @@ def next_part_code(conn, project_code: str) -> str:
         seq += 1
 
 
-def suggest_process(metrics: dict | None) -> dict:
-    """Score every process with its rule from master data; the highest wins."""
+def material_families(material: str) -> list[str]:
+    """Part types (plastic, die_casting, foundry, sheet_metal) under which a material is listed in Master data → Materials."""
+    return sorted({m["part_type"] for m in master_data.tables()["Materials"] if material and m["material"] == material})
+
+
+def suggest_process(metrics: dict | None, material: str = "", insert_count: float = 0) -> dict:
+    """Suggest a process: material first, then the geometry rules, then inserts. Returns the reason step by step."""
+    family_label = {"plastic": "a plastic", "die_casting": "a die-casting alloy", "foundry": "a foundry casting material",
+                    "sheet_metal": "a sheet-metal grade"}
+    procs = register_setup.processes()
+    label = lambda c: procs[c]["name"] if c in procs else c
+    if metrics and metrics.get("assembly"):
+        code = register_setup.assembly_process()
+        return {"process": code, "scores": {}, "steps": ["This is an assembly (it has child parts)."],
+                "reason": "This is an assembly (it has child parts)."}
+    steps, scores = [], {}
+    families = material_families(material)
+    candidates = list(procs)
+    if material and families:
+        candidates = [c for c, p in procs.items() if p["part_type"] in families]
+        fam = " and ".join(family_label.get(f, f) for f in families)
+        steps.append(f"1 · Material: {material} is {fam} (Master data → Materials, part type "
+                     f"{', '.join(families)}), so only "
+                     f"{', '.join(label(c) for c in candidates)} are considered.")
+    elif material and material in register_setup.insert_materials():
+        code = register_setup.settings()["insert_default_process"]
+        text = (f"1 · Material: {material} is an insert material (Part register setup → Insert materials), "
+                f"so the part is taken as {label(code)}.")
+        return {"process": code, "scores": {}, "steps": [text], "reason": text, "material_family": []}
+    elif material:
+        steps.append(f"1 · Material: {material} is not in Master data → Materials, so the geometry decides alone.")
+    else:
+        steps.append("1 · Material: not set yet, so this is a geometry-only suggestion. Set the material for a firmer one.")
     if not metrics:
-        return {"process": "", "scores": {}}
-    if metrics.get("assembly"):
-        return {"process": register_setup.assembly_process(), "scores": {}}
-    env = {k: metrics[k] for k in register_setup.SUGGEST_VARIABLES}
-    env["volume_cm3"] = metrics["volume_cm3"]
-    scores = {}
-    for code, p in register_setup.processes().items():
+        if material and families:
+            code = next((c for c in candidates if bool(procs[c]["is_insert_moulding"]) == bool(insert_count)), candidates[0])
+            steps.append(f"2 · Geometry: no 3D file yet, so the first matching process is taken: {label(code)}.")
+            return {"process": code, "scores": {}, "steps": steps, "reason": " ".join(steps), "material_family": families}
+        steps.append("2 · Geometry: no 3D file yet, so no suggestion.")
+        return {"process": "", "scores": {}, "steps": steps, "reason": " ".join(steps), "material_family": families}
+
+    env = {k: metrics.get(k, 0) for k in register_setup.SUGGEST_VARIABLES}
+    env["insert_count"] = insert_count or 0
+    for code, p in procs.items():
         try:
             scores[code] = formula.evaluate(p["suggest_rule"] or "0", env)
         except formula.FormulaError:
             scores[code] = 0
-    best = max(scores, key=scores.get) if scores and max(scores.values()) > 0 else ""
-    return {"process": best, "scores": scores, "inputs": env}
+    steps.append(f"2 · Geometry: main wall {env['wall_mm']:g} mm over {env['sheet_share'] * 100:.0f} % of the surface, "
+                 f"{env['bend_count']:g} bend{'s' if env['bend_count'] != 1 else ''}, fill {env['fill_ratio'] * 100:.0f} % "
+                 f"of the bounding box, largest size {env['max_dim_mm']:g} mm.")
+    if insert_count:
+        steps.append(f"3 · Inserts: {insert_count:g} moulded-in insert{'s' if insert_count != 1 else ''} "
+                     "(insert_count in the rules).")
+    best = max(candidates, key=lambda c: scores[c]) if candidates else ""
+    n = len(steps) + 1
+    if best and scores[best] > 0:
+        steps.append(f"{n} · {label(best)} scores highest ({scores[best]:g}) with its rule: {procs[best]['suggest_rule']}.")
+    elif material and families:
+        best = next((c for c in candidates if bool(procs[c]["is_insert_moulding"]) == bool(insert_count)), candidates[0])
+        steps.append(f"{n} · No geometry rule of these processes fits, so the first one is taken: {label(best)}.")
+    else:
+        best = ""
+        steps.append(f"{n} · No rule scores above 0. Please choose the process.")
+    overall = max(scores, key=scores.get) if scores else ""
+    if best and overall and overall != best and scores[overall] > scores.get(best, 0) and families:
+        steps.append(f"Geometry alone would point to {label(overall)} ({scores[overall]:g}); the material decides.")
+    return {"process": best, "scores": scores, "inputs": env, "candidates": candidates, "material_family": families,
+            "steps": steps, "reason": " ".join(steps)}
 
 
 def _part_values(data, where="Part"):
@@ -213,8 +299,12 @@ def _part_values(data, where="Part"):
         v = data[k]
         if k == "annual_volume":
             out[k] = _num(v, f"{where}: annual volume", int)
-        elif k in ("programme_life_years", "target_piece_cost_inr"):
+        elif k in ("programme_life_years", "target_piece_cost_inr", "unit_price"):
             out[k] = _num(v, f"{where}: {k.replace('_', ' ')}")
+        elif k == "price_is_example":
+            out[k] = v is True or str(v).strip().lower() in ("1", "true", "yes", "on", "example")
+        elif k == "dimensions":
+            out[k] = _dimensions(v, where)
         else:
             out[k] = str(v or "").strip()
     if out.get("process") and out["process"] not in procs:
@@ -226,6 +316,34 @@ def _part_values(data, where="Part"):
         raise RegisterError(f"{where}: status '{out['status']}' is not in Part statuses.")
     if "name" in out and not out["name"]:
         raise RegisterError(f"{where}: name must not be empty.")
+    if out.get("price_month") and not (len(out["price_month"]) == 7 and out["price_month"][4] == "-"
+                                       and out["price_month"].replace("-", "").isdigit()):
+        raise RegisterError(f"{where}: price month '{out['price_month']}' must look like 2026-10.")
+    return out
+
+
+def _dimensions(v, where):
+    """{"shape": code, <dimension>: mm, ...} checked against Part register setup → Insert shapes."""
+    if v in (None, "", {}):
+        return None
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except ValueError:
+            raise RegisterError(f"{where}: dimensions are not readable.") from None
+    shapes = register_setup.insert_shapes()
+    shape = str(v.get("shape") or "").strip()
+    if not shape:
+        return None
+    if shape not in shapes:
+        raise RegisterError(f"{where}: shape '{shape}' is not in Part register setup → Insert shapes "
+                            f"({', '.join(shapes)}).")
+    out = {"shape": shape}
+    for d in shapes[shape]["dims"]:
+        n = _num(v.get(d), f"{where}: {d}", required=True)
+        if n <= 0:
+            raise RegisterError(f"{where}: {d} must be more than 0.")
+        out[d] = n
     return out
 
 
@@ -284,13 +402,19 @@ def _next_rev(existing: list[str]) -> str:
     return f"{last}.1"
 
 
+def _same(a, b) -> bool:
+    """Equal, or both empty (None, "" and an unticked box are the same)."""
+    empty = lambda x: x is None or x == "" or x is False or x == {}
+    return a == b or (empty(a) and empty(b))
+
+
 def update_part(part_id: int, data: dict) -> dict:
     vals = _part_values(data)
     with db.engine().begin() as conn:
         old = conn.execute(select(db.parts).where(db.parts.c.id == part_id)).mappings().first()
         if not old:
             raise RegisterError(f"Part {part_id} does not exist.")
-        changes = {k: {"old": old[k], "new": v} for k, v in vals.items() if old[k] != v}
+        changes = {k: {"old": old[k], "new": v} for k, v in vals.items() if not _same(old[k], v)}
         if changes:
             conn.execute(db.parts.update().where(db.parts.c.id == part_id).values(**vals))
             _log(conn, "part", part_id, "updated", changes)
@@ -378,18 +502,35 @@ def part_detail(part_id: int) -> dict:
                                 .join(db.parts, db.parts.c.id == db.bom_lines.c.child_part_id)
                                 .join(db.variants, db.variants.c.id == db.bom_lines.c.variant_id)
                                 .where(db.bom_lines.c.parent_part_id == part_id)).mappings().all()
+        inserts = _insert_rows(conn, part_id)
+        body = db.parts.alias("body")
+        moulded_into = conn.execute(select(db.part_inserts.c.quantity, body.c.id, body.c.part_code, body.c.name)
+                                    .join(body, body.c.id == db.part_inserts.c.part_id)
+                                    .where(db.part_inserts.c.insert_part_id == part_id)).mappings().all()
+    insert_count = sum(i["quantity"] for i in inserts)
+    suggestion = suggest_process(p["geometry"], p["material"], insert_count) if not p["is_assembly"] else None
     return _plain(p) | {"revisions": [_plain(x) for x in revs], "history": [_plain(x) for x in hist],
-                        "where_used": [_plain(x) for x in used], "children": [_plain(x) for x in children]}
+                        "where_used": [_plain(x) for x in used], "children": [_plain(x) for x in children],
+                        "inserts": inserts, "insert_count": insert_count,
+                        "moulded_into": [_plain(x) for x in moulded_into], "suggestion": suggestion}
 
 
 def revision_trace(part_id: int, rev_id: int | None = None) -> dict:
-    """Traceable geometry of a revision: volume from the CAD file, weight = volume × material density."""
+    """Traceable geometry and weight of a revision.
+
+    Body weight = (CAD volume − any modelled overlap with inserts) × material density.
+    With moulded-in inserts: insert weight = Σ quantity × insert volume × insert density
+    (volume from the insert's own 3D file, or from its shape formula and dimensions), and
+    total weight = body weight + insert weight.
+    """
     from .trace import Trace
     d = part_detail(part_id)
     rev = next((r for r in d["revisions"] if rev_id in (None, r["id"])), None)
     if not rev or not rev["geometry"]:
         raise RegisterError("This revision has no 3D file yet, so there is no geometry to trace.")
     g = rev["geometry"]
+    if g.get("assembly"):
+        raise RegisterError("An assembly has no geometry of its own; open its parts to see their volume and weight.")
     cad = {"type": "cad", "file": rev["original_name"], "rev": rev["rev"], "sha256": rev["sha256"],
            "note": "Measured from the STEP file with OpenCascade (CadQuery)"}
     t = Trace()
@@ -398,16 +539,200 @@ def revision_trace(part_id: int, rev_id: int | None = None) -> dict:
     t.add_input("proj", f"Projected area (along {g['pull_direction'].upper()})",
                 g["projected_area_mm2"][g["pull_direction"]] / 100, "cm²", cad)
     nodes = ["volume", "surface", "proj"]
-    mat = next((m for m in master_data.tables()["Materials"] if m["material"] == d["material"]), None)
-    if mat:
-        t.add_input("density", f"Density of {mat['material']}", mat["density_g_cm3"], "g/cm³",
-                    {"type": "master", "sheet": "Materials", "row": mat["material"], "part_type": mat["part_type"]})
-        t.compute("weight", "Net weight", "volume * density", "g", names={"volume": "volume", "density": "density"},
+    warnings = []
+    volume_node = "volume"
+    if g.get("insert_overlap_mm3"):
+        t.add_input("overlap", "Insert volume inside the body model", g["insert_overlap_mm3"] / 1000, "cm³",
+                    {"type": "cad", "file": rev["original_name"], "rev": rev["rev"],
+                     "note": "The body was modelled solid through its inserts; the shared volume is measured and removed"})
+        t.compute("body_volume", "Body volume without inserts", "volume - overlap", "cm³")
+        volume_node = "body_volume"
+        nodes.insert(0, "body_volume")
+    density, dsrc = _density(d["material"])
+    if density:
+        t.add_input("density", f"Density of {d['material']}", density, "g/cm³", dsrc)
+        label = "Body weight (plastic / metal, without inserts)" if d["inserts"] else "Net weight"
+        t.compute("weight", label, "volume * density", "g", names={"volume": volume_node, "density": "density"},
                   description="Volume from the CAD file × material density from master data")
         nodes.insert(0, "weight")
+    else:
+        warnings.append("Set the part's material to calculate its weight (density from master data).")
+
+    parts_ok = []
+    for i, ins in enumerate(d["inserts"], start=1):
+        x, code = ins["insert"], ins["insert"]["part_code"]
+        vol = ins["volume"]
+        if ins["missing"]:
+            warnings.append(f"Insert {code}: {ins['missing']}, so its weight is not included.")
+            continue
+        if vol["method"] == "3d":
+            t.add_input(f"i{i}_vol", f"Volume of insert {code}", vol["volume_cm3"], "cm³", vol["source"])
+        else:
+            names = {}
+            for dim, val in vol["dims"].items():
+                t.add_input(f"i{i}_{dim}", f"{code} {dim}", val, "mm",
+                            {"type": "register", "note": f"Dimensions typed in the part register for {code}"})
+                names[dim] = f"i{i}_{dim}"
+            for k, v in register_setup.SHAPE_CONSTANTS.items():
+                t.add_input(f"c_{k}", k, v, "", {"type": "base", "note": "Mathematical constant"})
+                names[k] = f"c_{k}"
+            t.compute(f"i{i}_mm3", f"Volume of insert {code} ({vol['shape']['name']})", vol["shape"]["volume_rule"],
+                      "mm³", names=names, description="Shape formula from Part register setup → Insert shapes")
+            t.compute(f"i{i}_vol", f"Volume of insert {code}", "v / 1000", "cm³", names={"v": f"i{i}_mm3"})
+        t.add_input(f"i{i}_den", f"Density of {x['material']}", ins["density_g_cm3"], "g/cm³", ins["density_source"])
+        t.add_input(f"i{i}_qty", f"Quantity of {code} in this part", ins["quantity"], "pcs",
+                    {"type": "register", "note": "Insert link in the part register"
+                     + (" (detected in the 3D assembly)" if ins["detected"] else "")})
+        t.compute(f"i{i}", f"Insert {code} · {x['name']}", "qty * vol * den", "g",
+                  names={"qty": f"i{i}_qty", "vol": f"i{i}_vol", "den": f"i{i}_den"})
+        parts_ok.append(f"i{i}")
+    if parts_ok:
+        t.compute("insert_weight", "Insert weight", " + ".join(f"w{n}" for n in range(len(parts_ok))), "g",
+                  names={f"w{n}": node for n, node in enumerate(parts_ok)},
+                  description="Sum of quantity × volume × density of every insert")
+        nodes.insert(0, "insert_weight")
+        if density:
+            t.compute("total_weight", "Total part weight", "body + inserts", "g",
+                      names={"body": "weight", "inserts": "insert_weight"},
+                      description="Body (plastic / metal) weight + insert weight")
+            nodes.insert(0, "total_weight")
     out = t.to_dict(nodes[0])
     out["components"] = nodes
+    out["warnings"] = warnings
     return out
+
+
+# ---------- moulded-in inserts ----------
+
+def _density(material: str):
+    """(density g/cm³, source) from Insert materials first, then Master data → Materials; (None, None) if unknown."""
+    im = register_setup.insert_materials().get(material)
+    if im:
+        return im["density_g_cm3"], {"type": "master", "sheet": "Part register setup → Insert materials", "row": material,
+                                     "is_example": im["is_example"]}
+    mat = next((m for m in master_data.tables()["Materials"] if material and m["material"] == material), None)
+    if mat:
+        return mat["density_g_cm3"], {"type": "master", "sheet": "Materials", "row": material, "part_type": mat["part_type"]}
+    return None, None
+
+
+def _current_geometry(conn, part_id):
+    return conn.execute(select(db.revisions.c.geometry, db.revisions.c.rev, db.files.c.original_name, db.files.c.sha256)
+                        .select_from(db.parts.join(db.revisions, db.revisions.c.id == db.parts.c.current_revision_id)
+                                     .outerjoin(db.files, db.files.c.id == db.revisions.c.file_id))
+                        .where(db.parts.c.id == part_id)).mappings().first()
+
+
+def _insert_volume(conn, ins) -> dict:
+    """Volume of one insert: from its own 3D file, else from its shape + dimensions."""
+    cur = _current_geometry(conn, ins["id"])
+    g = cur["geometry"] if cur else None
+    if g and g.get("volume_cm3") is not None:
+        return {"method": "3d", "volume_cm3": g["volume_cm3"],
+                "source": {"type": "cad", "file": cur["original_name"], "rev": cur["rev"], "sha256": cur["sha256"],
+                           "note": f"Insert {ins['part_code']}: measured from its STEP file"}}
+    dims = ins["dimensions"] or {}
+    shapes = register_setup.insert_shapes()
+    if dims.get("shape") in shapes:
+        sh = shapes[dims["shape"]]
+        env = register_setup.SHAPE_CONSTANTS | {d: dims.get(d, 0) for d in sh["dims"]}
+        return {"method": "dimensions", "shape": sh, "dims": {d: dims.get(d) for d in sh["dims"]},
+                "volume_cm3": formula.evaluate(sh["volume_rule"], env) / 1000}
+    return {"method": "none", "volume_cm3": None}
+
+
+def _insert_rows(conn, part_id) -> list[dict]:
+    ins = db.parts.alias("ins")
+    rows = conn.execute(select(db.part_inserts.c.id.label("link_id"), db.part_inserts.c.quantity,
+                               db.part_inserts.c.detected, db.part_inserts.c.notes, ins)
+                        .join(ins, ins.c.id == db.part_inserts.c.insert_part_id)
+                        .where(db.part_inserts.c.part_id == part_id).order_by(ins.c.part_code)).mappings().all()
+    out = []
+    for r in rows:
+        r = dict(r)
+        vol = _insert_volume(conn, r)
+        density, dsrc = _density(r["material"])
+        each = vol["volume_cm3"] * density if vol["volume_cm3"] is not None and density else None
+        missing = ("no 3D file and no dimensions" if vol["volume_cm3"] is None else
+                   "material has no density in master data" if not density else "")
+        out.append({"link_id": r["link_id"], "quantity": r["quantity"], "detected": r["detected"], "notes": r["notes"],
+                    "insert": {k: r[k] for k in ("id", "part_code", "name", "material", "sourcing", "process", "unit_price",
+                                                 "price_currency", "price_source", "price_month", "price_is_example",
+                                                 "dimensions", "current_revision_id")},
+                    "volume": vol, "density_g_cm3": density, "density_source": dsrc,
+                    "weight_each_g": each, "weight_g": each * r["quantity"] if each is not None else None,
+                    "missing": missing})
+    return out
+
+
+def _set_insert_link(conn, part_id, insert_id, qty, detected=False, notes=""):
+    if part_id == insert_id:
+        raise RegisterError("A part cannot be its own insert.")
+    body = conn.execute(select(db.parts).where(db.parts.c.id == part_id)).mappings().first()
+    ins = conn.execute(select(db.parts).where(db.parts.c.id == insert_id)).mappings().first()
+    if not body or not ins:
+        raise RegisterError("Part not found.")
+    if body["is_assembly"] or ins["is_assembly"]:
+        raise RegisterError("Inserts link a moulded / cast part and a single insert part, not an assembly.")
+    if conn.execute(select(db.part_inserts.c.id).where(and_(db.part_inserts.c.part_id == insert_id,
+                                                            db.part_inserts.c.insert_part_id == part_id))).first():
+        raise RegisterError(f"{body['part_code']} is already an insert of {ins['part_code']}; the link cannot go both ways.")
+    if not qty or qty <= 0:
+        raise RegisterError("Insert quantity must be more than 0.")
+    old = conn.execute(select(db.part_inserts).where(and_(db.part_inserts.c.part_id == part_id,
+                                                          db.part_inserts.c.insert_part_id == insert_id))).mappings().first()
+    if old:
+        if old["quantity"] != qty or (notes and old["notes"] != notes):
+            conn.execute(db.part_inserts.update().where(db.part_inserts.c.id == old["id"])
+                         .values(quantity=qty, notes=notes or old["notes"]))
+            _log(conn, "part", part_id, "insert_updated", {"insert": ins["part_code"],
+                                                           "quantity": {"old": old["quantity"], "new": qty}})
+        return old["id"]
+    lid = conn.execute(db.part_inserts.insert().values(part_id=part_id, insert_part_id=insert_id, quantity=qty,
+                                                       detected=detected, notes=notes)).inserted_primary_key[0]
+    _log(conn, "part", part_id, "insert_linked", {"insert": f"{ins['part_code']} · {ins['name']}", "quantity": qty,
+                                                  "detected": "yes, in the 3D assembly" if detected else "no, typed in"})
+    _log(conn, "part", insert_id, "moulded_into", {"part": f"{body['part_code']} · {body['name']}", "quantity": qty})
+    return lid
+
+
+def link_insert(part_id: int, data: dict) -> dict:
+    """Link an insert to a moulded / cast part: an existing part (insert_part_code) or a new insert part."""
+    qty = _num(data.get("quantity"), "Insert quantity", required=True)
+    with db.engine().begin() as conn:
+        body = conn.execute(select(db.parts).where(db.parts.c.id == part_id)).mappings().first()
+        if not body:
+            raise RegisterError(f"Part {part_id} does not exist.")
+        code = str(data.get("insert_part_code") or "").strip()
+        existing = conn.execute(select(db.parts.c.id).where(db.parts.c.part_code == code)).scalar() if code else None
+        if existing:
+            insert_id = existing
+        else:
+            if not str(data.get("name") or "").strip():
+                raise RegisterError(f"Part code '{code}' is not in the register. Give a name to create the insert part."
+                                    if code else "Give the insert's part code (existing part) or a name (new part).")
+            s = register_setup.settings()
+            vals = _part_values({"sourcing": s["insert_default_sourcing"], "process": s["insert_default_process"]}
+                                | {k: data[k] for k in ("name", "material", "unit_price", "price_currency", "price_source",
+                                                        "price_month", "price_is_example", "dimensions", "notes")
+                                   if k in data}, "Insert")
+            vals = {k: v for k, v in vals.items() if v not in (None, "")}
+            insert_id, _ = upsert_part(conn, body["project_id"], code, vals)
+        _set_insert_link(conn, part_id, insert_id, qty, notes=str(data.get("link_notes") or "").strip())
+    return part_detail(part_id)
+
+
+def unlink_insert(part_id: int, link_id: int) -> dict:
+    with db.engine().begin() as conn:
+        row = conn.execute(select(db.part_inserts, db.parts.c.part_code).join(
+            db.parts, db.parts.c.id == db.part_inserts.c.insert_part_id)
+            .where(and_(db.part_inserts.c.id == link_id, db.part_inserts.c.part_id == part_id))).mappings().first()
+        if not row:
+            raise RegisterError("That insert link does not exist.")
+        conn.execute(db.part_inserts.delete().where(db.part_inserts.c.id == link_id))
+        _log(conn, "part", part_id, "insert_removed", {"insert": row["part_code"], "quantity": row["quantity"]})
+        _log(conn, "part", row["insert_part_id"], "removed_from", {"part_id": part_id})
+    return part_detail(part_id)
 
 
 # ---------- BOM ----------
@@ -432,15 +757,28 @@ def variant_bom(variant_id: int) -> list[dict]:
                                    db.parts.c.sourcing, db.parts.c.status)
                             .join(db.parts, db.parts.c.id == db.bom_lines.c.child_part_id)
                             .where(db.bom_lines.c.variant_id == variant_id)).mappings().all()
+        ins = db.parts.alias("ins")
+        moulded: dict = {}
+        for m in conn.execute(select(db.part_inserts.c.part_id, db.part_inserts.c.quantity, ins.c.id, ins.c.part_code,
+                                     ins.c.name, ins.c.sourcing, ins.c.status)
+                              .join(ins, ins.c.id == db.part_inserts.c.insert_part_id)).mappings():
+            moulded.setdefault(m["part_id"], []).append(dict(m))
     by_parent: dict = {}
     for r in rows:
         by_parent.setdefault(r["parent_part_id"], []).append(dict(r))
+
 
     def tree(parent, depth, mult):
         out = []
         for r in sorted(by_parent.get(parent, []), key=lambda x: x["part_code"]):
             total = r["quantity"] * mult
-            out.append(r | {"depth": depth, "total_quantity": total})
+            out.append(r | {"depth": depth, "total_quantity": total, "kind": "bom"})
+            # moulded-in inserts: shown under their body for buying, but not BOM children
+            for m in sorted(moulded.get(r["child_part_id"], []), key=lambda x: x["part_code"]):
+                out.append({"child_part_id": m["id"], "parent_part_id": r["child_part_id"], "part_code": m["part_code"],
+                            "name": m["name"], "is_assembly": False, "sourcing": m["sourcing"], "status": m["status"],
+                            "quantity": m["quantity"], "depth": depth + 1, "total_quantity": m["quantity"] * total,
+                            "kind": "insert"})
             out += tree(r["child_part_id"], depth + 1, total)
         return out
 
@@ -455,10 +793,25 @@ def import_preview(content: bytes, file_name: str) -> dict:
     src = folder / "source.step"
     src.write_bytes(content)
     try:
-        tree = cad_import.analyse_file(str(src), file_name)
+        tree = cad_import.analyse_file(str(src), file_name, insert_detection=register_setup.insert_detection())
     except cad_import.ImportError_ as exc:
         shutil.rmtree(folder, ignore_errors=True)
         raise RegisterError(str(exc)) from None
+    defs = tree["defs"]
+    settings = register_setup.settings()
+    insert_count: dict[str, float] = {}
+    for det in tree["inserts"]:
+        det["body_name"], det["insert_name"] = defs[det["body"]]["name"], defs[det["insert"]]["name"]
+        insert_count[det["body"]] = insert_count.get(det["body"], 0) + det["quantity"]
+        defs[det["insert"]].setdefault("insert_of", []).append(det["body_name"])
+        defs[det["insert"]]["default_sourcing"] = settings["insert_default_sourcing"]
+    for det in tree["inserts"]:
+        # an assembly that is only "body + its inserts" is really one moulded part: untick it by default
+        a = defs[det["assembly"]]
+        moulded = {det["body"]} | {x["insert"] for x in tree["inserts"] if x["assembly"] == det["assembly"]
+                                   and x["body"] == det["body"]}
+        if set(a["children"]) <= moulded and det["assembly"] != tree["root"]:
+            a["only_moulded_part"] = det["body"]
     for key, d in tree["defs"].items():
         if d["is_assembly"]:
             # an assembly revision records its structure (child names and quantities)
@@ -470,8 +823,17 @@ def import_preview(content: bytes, file_name: str) -> dict:
             d.pop("step", None)
         if d.get("thumbnail"):
             (folder / f"{key}.png").write_bytes(d.pop("thumbnail"))
-        d["suggestion"] = suggest_process(d["metrics"])
-    manifest = {"token": token, "file_name": file_name, "root": tree["root"], "defs": tree["defs"]}
+        d["insert_count"] = insert_count.get(key, 0)
+        if d.get("insert_of"):
+            code = settings["insert_default_process"]
+            text = (f"Detected as a moulded-in insert of {', '.join(d['insert_of'])}, so it is taken as "
+                    f"{register_setup.processes().get(code, {}).get('name', code)} (Register settings → "
+                    "insert_default_process). Untick the insert on its body to treat it as a normal part.")
+            d["suggestion"] = {"process": code, "steps": [text], "reason": text}
+        else:
+            d["suggestion"] = suggest_process(d["metrics"], "", d["insert_count"])
+    manifest = {"token": token, "file_name": file_name, "root": tree["root"], "defs": tree["defs"],
+                "inserts": tree["inserts"]}
     (folder / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     return manifest
 
@@ -485,7 +847,11 @@ def import_thumbnail(token: str, key: str) -> Path:
 
 def import_commit(token: str, project_id: int, variant_id: int | None, items: dict, rev: str = "",
                   change_note: str = "") -> dict:
-    """items: {def_key: {part_code, name, material, process, sourcing, register(bool)}}"""
+    """items: {def_key: {part_code, name, material, process, sourcing, register(bool), inserts: [insert def keys]}}
+
+    A detected insert that the engineer confirms on its body (items[body]["inserts"]) is
+    linked to the body as a moulded-in insert instead of becoming a BOM child.
+    """
     folder = file_store.scratch_dir(Path(token).name)
     mf = folder / "manifest.json"
     if not mf.exists():
@@ -493,6 +859,12 @@ def import_commit(token: str, project_id: int, variant_id: int | None, items: di
     manifest = json.loads(mf.read_text(encoding="utf-8"))
     defs = manifest["defs"]
     created, revised, ids = [], [], {}
+    confirmed = {(det["assembly"], det["insert"]): det for det in manifest.get("inserts", [])
+                 if det["insert"] in (items.get(det["body"], {}).get("inserts") or [])
+                 and items.get(det["body"], {}).get("register", True)}
+    for det in confirmed.values():
+        if det["overlap_mm3"] and defs[det["body"]]["metrics"]:
+            defs[det["body"]]["metrics"]["insert_overlap_mm3"] = det["overlap_mm3"]
     with db.engine().begin() as conn:
         if variant_id is not None:
             v = conn.execute(select(db.variants).where(db.variants.c.id == variant_id)).mappings().first()
@@ -506,7 +878,8 @@ def import_commit(token: str, project_id: int, variant_id: int | None, items: di
             if not choice.get("register", True):
                 ids[key] = None
                 return None
-            vals = _part_values({k: choice[k] for k in ("material", "process", "sourcing") if choice.get(k)}
+            defaults = {"sourcing": d["default_sourcing"]} if d.get("default_sourcing") else {}
+            vals = _part_values(defaults | {k: choice[k] for k in ("material", "process", "sourcing") if choice.get(k)}
                                 | {"name": choice.get("name") or d["name"]}, f"Part '{d['name']}'")
             pid, is_new = upsert_part(conn, project_id, choice.get("part_code", ""), vals, d["is_assembly"])
             is_root = key == manifest["root"]
@@ -531,6 +904,8 @@ def import_commit(token: str, project_id: int, variant_id: int | None, items: di
                 set_bom_line(conn, variant_id, parent_pid, pid, float(qty))
             # An unticked assembly passes its children (and its quantity) on to the next ticked level up.
             for child, child_qty in defs[key]["children"].items():
+                if (key, child) in confirmed:
+                    continue  # moulded into a sibling body: linked as an insert below, not a BOM child
                 if pid is None:
                     link(child, parent_pid, child_qty * qty)
                 else:
@@ -538,9 +913,17 @@ def import_commit(token: str, project_id: int, variant_id: int | None, items: di
 
         unchanged: list = []
         link(manifest["root"], None, 1)
+        linked = 0
+        for det in confirmed.values():
+            body, ins = make(det["body"]), make(det["insert"])
+            if body and ins:
+                _set_insert_link(conn, body, ins, float(det["quantity"]), detected=True,
+                                 notes=f"Detected in {manifest['file_name']}: {det['covered_share'] * 100:.0f} % of the "
+                                       "insert surface is covered by the body")
+                linked += 1
     shutil.rmtree(folder, ignore_errors=True)
     return {"created": len(created), "new_revisions": len(revised), "unchanged": len(set(unchanged)),
-            "part_ids": [i for i in ids.values() if i]}
+            "inserts_linked": linked, "part_ids": [i for i in ids.values() if i]}
 
 
 def _same_as_current(conn, part_id, metrics, step) -> bool:
@@ -577,6 +960,12 @@ TEMPLATE_COLUMNS = [
     ("parent_part_code", "Assembly it belongs to (blank = top level of the variant)"),
     ("quantity", "Quantity in the parent (default 1)"),
     ("change_note", "What changed (for a new revision)"),
+    ("insert_of_part_code", "Moulded-in insert: part code of the moulded / cast part this insert goes into"),
+    ("insert_quantity", "How many of this insert go into that part (default 1)"),
+    ("unit_price", "Bought-out price per piece (inserts and other BOP parts)"),
+    ("price_currency", "Currency of unit_price, e.g. INR"),
+    ("price_source", "Where the price comes from: supplier quote, catalogue, estimate"),
+    ("price_month", "Month of the price, e.g. 2026-10"),
 ]
 
 
@@ -592,8 +981,13 @@ def excel_template() -> bytes:
         cell.fill = HEADER_FILL
     ws.append(["", "Example bracket", "A", "sheet_metal_bracket.step", "Mild steel CRCA / HR", "", "make", 200000, 5,
                "", "STD", "", 2, "first upload"])
-    for cell in ws[2]:
-        cell.fill = EXAMPLE_FILL
+    ws.append(["EX-HSG-01", "Example housing with inserts", "A", "housing.step", "PA66 GF30", "", "make", 200000, 5,
+               "", "STD", "", 1, "first upload"])
+    ws.append(["EX-INS-M3", "Example M3 brass threaded insert", "", "", "Brass CuZn39Pb3", "", "", "", "",
+               "", "", "", "", "", "EX-HSG-01", 4, 2.5, "INR", "supplier quote", "2026-10"])
+    for r in (2, 3, 4):
+        for cell in ws[r]:
+            cell.fill = EXAMPLE_FILL
     for i, (c, _) in enumerate(TEMPLATE_COLUMNS, start=1):
         ws.column_dimensions[ws.cell(1, i).column_letter].width = max(14, len(c) + 4)
     help_ws = wb.create_sheet("Help")
@@ -604,7 +998,10 @@ def excel_template() -> bytes:
     for c, h in TEMPLATE_COLUMNS:
         help_ws.append([c, h])
     help_ws.append([])
-    help_ws.append(["note", "Row 2 is an example (yellow); replace or delete it. Same part_code again = new revision."])
+    help_ws.append(["note", "Rows 2-4 are examples (yellow); replace or delete them. Same part_code again = new revision."])
+    help_ws.append(["inserts", "An insert row names its moulded part in insert_of_part_code. It gets sourcing / process "
+                               "from Register settings when blank, and the moulded part's process is suggested as insert "
+                               "moulding. Without a 3D file, add its shape and dimensions later on the Parts page."])
     help_ws.column_dimensions["A"].width = 24
     help_ws.column_dimensions["B"].width = 90
     buf = io.BytesIO()
@@ -655,11 +1052,19 @@ def bulk_upload(project_id: int, excel: bytes, uploads: list[tuple[str, bytes]])
         r = {h: raw[j] if j < len(raw) else None for j, h in enumerate(header) if h}
         where = f"Parts row {i}"
         try:
-            vals = _part_values({"name": r.get("part_name"), "material": r.get("material"), "process": r.get("process"),
-                                 "sourcing": r.get("sourcing"), "annual_volume": r.get("annual_volume"),
-                                 "programme_life_years": r.get("programme_life_years"),
-                                 "target_piece_cost_inr": r.get("target_piece_cost_inr")}, where)
-            vals = {k: v for k, v in vals.items() if v not in (None, "")}
+            insert_of = str(r.get("insert_of_part_code") or "").strip()
+            raw_vals = {"name": r.get("part_name"), "material": r.get("material"), "process": r.get("process"),
+                        "sourcing": r.get("sourcing"), "annual_volume": r.get("annual_volume"),
+                        "programme_life_years": r.get("programme_life_years"),
+                        "target_piece_cost_inr": r.get("target_piece_cost_inr"), "unit_price": r.get("unit_price"),
+                        "price_currency": r.get("price_currency"), "price_source": r.get("price_source"),
+                        "price_month": r.get("price_month")}
+            if insert_of:
+                st = register_setup.settings()
+                raw_vals["sourcing"] = raw_vals["sourcing"] or st["insert_default_sourcing"]
+                raw_vals["process"] = raw_vals["process"] or st["insert_default_process"]
+            vals = _part_values(raw_vals, where)
+            vals = {k: v for k, v in vals.items() if v not in (None, "", False)}
             variant = str(r.get("variant") or "").strip().upper()
             if variant and variant not in variants:
                 raise RegisterError(f"{where}: variant '{variant}' is not in project {project['code']}. Add it first.")
@@ -673,7 +1078,9 @@ def bulk_upload(project_id: int, excel: bytes, uploads: list[tuple[str, bytes]])
             records.append({"row": i, "code": code, "values": vals, "rev": str(r.get("rev") or "").strip(),
                             "file_name": fname, "content": files.get(fname.lower()) if fname else None,
                             "variant": variant, "parent": str(r.get("parent_part_code") or "").strip(),
-                            "quantity": qty, "change_note": str(r.get("change_note") or "").strip()})
+                            "quantity": qty, "change_note": str(r.get("change_note") or "").strip(),
+                            "insert_of": insert_of,
+                            "insert_quantity": _num(r.get("insert_quantity"), f"{where}: insert_quantity") or 1})
         except RegisterError as exc:
             errors.append(str(exc))
     for rec in records:
@@ -683,6 +1090,14 @@ def bulk_upload(project_id: int, excel: bytes, uploads: list[tuple[str, bytes]])
                     errors.append(f"Parts row {rec['row']}: parent_part_code '{rec['parent']}' is not in the sheet or the register.")
         if rec["parent"] and not rec["variant"]:
             errors.append(f"Parts row {rec['row']}: a parent_part_code needs a variant.")
+        if rec["insert_of"]:
+            if rec["insert_of"] == rec["code"]:
+                errors.append(f"Parts row {rec['row']}: a part cannot be its own insert.")
+            elif rec["insert_of"] not in codes_in_sheet:
+                with db.engine().connect() as conn:
+                    if not conn.execute(select(db.parts.c.id).where(db.parts.c.part_code == rec["insert_of"])).first():
+                        errors.append(f"Parts row {rec['row']}: insert_of_part_code '{rec['insert_of']}' is not in the "
+                                      "sheet or the register.")
     if errors:
         raise RegisterError("Nothing was saved. Please fix: " + " | ".join(errors[:20]) +
                             (f" | … and {len(errors) - 20} more" if len(errors) > 20 else ""))
@@ -701,10 +1116,21 @@ def bulk_upload(project_id: int, excel: bytes, uploads: list[tuple[str, bytes]])
                 raise RegisterError(f"Nothing was saved. Parts row {rec['row']}: {rec['file_name']}: {exc}") from None
             finally:
                 shutil.rmtree(tmp, ignore_errors=True)
-            if not rec["values"].get("process"):
-                rec["values"]["process"] = suggest_process(rec["geometry"])["process"]
 
-    # 3. save everything in one transaction
+    # 3. suggest a process where none is given: material first, then geometry and inserts
+    inserts_into: dict[str, float] = {}
+    for rec in records:
+        if rec["insert_of"]:
+            inserts_into[rec["insert_of"]] = inserts_into.get(rec["insert_of"], 0) + rec["insert_quantity"]
+    for rec in records:
+        rec["reason"], rec["steps"] = "", []
+        if not rec["values"].get("process"):
+            sug = suggest_process(rec["geometry"], rec["values"].get("material", ""), inserts_into.get(rec["code"], 0))
+            if sug["process"]:
+                rec["values"]["process"] = sug["process"]
+            rec["reason"], rec["steps"] = sug["reason"], sug["steps"]
+
+    # 4. save everything in one transaction
     report = []
     with db.engine().begin() as conn:
         ids = {}
@@ -722,7 +1148,9 @@ def bulk_upload(project_id: int, excel: bytes, uploads: list[tuple[str, bytes]])
             code = conn.execute(select(db.parts.c.part_code).where(db.parts.c.id == pid)).scalar()
             ids[code] = rec["pid"] = pid
             report.append({"row": rec["row"], "part_code": code, "result": "created" if is_new else "new revision",
-                           "file": rec["file_name"] if rec["content"] else "File missing"})
+                           "file": rec["file_name"] if rec["content"] else "File missing",
+                           "process": rec["values"].get("process", ""), "process_reason": rec["reason"],
+                           "process_steps": rec["steps"]})
         for rec in records:
             if rec["variant"]:
                 parent = None
@@ -730,7 +1158,15 @@ def bulk_upload(project_id: int, excel: bytes, uploads: list[tuple[str, bytes]])
                     parent = ids.get(rec["parent"]) or conn.execute(
                         select(db.parts.c.id).where(db.parts.c.part_code == rec["parent"])).scalar()
                 set_bom_line(conn, variants[rec["variant"]], parent, rec["pid"], rec["quantity"])
-    return {"rows": report, "created": sum(r["result"] == "created" for r in report),
+        for rec in records:
+            if rec["insert_of"]:
+                body = ids.get(rec["insert_of"]) or conn.execute(
+                    select(db.parts.c.id).where(db.parts.c.part_code == rec["insert_of"])).scalar()
+                try:
+                    _set_insert_link(conn, body, rec["pid"], rec["insert_quantity"], notes=f"Excel row {rec['row']}")
+                except RegisterError as exc:
+                    raise RegisterError(f"Nothing was saved. Parts row {rec['row']}: {exc}") from None
+    return {"rows": report, "inserts_linked": sum(1 for r in records if r["insert_of"]), "created": sum(r["result"] == "created" for r in report),
             "new_revisions": sum(r["result"] == "new revision" for r in report),
             "file_missing": sum(r["file"] == "File missing" for r in report)}
 
@@ -788,7 +1224,8 @@ def export_parts_excel(**filters) -> bytes:
     wb.properties.title = "Design to Cost — Part register"
     wb.properties.creator = "Design to Cost"
     cols = ["part_code", "name", "project_code", "rev", "material", "process", "sourcing", "status", "annual_volume",
-            "programme_life_years", "target_piece_cost_inr", "volume_cm3", "bbox_mm", "file", "updated_at"]
+            "programme_life_years", "target_piece_cost_inr", "unit_price", "price_currency", "price_source", "price_month",
+            "volume_cm3", "bbox_mm", "file", "updated_at"]
     ws.append(cols)
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF")
@@ -798,7 +1235,7 @@ def export_parts_excel(**filters) -> bytes:
         b = g.get("bbox_mm") or {}
         ws.append([r["part_code"], r["name"], r["project_code"], r["rev"], r["material"], r["process"], r["sourcing"],
                    r["status"], r["annual_volume"], r["programme_life_years"], r["target_piece_cost_inr"],
-                   g.get("volume_cm3"), f"{b.get('length')} x {b.get('width')} x {b.get('height')}" if b else "",
+                   r["unit_price"], r["price_currency"], r["price_source"], r["price_month"], g.get("volume_cm3"), f"{b.get('length')} x {b.get('width')} x {b.get('height')}" if b else "",
                    "yes" if r["file_id"] else "File missing", r["updated_at"]])
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions

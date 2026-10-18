@@ -43,6 +43,17 @@ img.thumb-lg, span.thumb-lg { width: 100%; max-width: 260px; aspect-ratio: 1; ob
 .badge.suggested { border-color: var(--accent); color: var(--accent); }
 .badge.status { border-color: var(--brand); color: var(--brand-dark); }
 .badge.assy { border-color: var(--grey); color: var(--grey); }
+.badge.insert { border-color: var(--brand-dark); color: var(--brand-dark); background: var(--blue-soft); }
+details.reason { font-size: 11.5px; color: var(--grey); margin-top: 3px; min-width: 160px; }
+details.reason summary { cursor: pointer; color: var(--brand); }
+details.reason p { margin: 4px 0 0; line-height: 1.35; }
+.cost-table tr.insert-row td { background: var(--blue-soft); font-size: 12.5px; }
+label.check.inline { display: inline-flex; margin-right: 14px; }
+.suggest-box { margin: 10px 0 0; padding: 10px 12px; border: 1px solid var(--grey-border); border-radius: 6px; background: var(--grey-light); font-size: 12.5px; }
+.suggest-box p { margin: 3px 0; color: var(--grey); }
+.suggest-box b { color: var(--ink); }
+fieldset.sub { border: 1px solid var(--grey-border); border-radius: 6px; padding: 8px 10px 10px; margin: 0; min-width: 0; }
+fieldset.sub legend { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--grey); padding: 0 4px; }
 .warn { margin: 6px 0 12px; padding: 8px 12px; font-size: 12.5px; color: var(--ink); background: var(--input-cell-bg);
   border: 1px solid var(--input-cell-border); border-radius: 6px; }
 .status { min-height: 1.3em; font-size: 13px; color: var(--grey); margin-top: 8px; }
@@ -90,3 +101,10 @@ dialog.card::backdrop { background: rgba(14, 26, 44, 0.45); }
   .grid2 { grid-template-columns: 1fr; }
   .grid2 .span2 { grid-column: auto; }
 }
+
+.dims { display: contents; }
+details.add-insert { margin-top: 10px; padding: 10px 14px; }
+details.add-insert summary { list-style: none; display: inline-block; }
+details.add-insert[open] summary { margin-bottom: 10px; }
+details.bop summary { cursor: pointer; font-size: 12.5px; color: var(--brand); margin: 4px 0 8px; }
+details.bop fieldset { margin-bottom: 10px; }

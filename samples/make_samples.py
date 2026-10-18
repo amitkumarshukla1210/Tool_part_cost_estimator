@@ -53,9 +53,31 @@ def demo_assembly():
     return assy
 
 
+def insert_moulded_housing():
+    """Plastic housing 80 x 50 x 20 mm (2.5 mm wall) with 4 bosses; a brass threaded insert
+    (tube Ø6 / Ø3.4 x 8 mm) sits in a blind hole in each boss; plus a loose cover screwed on top."""
+    points = [(x, y) for x in (-30, 30) for y in (-17, 17)]
+    shell = cq.Workplane("XY").box(80, 50, 20).faces(">Z").shell(-2.5)
+    bosses = cq.Workplane("XY").workplane(offset=-7.5).pushPoints(points).circle(5).extrude(17.5)
+    holes = cq.Workplane("XY").workplane(offset=2).pushPoints(points).circle(3).extrude(8)
+    housing = shell.union(bosses).cut(holes)
+    insert = cq.Workplane("XY").circle(3).circle(1.7).extrude(8)
+    cover = cq.Workplane("XY").box(80, 50, 2).translate((0, 0, 11))
+    assy = cq.Assembly(name="housing_assembly")
+    body = cq.Assembly(name="housing_with_inserts")
+    body.add(housing, name="housing")
+    for i, (x, y) in enumerate(points):
+        body.add(insert, name=f"threaded_insert_{i + 1}", loc=cq.Location((x, y, 2)))
+    assy.add(body, name="housing_with_inserts")
+    assy.add(cover, name="cover")
+    return assy
+
+
 if __name__ == "__main__":
     demo_assembly().export(str(OUT / "demo_assembly.step"))
     print("wrote", OUT / "demo_assembly.step")
+    insert_moulded_housing().export(str(OUT / "insert_moulded_housing.step"))
+    print("wrote", OUT / "insert_moulded_housing.step")
     for name, fn in [
         ("plate_with_hole", plate_with_hole),
         ("plastic_cover", plastic_cover),

@@ -79,6 +79,14 @@ parts = Table(
     Column("is_assembly", Boolean, default=False),
     Column("current_revision_id", Integer),
     Column("notes", Text, default=""),
+    # bought-out price (inserts and other BOP parts): value, currency, where it came from, month
+    Column("unit_price", Float),
+    Column("price_currency", String(10), default=""),
+    Column("price_source", String(200), default=""),
+    Column("price_month", String(7), default=""),
+    Column("price_is_example", Boolean, default=False),
+    # simple shape + dimensions for a part without a 3D file, e.g. {"shape": "bush", "od_mm": 6, ...}
+    Column("dimensions", JSON),
     Column("created_by", String(100), default=""),
     Column("created_at", DateTime, default=now),
     Column("updated_at", DateTime, default=now, onupdate=now),
@@ -114,6 +122,19 @@ bom_lines = Table(
     UniqueConstraint("variant_id", "parent_part_id", "child_part_id"),
 )
 
+# Moulded-in inserts: the insert is a part of its own (usually bought-out), moulded into the body part.
+part_inserts = Table(
+    "part_inserts", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),         # the moulded / cast body
+    Column("insert_part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),  # the insert
+    Column("quantity", Float, nullable=False),
+    Column("detected", Boolean, default=False),   # found in the 3D assembly (and confirmed) rather than typed in
+    Column("notes", Text, default=""),
+    Column("created_at", DateTime, default=now),
+    UniqueConstraint("part_id", "insert_part_id"),
+)
+
 history = Table(
     "history", meta,
     Column("id", Integer, primary_key=True),
@@ -141,7 +162,20 @@ def _engine(url: str) -> Engine:
         def _fk(dbapi_con, _):
             dbapi_con.execute("PRAGMA foreign_keys = ON")
     meta.create_all(engine)
+    _add_new_columns(engine)
     return engine
+
+
+def _add_new_columns(engine: Engine) -> None:
+    """Columns added in a newer version of the app are added to an existing database (data kept)."""
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in meta.sorted_tables:
+            have = {c["name"] for c in insp.get_columns(table.name)}
+            for c in table.columns:
+                if c.name not in have:
+                    conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {c.name} {c.type.compile(engine.dialect)}'))
 
 
 def engine() -> Engine:

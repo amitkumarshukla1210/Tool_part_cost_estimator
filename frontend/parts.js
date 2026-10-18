@@ -81,7 +81,7 @@ async function openPart(id) {
   }
   history.replaceState(null, "", `?part=${id}`);
   part.trace = null;
-  if (part.file_id) part.trace = await api(`/api/parts/${id}/trace`).catch(() => null);
+  if (part.file_id && !part.is_assembly) part.trace = await api(`/api/parts/${id}/trace`).catch(() => null);
   renderPart();
   $("panel").hidden = false;
 }
@@ -90,10 +90,102 @@ function geometryRows(g) {
   if (!g || g.assembly) return g?.assembly ? `<tr><td>Structure</td><td class="calc">${g.children.map(([n, q]) => `${esc(n)} × ${q}`).join(", ")}</td></tr>` : "";
   const b = g.bbox_mm;
   return `<tr><td>Volume</td><td class="calc num"><button type="button" class="tv" data-trace="volume">${fmt(g.volume_cm3, 3)} cm³</button></td></tr>
-    <tr><td>Net weight</td><td class="calc num">${part.trace?.nodes.weight ? `<button type="button" class="tv" data-trace="weight">${fmt(part.trace.nodes.weight.value, 2)} g</button>` : "set a material to calculate"}</td></tr>
+    ${weightRows()}
     <tr><td>Bounding box L × W × H</td><td class="calc num">${fmt(b.length, 1)} × ${fmt(b.width, 1)} × ${fmt(b.height, 1)} mm</td></tr>
     <tr><td>Projected area (along ${esc(g.pull_direction.toUpperCase())})</td><td class="calc num"><button type="button" class="tv" data-trace="proj">${fmt(g.projected_area_mm2[g.pull_direction] / 100, 2)} cm²</button></td></tr>
-    <tr><td>Main wall / sheet thickness</td><td class="calc num">${fmt(g.wall_mm, 2)} mm (${fmt(g.sheet_share * 100, 0)} % sheet-like)</td></tr>`;
+    <tr><td>Main wall / sheet thickness</td><td class="calc num">${fmt(g.wall_mm, 2)} mm (${fmt(g.sheet_share * 100, 0)} % of the surface)${g.bend_count != null ? ` · ${g.bend_count} bend${g.bend_count === 1 ? "" : "s"}` : ""}</td></tr>`;
+}
+
+// Body (plastic / metal) weight, insert weight and total, each clickable to its trace.
+function weightRows() {
+  const n = part.trace?.nodes || {};
+  const tv = (id, d = 2) => (n[id] ? `<button type="button" class="tv" data-trace="${id}">${fmt(n[id].value, d)} g</button>` : null);
+  const warn = (part.trace?.warnings || []).map((w) => `<p class="note">${esc(w)}</p>`).join("");
+  if (!part.inserts.length)
+    return `<tr><td>Net weight</td><td class="calc num">${tv("weight") ?? "set a material to calculate"}</td></tr>`;
+  return `<tr><td>Body weight (${esc(part.material || "material not set")}, without inserts)</td><td class="calc num">${tv("weight") ?? "set a material to calculate"}</td></tr>
+    <tr><td>Insert weight (${fmt(part.insert_count)} insert${part.insert_count === 1 ? "" : "s"})</td><td class="calc num">${tv("insert_weight") ?? "—"}</td></tr>
+    <tr class="total"><td>Total part weight</td><td class="calc num">${tv("total_weight") ?? "—"}${warn}</td></tr>`;
+}
+
+// Material choices: estimator materials, then bought-out insert materials.
+function materialOptions(value) {
+  const opt = (m) => `<option value="${esc(m)}" ${m === value ? "selected" : ""}>${esc(m)}</option>`;
+  const known = meta.materials.includes(value) || meta.insert_materials.some((m) => m.name === value);
+  return `<option value="">—</option>${value && !known ? opt(value) : ""}<optgroup label="Part materials">${meta.materials.map(opt).join("")}</optgroup>` +
+    `<optgroup label="Insert materials">${meta.insert_materials.map((m) => opt(m.name)).join("")}</optgroup>`;
+}
+
+// Shape + dimension inputs (Part register setup → Insert shapes) for a part without a 3D file.
+function dimsFields(dims, prefix = "") {
+  const shape = meta.insert_shapes.find((s) => s.code === dims?.shape);
+  return `<label>Shape <select name="${prefix}shape" data-dims="${prefix}">${options(meta.insert_shapes, dims?.shape, "— (use the 3D file)")}</select></label>
+    <span class="dims" data-for="${prefix}">${shape ? shape.dims.map((d) => `<label>${esc(d)} <input type="number" min="0" step="any" name="${prefix}dim_${d}" value="${dims?.[d] ?? ""}" required /></label>`).join("") : ""}</span>`;
+}
+
+function readDims(f, prefix = "") {
+  const shape = f.get(`${prefix}shape`);
+  if (!shape) return null;
+  const out = { shape };
+  for (const [k, v] of f.entries()) if (k.startsWith(`${prefix}dim_`)) out[k.slice(prefix.length + 4)] = v;
+  return out;
+}
+
+const priceFields = (p = {}, prefix = "") => `
+  <label>Price per piece <input type="number" min="0" step="any" name="${prefix}unit_price" value="${p.unit_price ?? ""}" /></label>
+  <label>Currency <input name="${prefix}price_currency" maxlength="10" value="${esc(p.price_currency ?? "INR")}" /></label>
+  <label>Price source <input name="${prefix}price_source" placeholder="supplier quote, catalogue, estimate" value="${esc(p.price_source ?? "")}" /></label>
+  <label>Price month <input name="${prefix}price_month" placeholder="2026-10" pattern="\\d{4}-\\d{2}" value="${esc(p.price_month ?? "")}" /></label>
+  <label class="check span2"><input type="checkbox" name="${prefix}price_is_example" value="true" ${p.price_is_example ? "checked" : ""} /> Example price (replace later)</label>`;
+
+function suggestionBox(p) {
+  const s = p.suggestion;
+  if (!s?.process && !s?.steps?.length) return "";
+  const same = s.process === p.process;
+  return `<div class="suggest-box span2"><b>Suggested process: ${esc(nameOf(meta.processes, s.process) || "none")}</b>
+    ${s.process && !same ? `<button type="button" class="btn btn-outline small" id="useSuggestion">Use it</button>` : same ? ' <span class="badge suggested">matches</span>' : ""}
+    ${(s.steps || []).map((t) => `<p>${esc(t)}</p>`).join("")}</div>`;
+}
+
+function insertsBlock(p) {
+  if (p.is_assembly) return "";
+  const rows = p.inserts.map((x) => {
+    const i = x.insert;
+    const size = x.volume.method === "3d" ? "3D file" : x.volume.method === "dimensions"
+      ? `${esc(x.volume.shape.name)} ${Object.values(x.volume.dims).map((v) => fmt(v, 1)).join(" × ")} mm` : '<span class="badge missing">no size</span>';
+    return `<tr><td><button type="button" class="tv" data-open="${i.id}">${esc(i.part_code)}</button>${x.detected ? ' <span class="badge suggested" title="Found in the 3D assembly and confirmed">detected</span>' : ""}
+        <div class="note">${esc(i.name)} · ${esc(i.material || "material not set")}</div></td>
+      <td class="calc num">${fmt(x.quantity, 2)}</td><td>${size}</td>
+      <td class="calc num">${x.weight_g != null ? `${fmt(x.weight_g, 2)}<div class="note">${fmt(x.weight_each_g, 2)} each</div>` : `<span class="note">${esc(x.missing)}</span>`}</td>
+      <td class="calc num">${i.unit_price != null ? `${fmt(i.unit_price, 2)} ${esc(i.price_currency)}` : "—"}${i.price_is_example ? ' <span class="badge badge-example">EXAMPLE</span>' : ""}
+        <div class="note">${esc([i.price_source, i.price_month].filter(Boolean).join(" · "))}</div></td>
+      <td><button type="button" class="btn btn-outline small" data-unlink="${x.link_id}" aria-label="Remove insert ${esc(i.part_code)}">✕</button></td></tr>`;
+  }).join("");
+  return `<h3 class="block-title">Moulded-in inserts</h3>
+    <p class="note">Bought-out parts moulded or cast into this part (threaded inserts, bushes, terminals, pins, nuts). They are separate parts in the
+      register, not BOM children. Click a code to open the insert; set its price there or below.</p>
+    <div class="table-wrap"><table class="cost-table"><thead><tr><th>Insert</th><th class="num">Qty</th><th>Size from</th>
+      <th class="num">Weight (g)</th><th class="num">Price / pc</th><th></th></tr></thead><tbody>
+      ${rows || '<tr><td colspan="6" class="empty">No inserts linked.</td></tr>'}</tbody></table></div>
+    <details class="card add-insert"><summary class="btn btn-outline small">+ Link an insert</summary>
+      <form id="insertForm" class="grid2">
+        <label>Insert part code <input name="insert_part_code" list="codeList" placeholder="existing code, or blank / new code" /></label>
+        <label>Quantity in this part <input type="number" name="quantity" min="0" step="any" value="1" required /></label>
+        <p class="note span2">For a new insert part, also fill in:</p>
+        <label>Name <input name="name" placeholder="e.g. M3 brass threaded insert" /></label>
+        <label>Material <select name="material">${materialOptions("")}</select></label>
+        ${dimsFields(null, "n_")}
+        ${priceFields({}, "n_")}
+        <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary">Link insert</button></div>
+        <p class="status span2" id="insertStatus"></p>
+      </form></details>
+    <datalist id="codeList"></datalist>`;
+}
+
+function mouldedIntoBlock(p) {
+  if (!p.moulded_into.length) return "";
+  return `<h3 class="block-title">Moulded into</h3><div class="table-wrap"><table class="cost-table"><thead><tr><th>Part</th><th class="num">Qty</th></tr></thead><tbody>
+    ${p.moulded_into.map((m) => `<tr class="clickable" data-open="${m.id}"><td>${esc(m.part_code)} · ${esc(m.name)}</td><td class="calc num">${fmt(m.quantity, 2)}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
 function renderPart() {
@@ -108,7 +200,7 @@ function renderPart() {
         <p class="note">Project ${esc(p.project_code)} · current rev <b>${esc(p.rev ?? "—")}</b> · created ${esc(p.created_at.slice(0, 10))} by ${esc(p.created_by)}</p>
         <form id="partForm" class="grid2">
           <label class="span2">Part name <input name="name" value="${esc(p.name)}" /></label>
-          <label>Material <select name="material">${options(meta.materials, p.material, "—")}</select></label>
+          <label>Material <select name="material">${materialOptions(p.material)}</select></label>
           <label>Process ${sel("process", meta.processes, p.process)}</label>
           <label>Sourcing ${sel("sourcing", meta.sourcing, p.sourcing)}</label>
           <label>Status ${sel("status", meta.statuses, p.status)}</label>
@@ -116,6 +208,12 @@ function renderPart() {
           <label>Programme life (years) <input type="number" name="programme_life_years" min="0" step="any" value="${p.programme_life_years ?? ""}" /></label>
           <label>Target piece cost (INR) <input type="number" name="target_piece_cost_inr" min="0" step="any" value="${p.target_piece_cost_inr ?? ""}" /></label>
           <label class="span2">Notes <input name="notes" value="${esc(p.notes)}" /></label>
+          ${suggestionBox(p)}
+          <details class="span2 bop" ${!meta.sourcing.find((x) => x.code === p.sourcing)?.is_costed || p.unit_price != null || p.dimensions ? "open" : ""}>
+            <summary>Bought-out price and size without a 3D file (inserts, BOP parts)</summary>
+            <fieldset class="sub grid2"><legend>Bought-out price</legend>${priceFields(p)}</fieldset>
+            <fieldset class="sub grid2"><legend>Size without a 3D file</legend>${dimsFields(p.dimensions)}</fieldset>
+          </details>
           <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary">Save changes</button></div>
           <p class="status span2" id="partStatus"></p>
         </form></div>
@@ -123,6 +221,9 @@ function renderPart() {
 
     <h3 class="block-title">Geometry · rev ${esc(cur?.rev ?? "—")}</h3>
     <div class="table-wrap"><table class="cost-table"><tbody>${geometryRows(cur?.geometry) || '<tr><td class="empty">No 3D file for this revision.</td></tr>'}</tbody></table></div>
+
+    ${insertsBlock(p)}
+    ${mouldedIntoBlock(p)}
 
     <h3 class="block-title">Revisions</h3>
     <div class="table-wrap"><table class="cost-table">
@@ -163,10 +264,13 @@ function historyText(d) {
 $("panelBody").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (e.target.id === "partForm") {
-    const data = Object.fromEntries(new FormData(e.target).entries());
+    const f = new FormData(e.target);
+    const data = Object.fromEntries([...f.entries()].filter(([k]) => k !== "shape" && !k.startsWith("dim_")));
+    data.price_is_example = f.has("price_is_example");
+    data.dimensions = readDims(f) ?? {};
     try {
       part = await api(`/api/parts/${part.id}`, { method: "PUT", body: JSON.stringify(data) });
-      part.trace = part.file_id ? await api(`/api/parts/${part.id}/trace`).catch(() => null) : null;
+      part.trace = part.file_id && !part.is_assembly ? await api(`/api/parts/${part.id}/trace`).catch(() => null) : null;
       renderPart();
       status($("partStatus"), "Saved. The change is in the history below.", "ok");
       search();
@@ -174,11 +278,26 @@ $("panelBody").addEventListener("submit", async (e) => {
       status($("partStatus"), err.message, "error");
     }
   }
+  if (e.target.id === "insertForm") {
+    const f = new FormData(e.target);
+    const data = { insert_part_code: f.get("insert_part_code"), quantity: f.get("quantity"), name: f.get("name"),
+      material: f.get("material"), dimensions: readDims(f, "n_"), price_is_example: f.has("n_price_is_example") };
+    for (const k of ["unit_price", "price_currency", "price_source", "price_month"]) data[k] = f.get(`n_${k}`);
+    if (!data.name) delete data.material;
+    try {
+      part = await api(`/api/parts/${part.id}/inserts`, { method: "POST", body: JSON.stringify(data) });
+      part.trace = part.file_id && !part.is_assembly ? await api(`/api/parts/${part.id}/trace`).catch(() => null) : null;
+      renderPart();
+      search();
+    } catch (err) {
+      status($("insertStatus"), err.message, "error");
+    }
+  }
   if (e.target.id === "revForm") {
     status($("revStatus"), "Reading the STEP file…");
     try {
       part = await api(`/api/parts/${part.id}/revisions`, { method: "POST", body: new FormData(e.target) });
-      part.trace = await api(`/api/parts/${part.id}/trace`).catch(() => null);
+      part.trace = part.is_assembly ? null : await api(`/api/parts/${part.id}/trace`).catch(() => null);
       renderPart();
       search();
     } catch (err) {
@@ -200,10 +319,40 @@ $("panelBody").addEventListener("click", async (e) => {
   }
   const o = e.target.closest("[data-open]");
   if (o) openPart(Number(o.dataset.open));
+  const u = e.target.closest("[data-unlink]");
+  if (u && confirm("Remove this insert from the part? The insert part itself stays in the register.")) {
+    try {
+      part = await api(`/api/parts/${part.id}/inserts/${u.dataset.unlink}`, { method: "DELETE" });
+      part.trace = part.file_id && !part.is_assembly ? await api(`/api/parts/${part.id}/trace`).catch(() => null) : null;
+      renderPart();
+    } catch (err) {
+      status($("partStatus"), err.message, "error");
+    }
+  }
+  if (e.target.id === "useSuggestion") {
+    $("partForm").elements.namedItem("process").value = part.suggestion.process;
+    $("partForm").requestSubmit();
+  }
+});
+
+// shape picked: show its dimension inputs; code typed: offer matching part codes
+$("panelBody").addEventListener("input", async (e) => {
+  if (e.target.name === "insert_part_code" && e.target.value.length >= 2) {
+    const res = await api(`/api/parts?q=${encodeURIComponent(e.target.value)}&limit=15`).catch(() => null);
+    if (res) $("codeList").innerHTML = res.rows.filter((r) => r.id !== part.id && !r.is_assembly)
+      .map((r) => `<option value="${esc(r.part_code)}">${esc(r.name)}</option>`).join("");
+  }
 });
 
 // side-by-side compare of two revisions
 $("panelBody").addEventListener("change", (e) => {
+  if (e.target.dataset.dims != null) {
+    const prefix = e.target.dataset.dims;
+    const shape = meta.insert_shapes.find((s) => s.code === e.target.value);
+    e.target.closest("form").querySelector(`.dims[data-for="${prefix}"]`).innerHTML = shape
+      ? shape.dims.map((d) => `<label>${esc(d)} <input type="number" min="0" step="any" name="${prefix}dim_${d}" required /></label>`).join("") : "";
+    return;
+  }
   if (!e.target.classList.contains("cmp")) return;
   const ids = [...document.querySelectorAll(".cmp:checked")].map((c) => Number(c.value));
   if (ids.length !== 2) return ($("compare").innerHTML = ids.length > 2 ? '<p class="note">Tick exactly two revisions.</p>' : "");
