@@ -7,7 +7,7 @@ Holds the data that sizes a mould or die and builds its BOM:
     bom_elements    BOM lines with formula rules for quantity, cost, weight, hours
     process_rates   machining and other process rates per hour (India values; other countries are in the rate library)
     process_unit_rates  heat treatment per kg, wire cut per cm², polishing per cm², painting per m², transport per kg, ...
-    sizing_rules    walls and gaps that turn part size into insert size
+    concept_rules   gate / runner / cooling / ejection / insert proposals (first rule that applies), and\n                    sizing_rules undercut_* thresholds for the concept analysis\n    sizing_rules    walls and gaps that turn part size into insert size
     tool_processes  how each tool process is priced: machine hours (MHR + operators × labour rate), labour hours,
                     or a rate per unit (kg, cm², ...); its machine, labour grade, operators and cost group
     time_parameters removal rates, set-up hours and shares that the BOM hour / amount rules use
@@ -28,6 +28,8 @@ CATEGORIES = ("made", "bought_out", "process")
 BASES = ("kg", "cm²", "mm", "m²", "unit")
 # How a tool process is priced (tool cost engine, roadmap stage 4).
 PRICING = ("machine_hour", "labour_hour", "unit")
+# Concept rules (roadmap stage 5): one proposal per topic, the first rule that applies.
+TOPICS = ("gate", "runner", "cooling", "ejection", "insert")
 COST_GROUPS = ("cutting", "machining", "polishing", "treatment", "assembly", "design", "trial")
 # Machine of the try-out process: the smallest moulding / die-casting machine whose tonnage takes the clamp force.
 BY_TONNAGE = "by tonnage"
@@ -109,6 +111,15 @@ TABLES = {
         col("description", "Description"),
         col("is_example", "Example", "bool"),
     ]},
+    "concept_rules": {"title": "Concept rules", "unique": ("part_type", "topic", "step"), "columns": [
+        col("part_type", "Part type", "part_type", PART_TYPES),
+        col("topic", "Topic", "topic", TOPICS),
+        col("step", "Order", "number"),
+        col("condition", "Applies when (rule)", "formula"),
+        col("proposal", "Proposal"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
     "tool_processes": {"title": "Tool processes", "unique": ("code",), "columns": [
         col("code", "Process"),
         col("pricing", "Priced by", "pricing", PRICING),
@@ -131,6 +142,12 @@ TABLES = {
 
 
 def _check(clean: dict) -> None:
+    from . import concept
+    for i, r in enumerate(clean["concept_rules"], start=2):
+        try:
+            formula.evaluate(r["condition"], {k: 1.0 for k in concept.CONCEPT_VARS})
+        except formula.FormulaError as exc:
+            raise MouldDbError(f"Concept rules row {i}, condition: {exc}") from None
     from . import costing_setup
     materials = {r["code"] for r in clean["tool_materials"]}
     unit_rates = {r["code"] for r in clean["process_unit_rates"]}

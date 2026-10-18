@@ -608,6 +608,15 @@ def projects_rm_recalculate(project_id: int):
     return register.recalculate_project(project_id)
 
 
+@app.get("/api/parts/{part_id}/concept")
+def parts_concept(part_id: int):
+    """Mould / die concept v1: opening direction, undercuts -> slides / lifters, proposals (roadmap stage 5)."""
+    try:
+        return register.mould_concept(part_id)
+    except register.ToolNotApplicable as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
 @app.get("/api/parts/{part_id}/tool-cost")
 def parts_tool_versions(part_id: int):
     return register.tool_versions(part_id)

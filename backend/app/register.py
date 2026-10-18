@@ -27,7 +27,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 from sqlalchemy import and_, func, or_, select
 
-from . import (cad_import, capacity, costing_setup, file_store, formula, master_data, mould_db, rates, register_setup,
+from . import (cad_import, capacity, concept, costing_setup, file_store, formula, master_data, mould_db, rates, register_setup,
                rm_cost, tool_cost)
 from . import projects_db as db
 from .table_set import EXAMPLE_FILL, HEADER_FILL
@@ -1295,6 +1295,47 @@ def _tool_compute(part_id: int) -> dict:
     r["stage_c"] = {k: cap[k] for k in ("cavities_needed", "cavities_per_tool", "tools_for_capacity", "tools_for_life",
                                         "tool_sets_over_programme", "limited_by")} | {"note": stage_c}
     return r
+
+
+def mould_concept(part_id: int) -> dict:
+    """Concept v1 of the part's current revision: opening direction, undercuts -> slides / lifters, proposals."""
+    from .geometry import load_step, tessellate
+    d = part_detail(part_id, with_rm=False)
+    why = tool_eligibility(d)
+    if why:
+        raise ToolNotApplicable(why)
+    part_type = register_setup.processes()[d["process"]]["part_type"]
+    rev = d["revisions"][0] if d["revisions"] else None
+    if not rev or not rev["file_id"]:
+        raise ToolNotApplicable("This part has no 3D file yet. Upload a revision first.")
+    with db.engine().connect() as conn:
+        row = conn.execute(select(db.files).where(db.files.c.id == rev["file_id"])).mappings().first()
+    path = file_store.path_of(dict(row))
+    if not path.exists():
+        raise ToolNotApplicable(f"The 3D file is missing from the storage folder ({row['stored_path']}).")
+    g = rev["geometry"]
+    verts, tris = tessellate(load_step(str(path)))
+    try:
+        res = concept.analyze(verts, tris, part_type, g["projected_area_mm2"])
+    except ValueError as exc:
+        raise ToolNotApplicable(str(exc)) from None
+    axis = res["opening_axis"]
+    across = sorted((v for a, v in g["bbox_axes_mm"].items() if a != axis), reverse=True)
+    typed = d["tool_inputs"] or {}
+    try:
+        cavities = typed.get("cavities") or _tool_compute(part_id)["stage_c"]["cavities_per_tool"]
+    except (RegisterError, ToolNotApplicable, tool_cost.ToolCostError):
+        cavities = 1
+    t = _geometry_trace(part_id)[0]
+    facts = {"part_weight_g": t.value("weight") if "weight" in t.nodes else 0, "wall_mm": g.get("wall_mm") or 0,
+             "part_l": across[0], "part_w": across[1], "part_h": g["bbox_axes_mm"][axis],
+             "projected_area_cm2": g["projected_area_mm2"][axis] / 100, "volume_cm3": g["volume_cm3"],
+             "cavities": cavities, "slides": typed.get("slides_per_cavity", res["slides"]),
+             "lifters": typed.get("lifters_per_cavity", res["lifters"]), "undercut_area_cm2": res["undercut_area_cm2"],
+             "inserts": d["insert_count"]}
+    return res | {"part_id": part_id, "rev": rev["rev"], "stored_pull_direction": g["pull_direction"],
+                  "facts": facts, "proposals": concept.proposals(part_type, facts),
+                  "typed": {k: typed[k] for k in ("slides_per_cavity", "lifters_per_cavity") if k in typed}}
 
 
 def _tool_row(row) -> dict:

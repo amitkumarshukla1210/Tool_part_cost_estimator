@@ -284,6 +284,12 @@ function toolBlock(p) {
       <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary">Save and calculate</button></div>
       <p class="status span2" id="toolStatus"></p>
     </form></details>`;
+  if (live.part_type === "plastic" || live.part_type === "die_casting") {
+    html += `<details class="card add-insert"><summary class="btn btn-outline small">Mould concept (opening direction, undercuts, proposals)</summary>
+      <p class="note">A proposal from ray casting on the 3D model and the Concept rules in Master data. Check it before you use it.</p>
+      <button type="button" class="btn btn-outline small" id="conceptRun">Analyse</button> <span class="status" id="conceptStatus"></span>
+      <div id="conceptOut"></div></details>`;
+  }
   if (t.versions) {
     html += `<details class="card add-insert"><summary class="btn btn-outline small">Tool cost versions (${t.versions})</summary>
       <div class="table-wrap"><table class="cost-table"><thead><tr><th>Ver</th><th>Rev</th><th>Country</th><th>Month</th><th class="num">Cavities</th>
@@ -521,6 +527,28 @@ $("panelBody").addEventListener("click", async (e) => {
   if (tvn) {
     const tr = await api(`/api/parts/${part.id}/tool-cost/trace?version=${tvn.dataset.toolversion}`);
     window.TracePanel.open(tr, tr.root);
+  }
+  if (e.target.id === "conceptRun") {
+    status($("conceptStatus"), "Analysing the 3D model…");
+    try {
+      const c = await api(`/api/parts/${part.id}/concept`);
+      status($("conceptStatus"), "");
+      $("conceptOut").innerHTML = `<p>Opening direction <b>${esc(c.opening_axis.toUpperCase())}</b> (least undercut; the register uses ${esc(c.stored_pull_direction.toUpperCase())}, largest shadow).
+        Undercut area ${fmt(c.undercut_area_cm2, 1)} cm² → <b>${c.slides}</b> slide(s), <b>${c.lifters}</b> lifter(s).${c.sampled ? " Faces were sampled." : ""}</p>
+        <div class="table-wrap"><table class="cost-table"><thead><tr><th>Axis</th><th class="num">Undercut (mm²)</th><th class="num">Shadow (mm²)</th></tr></thead><tbody>
+        ${c.ranking.map((r) => `<tr><td>${esc(r.axis.toUpperCase())}</td><td class="num">${fmt(r.undercut_area_mm2, 0)}</td><td class="num">${fmt(r.projected_area_mm2, 0)}</td></tr>`).join("")}</tbody></table></div>
+        ${c.regions.length ? `<ul>${c.regions.map((r) => `<li><b>${esc(r.kind)}</b> · ${fmt(r.area_mm2, 0)} mm² at ${r.centre_mm.join(", ")} · ${esc(r.reason)}</li>`).join("")}</ul>` : ""}
+        <h4>Proposals</h4><ul>${c.proposals.map((x) => `<li><b>${esc(x.topic)}</b>: ${esc(x.proposal)} <span class="note">(${esc(x.rule)}${x.is_example ? ", EXAMPLE rule" : ""})</span></li>`).join("")}</ul>
+        <button type="button" class="btn btn-primary small" id="conceptApply" data-slides="${c.slides}" data-lifters="${c.lifters}">Use ${c.slides} slide(s) and ${c.lifters} lifter(s) in the tool cost</button>`;
+    } catch (err) {
+      status($("conceptStatus"), err.message, "error");
+    }
+  }
+  if (e.target.id === "conceptApply") {
+    const inputs = { ...(part.tool_inputs || {}), slides_per_cavity: Number(e.target.dataset.slides), lifters_per_cavity: Number(e.target.dataset.lifters) };
+    await api(`/api/parts/${part.id}/tool-cost`, { method: "POST", body: JSON.stringify({ tool_inputs: inputs, reason: "slides / lifters from the mould concept" }) });
+    await openPart(part.id);
+    search();
   }
   if (e.target.id === "toolRecalc") {
     e.target.disabled = true;
