@@ -1231,8 +1231,8 @@ def _sheet_inputs(v, where):
     return out or None
 
 
-def sheet_tools_result(part_id: int) -> dict:
-    """Sheet-metal tools I for the part's current revision (roadmap stage 9)."""
+def _sheet_context(part_id: int):
+    """(part detail, revision, 3D shape, blank, sheet-tools result) of a sheet-metal part's current revision."""
     from . import sheet_tools
     from .geometry import blank_estimate, load_step
     d = part_detail(part_id, with_rm=False)
@@ -1253,13 +1253,45 @@ def sheet_tools_result(part_id: int) -> dict:
     g, typed = rev["geometry"], d["sheet_inputs"] or {}
     blank = blank_estimate(g["volume_mm3"], g["bbox_mm"], g.get("wall_mm") or 1.0)
     volume, _ = _annual_volume(d)
-    feat = sheet_tools.features(load_step(str(path)), g, blank, typed, density, volume, d["programme_life_years"])
+    shape = load_step(str(path))
+    feat = sheet_tools.features(shape, g, blank, typed, density, volume, d["programme_life_years"])
     try:
         by_process = {"sheet_metal_progressive": "progressive", "sheet_metal_multistage": "multi_stage"}.get(d["process"], "")
         res = sheet_tools.run(feat, d["material"], typed, by_process)
     except ValueError as exc:
         raise ToolNotApplicable(str(exc)) from None
-    return res | {"part_id": part_id, "rev": rev["rev"], "typed": typed, "process": d["process"]}
+    res = res | {"part_id": part_id, "rev": rev["rev"], "typed": typed, "process": d["process"]}
+    return d, rev, shape, blank, res
+
+
+def sheet_tools_result(part_id: int) -> dict:
+    """Sheet-metal tools I for the part's current revision (roadmap stage 9)."""
+    return _sheet_context(part_id)[4]
+
+
+def _layout(part_id: int):
+    from . import sheet_layout
+    d, rev, shape, blank, res = _sheet_context(part_id)
+    t = res["features"]["t"]
+    fp = sheet_layout.flat_pattern(shape, rev["geometry"], blank, t)
+    sl = sheet_layout.strip_layout(fp, t, len(res["operations"]))
+    return d, rev, fp, sl, res
+
+
+def sheet_layout_result(part_id: int) -> dict:
+    """Flat pattern and progressive strip layout (roadmap stage 10)."""
+    d, rev, fp, sl, res = _layout(part_id)
+    return {"part_id": part_id, "rev": rev["rev"], "flat_pattern": fp, "strip": sl, "mode": res["mode"]}
+
+
+def sheet_layout_file(part_id: int, kind: str) -> tuple[bytes, str]:
+    from . import sheet_layout
+    d, rev, fp, sl, res = _layout(part_id)
+    if kind == "blank.dxf":
+        return sheet_layout.blank_dxf(fp, d["part_code"]), "application/dxf"
+    if kind == "strip.dxf":
+        return sheet_layout.strip_dxf(fp, sl, d["part_code"]), "application/dxf"
+    return sheet_layout.pack_pdf(fp, sl, res, d, rev["rev"]), "application/pdf"
 
 
 def _piece_inputs(v, where):

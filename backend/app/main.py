@@ -673,6 +673,27 @@ def parts_sheet_tools(part_id: int):
         raise HTTPException(400, str(exc)) from None
 
 
+@app.get("/api/parts/{part_id}/sheet-layout")
+def parts_sheet_layout(part_id: int):
+    """Flat pattern and progressive strip layout (roadmap stage 10)."""
+    try:
+        return register.sheet_layout_result(part_id)
+    except register.ToolNotApplicable as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/sheet-layout/{kind}")
+def parts_sheet_layout_file(part_id: int, kind: str):
+    """kind: blank.dxf, strip.dxf or tool-pack.pdf."""
+    if kind not in ("blank.dxf", "strip.dxf", "tool-pack.pdf"):
+        raise HTTPException(404, "Unknown file.")
+    try:
+        content, media = register.sheet_layout_file(part_id, kind)
+    except register.ToolNotApplicable as exc:
+        raise HTTPException(400, str(exc)) from None
+    return Response(content, media_type=media, headers={"Content-Disposition": f'attachment; filename="{kind.split(".")[0]}_part_{part_id}.{kind.split(".")[1]}"'})
+
+
 @app.get("/api/parts/{part_id}/simulation")
 def parts_simulation(part_id: int):
     """Simulation & analysis v1: maps, cycle time, clamp force, machine, corrections required (roadmap stage 6)."""

@@ -168,6 +168,15 @@ TABLES = {
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
     ]},
+    "strip_rules": {"title": "Strip rules", "unique": ("name",), "columns": [
+        col("step", "Order", "number"),
+        col("name", "Name"),
+        col("formula", "Formula", "formula"),
+        col("unit", "Unit"),
+        col("label", "Meaning"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
     "tool_processes": {"title": "Tool processes", "unique": ("code",), "columns": [
         col("code", "Process"),
         col("pricing", "Priced by", "pricing", PRICING),
@@ -198,6 +207,16 @@ def _check(clean: dict) -> None:
             raise MouldDbError(f"Concept rules row {i}, condition: {exc}") from None
     from . import sheet_tools
     sheet_tools.validate(clean)
+    senv = sheet_tools.sample_env() | {k: 1.0 for k in ("feed_len", "across_w", "part_area", "operation_count")}
+    for r in sorted(clean["strip_rules"], key=lambda r: r["step"]):
+        if not r["name"].isidentifier():
+            raise MouldDbError(f"Strip rules '{r['name']}' must be one word (letters, digits and _).")
+        try:
+            senv[r["name"]] = float(formula.evaluate(r["formula"], senv))
+        except formula.FormulaError as exc:
+            raise MouldDbError(f"Strip rules ({r['name']}): {exc}") from None
+        except ArithmeticError:
+            senv[r["name"]] = 1.0
     from . import simulation
     for pt in PART_TYPES:
         env = simulation.sample_env(pt)

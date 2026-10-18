@@ -98,6 +98,7 @@ async function openPart(id) {
   part.sheet = null;
   if (!part.is_assembly && /sheet_metal/.test(part.process || "")) {
     part.sheet = await api(`/api/parts/${id}/sheet-tools`).catch((err) => ({ problem: err.message }));
+    part.layout = part.sheet.problem ? null : await api(`/api/parts/${id}/sheet-layout`).catch(() => null);
   }
   part.loop = part.is_assembly ? null : await api(`/api/parts/${id}/design-loop`).catch(() => null);
   renderPart();
@@ -658,6 +659,7 @@ function sheetBlock(p) {
     <tr class="total"><td></td><td>Total × safety ${fmt(s.safety_factor, 2)}</td><td class="calc num">${fmt(s.design_force_t, 1)}</td><td></td>
       <td>${pr ? esc(pr.machine_id ? `${pr.machine_id} (${fmt(pr.tonnage_t)} t)` : "none large enough") : ""}</td></tr></tbody></table></div>
     ${s.problems.length ? `<h4>Formability</h4><ul>${s.problems.map((x) => `<li>${esc(x.message)}</li>`).join("")}</ul>` : '<p class="note">Formability checks passed.</p>'}
+    ${layoutBlock(p)}
     <form id="sheetForm" class="card grid2">
       <label>Die type <select name="mode"><option value="">Follow the part's process</option>
         <option value="progressive" ${p.sheet_inputs?.mode === "progressive" ? "selected" : ""}>Progressive</option>
@@ -669,6 +671,25 @@ function sheetBlock(p) {
       <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary small">Save and recalculate</button></div>
       <p class="status span2" id="sheetStatus"></p></form>`;
   return html;
+}
+
+// flat pattern, progressive strip layout and downloads (stage 10)
+function layoutBlock(p) {
+  const l = p.layout;
+  if (!l) return "";
+  const fp = l.flat_pattern, b = l.strip.best, v = b.values, o = l.strip.other.values;
+  return `<h4>Blank and strip layout</h4>
+    <p>Blank ${fmt(fp.length_mm, 1)} × ${fmt(fp.width_mm, 1)} mm, area ${fmt(fp.area_mm2, 0)} mm² · ${esc(fp.method)}</p>
+    <div class="table-wrap"><table class="cost-table"><tbody>
+      <tr><td>Feed</td><td class="calc num">${esc(b.feed)}</td></tr>
+      <tr><td>Pitch · bridge · edge (mm)</td><td class="calc num">${fmt(v.pitch_mm, 1)} · ${fmt(v.bridge_mm, 1)} · ${fmt(v.edge_mm, 1)}</td></tr>
+      <tr><td>Strip width (mm)</td><td class="calc num">${fmt(v.strip_width_mm, 1)}</td></tr>
+      <tr><td>Stations · pilots</td><td class="calc num">${fmt(v.stations)} · ${fmt(v.pilots)} × Ø${fmt(v.pilot_dia_mm, 1)}</td></tr>
+      <tr class="total"><td>Material utilisation (other feed direction ${fmt(o.utilisation_pct, 1)} %)</td><td class="calc num">${fmt(v.utilisation_pct, 1)} %</td></tr></tbody></table></div>
+    ${l.strip.problems.map((x) => `<p class="note"><b>${esc(x)}</b></p>`).join("")}
+    <p class="note">Download: <a class="link" href="/api/parts/${p.id}/sheet-layout/blank.dxf">Blank DXF</a> ·
+      <a class="link" href="/api/parts/${p.id}/sheet-layout/strip.dxf">Strip DXF</a> ·
+      <a class="link" href="/api/parts/${p.id}/sheet-layout/tool-pack.pdf">Tool pack PDF</a></p>`;
 }
 
 $("panelBody").addEventListener("submit", async (e) => {
