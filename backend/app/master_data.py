@@ -2,12 +2,11 @@
 
 All values live in one Excel workbook (``master_data/master_data.xlsx``) so
 they can be changed without touching code, either on the Master data page
-or directly in Excel. The workbook has three sheets:
+or directly in Excel. The workbook has two sheets:
 
     Parameters  part_type | parameter | value | unit | description
                 part_type "all" applies to every part type.
     Materials   part_type | material | density_g_cm3 | rate_per_kg | scrap_rate_per_kg | notes
-    Machines    part_type | machine | tonnage_t | length_mm | width_mm | mhr_per_hour | notes
 
 The file is re-read whenever it changes on disk.
 """
@@ -30,11 +29,9 @@ PART_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal")
 SHEETS = {
     "Parameters": ["part_type", "parameter", "value", "unit", "description"],
     "Materials": ["part_type", "material", "density_g_cm3", "rate_per_kg", "scrap_rate_per_kg", "notes"],
-    "Machines": ["part_type", "machine", "tonnage_t", "length_mm", "width_mm", "mhr_per_hour", "notes"],
 }
 NUMERIC = {
     "Materials": {"density_g_cm3", "rate_per_kg", "scrap_rate_per_kg"},
-    "Machines": {"tonnage_t", "length_mm", "width_mm", "mhr_per_hour"},
 }
 # Parameters whose value is text or a comma list; every other parameter is a number.
 TEXT_PARAMETERS = {"currency"}
@@ -136,7 +133,7 @@ def validate(raw: dict) -> dict:
             for c in NUMERIC.get(sheet, ()):
                 clean[c] = _number(row.get(c), f"{sheet} row {i}, {c}")
 
-            name_col = {"Parameters": "parameter", "Materials": "material", "Machines": "machine"}[sheet]
+            name_col = {"Parameters": "parameter", "Materials": "material"}[sheet]
             if not clean[name_col]:
                 raise MasterDataError(f"{sheet} row {i}: {name_col} is empty.")
             if (pt, clean[name_col]) in seen:

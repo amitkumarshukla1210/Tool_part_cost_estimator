@@ -66,7 +66,8 @@ def _eval(node, env):
     if isinstance(node, ast.Name):
         if node.id in env:
             return env[node.id]
-        raise FormulaError(f"unknown name '{node.id}'. Allowed: {', '.join(VARIABLE_HELP)}")
+        allowed = [k for k in env if not k.startswith("_")]
+        raise FormulaError(f"unknown name '{node.id}'. Allowed: {', '.join(allowed)}")
     if isinstance(node, ast.BinOp) and type(node.op) in _BINOPS:
         if isinstance(node.op, ast.Pow):
             exp = _eval(node.right, env)
@@ -129,6 +130,13 @@ SAMPLE = {name: 1.0 for name in VARIABLE_HELP} | {
     "insert_half_h": 40, "pocket_l": 310, "pocket_w": 230, "base_l": 400, "base_w": 350,
     "base_stack_h": 350, "base_weight_kg": 300, "hot_runner": 1, "density": 7.85,
 }
+
+
+def names(text: str) -> set[str]:
+    """Variable names a formula uses (function names excluded)."""
+    tree = _parse(text)
+    funcs = {n.func.id for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    return {n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id not in funcs}
 
 
 def check(text: str) -> None:

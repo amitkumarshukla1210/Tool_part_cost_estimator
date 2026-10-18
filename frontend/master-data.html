@@ -19,6 +19,7 @@
       <nav>
         <ul>
           <li><a href="/">Estimate</a></li>
+          <li><a href="/rates">Rates</a></li>
           <li><a href="/master-data" class="active" aria-current="page">Master data</a></li>
           <li><a href="/help">Help</a></li>
         </ul>
@@ -32,7 +33,8 @@
         <div class="section-head">
           <p class="kicker">Master data</p>
           <h2>Rates, rules &amp; tool database</h2>
-          <p>Every value the estimator uses lives here. Nothing is hard-coded, so change it here or in Excel.</p>
+          <p>Every value the estimator uses lives here. Nothing is hard-coded, so change it here or in Excel.
+            Country rates (with monthly versions and approval) are on the <a class="link" href="/rates#library">Rates</a> page.</p>
         </div>
         <div class="datasets" role="tablist" aria-label="Data set">
           <button role="tab" class="card" data-dataset="general" aria-selected="true">
@@ -40,6 +42,9 @@
           </button>
           <button role="tab" class="card" data-dataset="mould">
             <b>Mould &amp; die database</b><span>Bases, tool steels, BOM rules, process rates · SQLite</span>
+          </button>
+          <button role="tab" class="card" data-dataset="setup">
+            <b>Countries, machines &amp; formulas</b><span>Rate engine logic: MHR &amp; labour formulas · SQLite</span>
           </button>
         </div>
       </div>

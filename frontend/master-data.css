@@ -6,7 +6,7 @@
 .md-intro { margin-bottom: 16px; max-width: 900px; font-size: 13.5px; color: var(--grey); }
 
 /* Data-set switch */
-.datasets { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; max-width: 1000px; margin: 0 auto; }
+.datasets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; max-width: 1200px; margin: 0 auto; }
 .datasets button {
   display: grid;
   gap: 2px;

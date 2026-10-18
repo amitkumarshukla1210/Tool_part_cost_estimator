@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design to Cost — Part Cost Estimator · Rates</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/rates.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img src="/theme/logo.png" alt="Design to Cost logo" />
+        <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/">Estimate</a></li>
+          <li><a href="/rates" class="active" aria-current="page">Rates</a></li>
+          <li><a href="/master-data">Master data</a></li>
+          <li><a href="/help">Help</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="bg-grey rates-head">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Country rate library</p>
+          <h2>Machine hour rates &amp; approved rates</h2>
+          <p>Every rate is versioned by month and only approved versions are used. Click any number to see how it is made.</p>
+        </div>
+        <div class="rates-toolbar card">
+          <label class="inline">Producing country
+            <select id="country"></select></label>
+          <label class="inline">Costing month (as of)
+            <input type="month" id="month" /></label>
+          <div class="tabs" role="tablist" id="tabs">
+            <button role="tab" class="btn btn-outline" data-tab="mhr" aria-selected="true">Machine &amp; labour rates</button>
+            <button role="tab" class="btn btn-outline" data-tab="library" aria-selected="false">Rate library</button>
+            <button role="tab" class="btn btn-outline" data-tab="review" aria-selected="false">Rate review <span id="reviewCount" class="count"></span></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Machine & labour rates -->
+    <section id="tab-mhr" class="tab-pane">
+      <div class="container">
+        <p class="warn" id="mhrExamples" hidden></p>
+        <p id="mhrStatus" class="status error" role="status"></p>
+        <h3 class="block-title">Machine hour rates (machine only, labour added per process)</h3>
+        <div class="table-wrap tall">
+          <table class="cost-table" id="mhrTable"></table>
+        </div>
+        <h3 class="block-title">Labour rates by skill level</h3>
+        <div class="table-wrap">
+          <table class="cost-table" id="labourTable"></table>
+        </div>
+        <p class="note">All values in the producing country's currency, with the final rate also in INR.
+          Logic: Master data → Countries, machines &amp; formulas → Cost formulas.</p>
+      </div>
+    </section>
+
+    <!-- Rate library -->
+    <section id="tab-library" class="tab-pane" hidden>
+      <div class="container">
+        <div class="md-toolbar">
+          <label class="inline">Category
+            <select id="category"><option value="">All</option></select></label>
+          <label class="inline grow">Search
+            <input type="search" id="search" placeholder="item, source or comment" /></label>
+          <label class="check"><input type="checkbox" id="examplesOnly" /> Examples only</label>
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-outline" id="addRate">+ New rate</button>
+          <a class="btn btn-outline" href="/api/rates/download">Download Excel (full history)</a>
+          <label class="btn btn-outline" for="upload">Import Excel as drafts</label>
+          <input type="file" id="upload" accept=".xlsx" hidden />
+        </div>
+        <p id="libStatus" class="status" role="status"></p>
+        <div class="table-wrap tall">
+          <table class="cost-table" id="libTable"></table>
+        </div>
+        <p class="note">Click a value for its source, approval and month-on-month history. Approved versions are never
+          changed: a new value is saved as a new version.</p>
+      </div>
+    </section>
+
+    <!-- Rate review -->
+    <section id="tab-review" class="tab-pane" hidden>
+      <div class="container">
+        <div class="card review-settings">
+          <label class="inline">Approver name
+            <input type="text" id="approver" placeholder="your name" /></label>
+          <label class="inline">Highlight changes above (%)
+            <input type="number" id="threshold" min="0" step="0.5" /></label>
+          <button type="button" class="btn btn-outline" id="saveSettings">Save settings</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-outline" id="bulkReview" disabled>Mark selected reviewed</button>
+          <button type="button" class="btn btn-primary" id="bulkApprove" disabled>Approve selected</button>
+        </div>
+        <p id="reviewStatus" class="status" role="status"></p>
+        <div class="table-wrap tall">
+          <table class="cost-table" id="reviewTable"></table>
+        </div>
+        <p class="note">Only approved rates are used in costing. Edit a proposed value in its yellow cell before approving.</p>
+      </div>
+    </section>
+
+    <!-- New version form -->
+    <dialog id="rateDialog" class="card rate-dialog">
+      <form method="dialog" id="rateForm" class="grid2">
+        <h3 class="span2" id="rateDialogTitle">New rate version</h3>
+        <label>Category <input name="category" required /></label>
+        <label>Item <input name="item" required /></label>
+        <label>Country (blank = global, e.g. forex) <input name="country" maxlength="3" /></label>
+        <label>Valid from month <input type="month" name="month" required /></label>
+        <label>Value <input type="number" step="any" min="0" name="value" required /></label>
+        <label>Currency <input name="currency" maxlength="3" placeholder="INR, USD …" /></label>
+        <label>Unit <input name="unit" placeholder="INR/kWh, %, …" /></label>
+        <label>Fetched date <input type="date" name="fetched_date" /></label>
+        <label class="span2">Source <input name="source" placeholder="e.g. MSEDCL HT industrial tariff order 2026" /></label>
+        <label class="span2">Source URL <input type="url" name="source_url" placeholder="https://…" /></label>
+        <label class="span2">Comment <input name="comment" /></label>
+        <label class="check span2"><input type="checkbox" name="is_example" /> Still an example value</label>
+        <p class="status error span2" id="rateFormStatus"></p>
+        <div class="span2 dialog-actions">
+          <button type="button" class="btn btn-outline" value="cancel" id="rateCancel">Cancel</button>
+          <button type="button" class="btn btn-outline" id="rateSaveDraft">Save as draft</button>
+          <button type="button" class="btn btn-primary" id="rateSaveApprove">Save &amp; approve</button>
+        </div>
+      </form>
+    </dialog>
+  </main>
+
+  <footer>
+    <div class="container"><p class="footnote">© Design to Cost</p></div>
+  </footer>
+
+  <script src="/static/trace.js"></script>
+  <script src="/static/rates.js"></script>
+</body>
+</html>

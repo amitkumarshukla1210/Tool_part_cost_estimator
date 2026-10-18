@@ -1,0 +1,184 @@
+"""Setup tables of the costing database: what the rate engine calculates with.
+
+    countries        country code, name and currency
+    machines         technical data per machine (power, area, life, residual,
+                     maintenance); prices and consumables are country rates
+    labour_grades    skill levels (operator, toolmaker, ...)
+    cost_formulas    every step of the MHR and labour-rate calculation as a
+                     formula, per scope ("mhr" or "labour")
+    formula_inputs   where each formula variable comes from: a country rate
+                     (category + item, "{machine}" / "{grade}" filled in) or a
+                     machine field
+
+Changing these rows changes the calculation logic without touching code.
+"""
+
+from __future__ import annotations
+
+from . import formula
+from .table_set import TableSet, col
+
+SCOPES = ("mhr", "labour")
+SOURCES = ("rate", "machine")
+MACHINE_FIELDS = ("power_kw", "load_factor_pct", "floor_area_m2", "life_years", "residual_pct",
+                  "maintenance_pct", "tonnage_t", "length_mm", "width_mm")
+RESULT_OF = {"mhr": "Machine hour rate", "labour": "Labour rate"}
+
+
+class SetupError(ValueError):
+    pass
+
+
+TABLES = {
+    "countries": {"title": "Countries", "unique": ("code",), "columns": [
+        col("code", "Code"),
+        col("name", "Country"),
+        col("currency", "Currency"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "machines": {"title": "Machines", "unique": ("machine_id",), "columns": [
+        col("machine_id", "Machine ID"),
+        col("name", "Machine"),
+        col("process", "Process"),
+        col("power_kw", "Connected power (kW)", "number"),
+        col("load_factor_pct", "Power load factor (%)", "number"),
+        col("floor_area_m2", "Floor area (m²)", "number"),
+        col("life_years", "Life (years)", "number"),
+        col("residual_pct", "Residual value (%)", "number"),
+        col("maintenance_pct", "Maintenance (% of price / yr)", "number"),
+        col("tonnage_t", "Tonnage (t)", "number", required=False),
+        col("length_mm", "Tie-bar / bed length (mm)", "number", required=False),
+        col("width_mm", "Tie-bar / bed width (mm)", "number", required=False),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "labour_grades": {"title": "Labour grades", "unique": ("grade",), "columns": [
+        col("grade", "Grade ID"),
+        col("name", "Skill level"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "cost_formulas": {"title": "Cost formulas", "unique": ("scope", "name"), "columns": [
+        col("scope", "Scope", "scope", SCOPES),
+        col("name", "Name"),
+        col("label", "Shown as"),
+        col("formula", "Formula", "formula"),
+        col("unit", "Unit"),
+        col("is_result", "Final result", "bool"),
+        col("description", "Description"),
+    ]},
+    "formula_inputs": {"title": "Formula inputs", "unique": ("scope", "variable"), "columns": [
+        col("scope", "Scope", "scope", SCOPES),
+        col("variable", "Variable"),
+        col("label", "Shown as"),
+        col("source", "Comes from", "source", SOURCES),
+        col("category", "Rate category"),
+        col("item", "Rate item / machine field"),
+        col("is_money", "Money (convert currency)", "bool"),
+        col("unit", "Unit"),
+    ]},
+}
+
+
+def formula_order(rows: list[dict], inputs: set[str], where=lambda i: f"row {i}") -> list[dict]:
+    """Formulas of one scope in calculation order; checks names and cycles."""
+    by_name = {r["name"]: (i, r) for i, r in rows}
+    order, state = [], {}
+
+    def visit(name, chain):
+        i, r = by_name[name]
+        if state.get(name) == "done":
+            return
+        if state.get(name) == "busy":
+            raise SetupError(f"Cost formulas {where(i)}: '{name}' depends on itself ({' → '.join(chain + [name])}).")
+        state[name] = "busy"
+        try:
+            used = formula.names(r["formula"])
+        except formula.FormulaError as exc:
+            raise SetupError(f"Cost formulas {where(i)}, formula: {exc}") from None
+        for n in used:
+            if n in by_name:
+                visit(n, chain + [name])
+            elif n not in inputs:
+                raise SetupError(f"Cost formulas {where(i)}, formula: unknown name '{n}'. Use a formula name of the "
+                                 f"same scope or a variable from Formula inputs.")
+        state[name] = "done"
+        order.append(r)
+
+    for name in by_name:
+        visit(name, [])
+    return order
+
+
+def _check(clean: dict) -> None:
+    for i, c in enumerate(clean["countries"], start=2):
+        c["code"] = c["code"].upper()
+        c["currency"] = c["currency"].upper()
+        if len(c["currency"]) != 3:
+            raise SetupError(f"Countries row {i}: currency must be a 3-letter code such as INR, USD, JPY.")
+    for i, r in enumerate(clean["formula_inputs"], start=2):
+        if r["source"] == "rate" and not (r["category"] and r["item"]):
+            raise SetupError(f"Formula inputs row {i}: a rate input needs a rate category and item.")
+        if r["source"] == "machine" and r["item"] not in MACHINE_FIELDS:
+            raise SetupError(f"Formula inputs row {i}: machine field must be one of {', '.join(MACHINE_FIELDS)}.")
+    for scope in SCOPES:
+        rows = [(i, r) for i, r in enumerate(clean["cost_formulas"], start=2) if r["scope"] == scope]
+        if not rows:
+            continue
+        results = [r for _, r in rows if r["is_result"]]
+        if len(results) != 1:
+            raise SetupError(f"Cost formulas: scope '{scope}' needs exactly one row marked 'Final result' "
+                             f"(found {len(results)}).")
+        inputs = {r["variable"] for r in clean["formula_inputs"] if r["scope"] == scope}
+        clash = inputs & {r["name"] for _, r in rows}
+        if clash:
+            raise SetupError(f"Cost formulas: '{sorted(clash)[0]}' is both a formula and an input in scope '{scope}'.")
+        order = formula_order(rows, inputs)
+        env = {n: 1.0 for n in inputs}
+        for r in order:
+            try:
+                env[r["name"]] = formula.evaluate(r["formula"], env)
+            except formula.FormulaError as exc:
+                i = next(i for i, x in rows if x is r)
+                raise SetupError(f"Cost formulas row {i}, formula: {exc}") from None
+
+
+def _help() -> list:
+    return [
+        ["Design to Cost — Countries, machines & formulas: help"], [],
+        ["variable", "meaning"],
+        ["Cost formulas", "One row per calculation step. A formula may use the scope's Formula inputs and the names "
+                          "of other formulas in the same scope. Mark exactly one row per scope as the final result."],
+        ["Formula inputs", "source = rate: the country rate with this category and item ({machine} and {grade} are "
+                           "filled in). source = machine: a field of the Machines sheet. Money inputs are converted "
+                           "to the producing country's currency with the forex rate of the month."],
+        ["functions", "ceil, floor, round, min, max, abs, sqrt; 'a if condition else b'; and, or, not"],
+    ]
+
+
+SET = TableSet("Countries, machines & formulas", TABLES, error=SetupError, check=_check, help_sheet=_help)
+
+
+def schema() -> dict:
+    return SET.schema() | {"machine_fields": list(MACHINE_FIELDS)}
+
+
+def tables() -> dict:
+    return SET.read()
+
+
+def write(data: dict) -> None:
+    SET.write(data)
+
+
+def to_excel() -> bytes:
+    return SET.to_excel()
+
+
+def from_excel(content: bytes) -> None:
+    SET.from_excel(content)
+
+
+def countries() -> dict:
+    return {c["code"]: c for c in tables()["countries"]}
