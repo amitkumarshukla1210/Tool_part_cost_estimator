@@ -6,8 +6,8 @@
 .md-intro { margin-bottom: 16px; max-width: 900px; font-size: 13.5px; color: var(--grey); }
 
 /* Data-set switch */
-.datasets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; max-width: 1200px; margin: 0 auto; }
-.datasets button {
+.datasets { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; max-width: 1200px; margin: 0 auto; }
+.datasets button, .datasets a.checklist {
   display: grid;
   gap: 2px;
   text-align: left;
@@ -16,9 +16,9 @@
   padding: 14px 18px;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
-.datasets button b { font-size: 15px; font-weight: 800; color: var(--ink); }
-.datasets button span { font-size: 12.5px; color: var(--grey); }
-.datasets button:hover { border-color: var(--grey); }
+.datasets button b, .datasets a.checklist b { font-size: 15px; font-weight: 800; color: var(--ink); }
+.datasets button span, .datasets a.checklist span { font-size: 12.5px; color: var(--grey); }
+.datasets button:hover, .datasets a.checklist:hover { border-color: var(--grey); }
 .datasets button[aria-selected="true"] { border: 2px solid var(--brand); box-shadow: 0 0 0 3px var(--blue-soft); }
 
 /* Toolbar */
@@ -80,3 +80,6 @@ label.grow { flex: 1; min-width: 200px; }
 @media (max-width: 700px) {
   .datasets { grid-template-columns: 1fr; }
 }
+
+/* Link to the Replace example values checklist */
+.datasets a.checklist { text-decoration: none; border-left: 4px solid var(--accent); }

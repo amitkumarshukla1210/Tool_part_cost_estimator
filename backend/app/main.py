@@ -19,7 +19,7 @@ from typing import Optional
 
 from .geometry import PART_TYPES, analyze, blank_estimate, load_step, sheet_thickness, tessellate
 from . import (capacity, costing_setup, country_rates, file_store, gross_weight, master_data, mould, mould_db, rate_engine, rates,
-               register, register_setup, rm_cost, tool_cost)
+               register, register_setup, rm_cost, tool_cost, example_values)
 from . import projects_db
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
@@ -199,6 +199,41 @@ def mould_estimate(inp: mould.MouldInput):
         return mould.size(inp)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/examples")
+def examples_checklist(as_of: Optional[str] = None):
+    """Every value still marked EXAMPLE: library rates by category and country, master-data rows by table."""
+    return example_values.checklist(as_of)
+
+
+@app.get("/api/examples/export.xlsx")
+def examples_excel(as_of: Optional[str] = None):
+    return _xlsx(example_values.to_excel(as_of), "replace_example_values.xlsx")
+
+
+class ReplaceRateIn(BaseModel):
+    rate_id: int
+    value: Optional[float] = None   # None = keep the value, just confirm it is real
+    source: str = ""
+    comment: str = ""
+
+
+@app.post("/api/examples/rate")
+def examples_replace_rate(inp: ReplaceRateIn):
+    return example_values.replace_rate(inp.rate_id, inp.value, inp.source, inp.comment)
+
+
+class ReplaceRowIn(BaseModel):
+    set: str
+    table: str
+    key: dict
+    value: Optional[float] = None   # None = keep the row, just clear its Example flag
+
+
+@app.post("/api/examples/row")
+def examples_replace_row(inp: ReplaceRowIn):
+    return example_values.replace_row(inp.set, inp.table, inp.key, inp.value)
 
 
 @app.get("/api/tool-cost/meta")
@@ -686,6 +721,7 @@ def _require_xlsx(file: UploadFile) -> None:
 
 @app.exception_handler(rm_cost.RMError)
 @app.exception_handler(tool_cost.ToolCostError)
+@app.exception_handler(example_values.ExampleError)
 @app.exception_handler(master_data.MasterDataError)
 @app.exception_handler(mould_db.MouldDbError)
 @app.exception_handler(costing_setup.SetupError)
@@ -700,6 +736,11 @@ def master_data_error(request, exc):
 @app.get("/")
 def index():
     return FileResponse(FRONTEND_DIR / "index.html")
+
+
+@app.get("/master-data/examples")
+def examples_page():
+    return FileResponse(FRONTEND_DIR / "examples.html")
 
 
 @app.get("/master-data")
