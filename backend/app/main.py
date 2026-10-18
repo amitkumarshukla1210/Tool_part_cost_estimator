@@ -1,4 +1,4 @@
-"""FastAPI web server for the part cost estimator (Stages A and B).
+"""Design to Cost: web server for the Part Cost Estimator module (Stages A to C).
 
 Run from the repository root:
     uvicorn backend.app.main:app --reload
@@ -12,16 +12,17 @@ import tempfile
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .geometry import PART_TYPES, analyze, blank_estimate, load_step, sheet_thickness, tessellate
-from .gross_weight import DEFAULTS, GrossWeightInput, calculate
+from . import capacity, gross_weight, master_data, mould, mould_db
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
+THEME_DIR = Path(__file__).resolve().parents[2] / "theme"
 MAX_UPLOAD_MB = 100
 
-app = FastAPI(title="Tool & Part Cost Estimator", version="0.2.0 (Stage B)")
+app = FastAPI(title="Design to Cost — Part Cost Estimator", version="0.3.0 (Stage C)")
 
 
 @app.get("/api/part-types")
@@ -61,16 +62,26 @@ async def analyze_part(
     vertices, triangles = tessellate(shape)
     metrics = analyze(shape, part_type, density, mesh=(vertices, triangles))
 
+    # Most common wall: sheet thickness for sheet metal, wall for mouldings.
+    wall = sheet_thickness(shape)
     sheet = None
     if part_type == "sheet_metal":
-        t = sheet_thickness(shape)
-        sheet = {"thickness_mm": t, "blank_mm": blank_estimate(metrics.volume_mm3, metrics.bbox_mm, t)}
+        sheet = {"thickness_mm": wall, "blank_mm": blank_estimate(metrics.volume_mm3, metrics.bbox_mm, wall)}
+
+    # Part size across the parting plane, i.e. the two axes other than the pull.
+    across = sorted((v for a, v in metrics.bbox_axes_mm.items() if a != metrics.pull_direction), reverse=True)
+    process = {
+        "wall_thickness_mm": wall,
+        "footprint_mm": {"length": across[0], "width": across[1]},
+        "cycle_time_s_estimate": capacity.plastic_cycle_estimate(wall) if part_type == "plastic" else None,
+    }
 
     return {
         "file_name": file.filename,
         "part_type_label": PART_TYPES[part_type],
         "metrics": metrics.to_dict(),
         "sheet_metal": sheet,
+        "process": process,
         # Flat arrays are what three.js BufferGeometry expects.
         "mesh": {
             "positions": [c for v in vertices for c in v],
@@ -81,15 +92,103 @@ async def analyze_part(
 
 @app.get("/api/gross-weight/defaults")
 def gross_weight_defaults():
-    return DEFAULTS
+    return {pt: gross_weight.defaults(pt) for pt in PART_TYPES}
 
 
 @app.post("/api/gross-weight")
-def gross_weight(inp: GrossWeightInput):
+def gross_weight_calc(inp: gross_weight.GrossWeightInput):
     try:
-        return calculate(inp)
+        return gross_weight.calculate(inp)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/capacity/defaults")
+def capacity_defaults():
+    return {"by_part_type": {pt: capacity.defaults(pt) for pt in PART_TYPES}, "terms": capacity.TERMS}
+
+
+@app.post("/api/capacity")
+def capacity_calc(inp: capacity.CapacityInput):
+    try:
+        return capacity.calculate(inp)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/master-data")
+def master_data_get():
+    return master_data.tables()
+
+
+@app.put("/api/master-data")
+def master_data_put(data: dict):
+    master_data.write(data)
+    return master_data.tables()
+
+
+@app.get("/api/master-data/download")
+def master_data_download():
+    return Response(
+        master_data.path().read_bytes(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="master_data.xlsx"'},
+    )
+
+
+@app.post("/api/master-data/upload")
+async def master_data_upload(file: UploadFile = File(...)):
+    if not (file.filename or "").lower().endswith(".xlsx"):
+        raise HTTPException(400, "Please upload an Excel .xlsx file.")
+    master_data.replace_from_upload(await file.read())
+    return master_data.tables()
+
+
+@app.get("/api/mould-db/schema")
+def mould_db_schema():
+    return mould_db.schema()
+
+
+@app.get("/api/mould-db")
+def mould_db_get():
+    return mould_db.tables()
+
+
+@app.put("/api/mould-db")
+def mould_db_put(data: dict):
+    mould_db.write(data)
+    return mould_db.tables()
+
+
+@app.get("/api/mould-db/download")
+def mould_db_download():
+    return Response(
+        mould_db.to_excel(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="mould_db.xlsx"'},
+    )
+
+
+@app.post("/api/mould-db/upload")
+async def mould_db_upload(file: UploadFile = File(...)):
+    if not (file.filename or "").lower().endswith(".xlsx"):
+        raise HTTPException(400, "Please upload an Excel .xlsx file.")
+    mould_db.from_excel(await file.read())
+    return mould_db.tables()
+
+
+@app.post("/api/mould/estimate")
+def mould_estimate(inp: mould.MouldInput):
+    try:
+        return mould.estimate(inp)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.exception_handler(master_data.MasterDataError)
+@app.exception_handler(mould_db.MouldDbError)
+def master_data_error(request, exc):
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
 @app.get("/")
@@ -97,4 +196,15 @@ def index():
     return FileResponse(FRONTEND_DIR / "index.html")
 
 
+@app.get("/master-data")
+def master_data_page():
+    return FileResponse(FRONTEND_DIR / "master-data.html")
+
+
+@app.get("/help")
+def help_page():
+    return FileResponse(FRONTEND_DIR / "help.html")
+
+
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+app.mount("/theme", StaticFiles(directory=THEME_DIR), name="theme")

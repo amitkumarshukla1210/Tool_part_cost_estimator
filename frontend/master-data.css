@@ -1,0 +1,79 @@
+/* Master data page layout. Colours and fonts come from theme/dtc-theme.css. */
+
+.md-head { padding-bottom: 28px; }
+.md-head .section-head { margin-bottom: 22px; }
+.md { padding-top: 24px; }
+.md-intro { margin-bottom: 16px; max-width: 900px; font-size: 13.5px; color: var(--grey); }
+
+/* Data-set switch */
+.datasets { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; max-width: 1000px; margin: 0 auto; }
+.datasets button {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 14px 18px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.datasets button b { font-size: 15px; font-weight: 800; color: var(--ink); }
+.datasets button span { font-size: 12.5px; color: var(--grey); }
+.datasets button:hover { border-color: var(--grey); }
+.datasets button[aria-selected="true"] { border: 2px solid var(--brand); box-shadow: 0 0 0 3px var(--blue-soft); }
+
+/* Toolbar */
+.md-toolbar { display: flex; flex-wrap: wrap; gap: 14px; align-items: end; margin-bottom: 12px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.tabs .btn[aria-selected="true"] { background: var(--brand); border-color: var(--brand); color: var(--white); }
+label.inline { margin: 0; }
+label.inline select { min-width: 150px; }
+label.grow { flex: 1; min-width: 200px; }
+.md-toolbar label.check { padding-bottom: 8px; }
+
+/* Formula help */
+.help { margin-bottom: 12px; padding: 12px 16px; font-size: 13px; }
+.help summary { cursor: pointer; font-weight: 700; color: var(--ink); }
+.help p { margin: 8px 0; color: var(--grey); }
+.help code { background: var(--blue-soft); color: var(--brand-dark); padding: 1px 5px; border-radius: 4px; }
+.help dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; }
+.help dd { color: var(--grey); }
+
+/* Editor table */
+.md-table-wrap { max-height: calc(100vh - 320px); min-height: 260px; }
+.md-table td { padding: 3px 6px; }
+.md-table td.rownum { text-align: right; width: 1%; padding: 6px 8px; box-shadow: inset 4px 0 0 transparent; }
+.md-table tr.example td.rownum { box-shadow: inset 4px 0 0 var(--accent); }
+.md-table tr.changed td.rownum { box-shadow: inset 4px 0 0 var(--brand); font-weight: 700; }
+.md-table tr.bad td.rownum { box-shadow: inset 4px 0 0 var(--danger); color: var(--danger); font-weight: 800; }
+.md-table tr.bad td.input { outline: 2px solid var(--danger); outline-offset: -2px; }
+.md-table input, .md-table select { width: 100%; min-width: 90px; }
+.md-table input[type="number"] { min-width: 100px; text-align: right; }
+.md-table input.name { min-width: 230px; }
+.md-table input.wide { min-width: 280px; }
+.md-table input.formula { font-family: Consolas, "Courier New", monospace; min-width: 260px; }
+.md-table label.flag { display: flex; gap: 6px; align-items: center; margin: 0; text-transform: none; font-size: 11.5px; color: var(--accent); }
+.md-table label.flag input { width: auto; min-width: 0; }
+.md-table button.del { background: none; border: none; cursor: pointer; color: var(--grey); padding: 4px 8px; font-size: 13px; }
+.md-table button.del:hover { color: var(--danger); }
+.md-table td.empty { padding: 24px; text-align: center; color: var(--grey); }
+
+/* Legend */
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 8px; font-size: 12px; color: var(--grey); }
+.legend .key { display: inline-block; width: 14px; height: 14px; margin-right: -8px; vertical-align: middle; border-radius: 2px; }
+.legend .key.input { background: var(--input-cell-bg); border: 1px solid var(--input-cell-border); }
+.legend .key.calc { background: var(--calc-cell-bg); border: 1px solid var(--grey-border); }
+.legend .key.mark-example { background: var(--accent); width: 4px; }
+.legend .key.mark-changed { background: var(--brand); width: 4px; }
+.legend .key.mark-bad { background: var(--danger); width: 4px; }
+
+/* Actions */
+.md-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
+.md-actions .spacer { flex: 1; }
+.md-actions label.btn { margin: 0; text-transform: none; font-size: 12px; color: var(--ink); }
+.md-actions .btn { cursor: pointer; }
+.counts { font-size: 12.5px; color: var(--grey); }
+.md .status { margin-top: 10px; }
+
+@media (max-width: 700px) {
+  .datasets { grid-template-columns: 1fr; }
+}

@@ -1,101 +1,32 @@
-:root {
-  --bg: #f4f6f8;
-  --panel: #ffffff;
-  --text: #1d2733;
-  --muted: #5d6b7a;
-  --accent: #1f6feb;
-  --border: #d6dde4;
-  --highlight: #e8f0fe;
-  --error: #c62828;
-}
+/* Layout specific to the Part Cost Estimator module.
+   Colours, fonts, header, buttons, cards, fields and costing tables come from
+   theme/dtc-theme.css (see theme/THEME.md). Only theme variables are used here. */
 
-* { box-sizing: border-box; }
-
-body {
-  margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-}
-
-header {
-  display: flex;
-  align-items: baseline;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 14px 20px;
-  background: #102a43;
-  color: #fff;
-}
-header h1 { margin: 0; font-size: 1.3rem; }
-.stage { color: #9fb3c8; font-size: 0.9rem; }
-
-main {
-  display: grid;
-  grid-template-columns: minmax(300px, 420px) 1fr;
-  gap: 16px;
-  padding: 16px;
-  min-height: calc(100vh - 56px);
-}
-
-.panel, .viewer {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.panel { padding: 16px; overflow-y: auto; }
-
-form { display: grid; gap: 12px; }
-label { display: grid; gap: 4px; font-size: 0.9rem; color: var(--muted); }
-input, select {
-  font: inherit;
-  color: var(--text);
-  padding: 7px 9px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: #fff;
-}
-button {
-  font: inherit;
-  font-weight: 600;
-  padding: 10px;
-  border: 0;
-  border-radius: 6px;
-  background: var(--accent);
-  color: #fff;
-  cursor: pointer;
-}
-button:disabled { opacity: 0.6; cursor: wait; }
-#status { margin: 0; min-height: 1.2em; font-size: 0.9rem; color: var(--muted); }
-#status.error { color: var(--error); }
-
-h2 { margin: 20px 0 8px; font-size: 1.1rem; }
-h3 { margin: 16px 0 6px; font-size: 0.95rem; }
-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
-th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border); }
-th { font-weight: 500; color: var(--muted); }
-td { font-variant-numeric: tabular-nums; font-weight: 600; }
-table.small td { font-weight: 400; }
-tr.pull td { background: var(--highlight); font-weight: 600; }
-.note { font-size: 0.8rem; color: var(--muted); }
-
-.grid2 { grid-template-columns: 1fr 1fr; gap: 10px; }
-.grid2 .span2 { grid-column: span 2; }
-.grid2 label { font-size: 0.82rem; min-width: 0; }
-.grid2 input { width: 100%; min-width: 0; }
-#stageB { margin-top: 8px; padding-top: 4px; border-top: 2px solid var(--border); }
-#statusB { margin: 8px 0 0; min-height: 1.2em; font-size: 0.85rem; color: var(--error); }
-tr.total th, tr.total td { border-top: 2px solid var(--text); font-weight: 700; color: var(--text); }
 [hidden] { display: none !important; }
 
-.viewer {
-  position: sticky;
-  top: 16px;
-  align-self: start;
-  height: calc(100vh - 88px);
-  min-height: 420px;
-  overflow: hidden;
+/* ===== Header (shared by all pages) ===== */
+.brand { flex-shrink: 0; }
+.header-inner { gap: 16px; flex-wrap: wrap; }
+
+/* ===== Section spacing ===== */
+.section-head p a.link, a.link { color: var(--brand); font-weight: 600; }
+.section-head p a.link:hover, a.link:hover { color: var(--brand-dark); }
+.block-title { margin: 28px 0 10px; font-size: 15px; font-weight: 800; color: var(--ink); }
+.card h3 + form { margin-top: 0; }
+
+/* ===== Upload + viewer ===== */
+.top-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 400px) 1fr;
+  gap: 20px;
+  align-items: stretch;
 }
+#form { display: grid; gap: 12px; }
+#form label { margin: 0; }
+#submit { width: 100%; padding: 11px 16px; font-size: 13px; }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; box-shadow: none; }
+
+.viewer-card { position: relative; min-height: 460px; padding: 0; overflow: hidden; background: var(--grey-light); }
 #viewer { position: absolute; inset: 0; }
 .placeholder {
   position: absolute;
@@ -103,11 +34,75 @@ tr.total th, tr.total td { border-top: 2px solid var(--text); font-weight: 700; 
   display: grid;
   place-content: center;
   text-align: center;
-  color: var(--muted);
-  margin: 0;
+  color: var(--grey);
+  font-size: 13.5px;
 }
 
-@media (max-width: 800px) {
-  main { grid-template-columns: 1fr; padding: 12px; }
-  .viewer { position: relative; top: 0; height: 60vh; min-height: 360px; }
+/* ===== Stage blocks: inputs card next to the results table ===== */
+.stage-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 480px) 1fr;
+  gap: 20px;
+  align-items: start;
+}
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.grid2 .span2 { grid-column: span 2; }
+.grid2 label { display: grid; align-content: space-between; margin: 0; min-width: 0; }
+.grid2 input { min-width: 0; }
+label.check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  align-content: normal;
+  text-transform: none;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+input[type="checkbox"] { width: auto; }
+
+/* ===== Messages ===== */
+.status { min-height: 1.4em; font-size: 13px; color: var(--grey); }
+.status.error, .error { color: var(--danger); }
+.status.ok { color: var(--brand-dark); }
+.stage-grid .status:empty { display: none; }
+.stage-grid .status { margin-bottom: 10px; }
+.note { margin-top: 10px; font-size: 12.5px; color: var(--grey); }
+.warn {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--input-cell-bg);
+  border: 1px solid var(--input-cell-border);
+  border-radius: 6px;
+}
+.tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  font-size: 10.5px;
+  letter-spacing: 1px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  vertical-align: 1px;
+}
+
+/* ===== Costing tables ===== */
+.cost-table .num { text-align: right; white-space: nowrap; }
+.table-wrap + .note { margin-top: 10px; }
+.example-mark { color: var(--accent); font-weight: 800; margin-left: 4px; }
+
+/* ===== Footer ===== */
+footer { margin-top: 0; }
+
+@media (max-width: 900px) {
+  .top-grid, .stage-grid { grid-template-columns: 1fr; }
+  .viewer-card { min-height: 360px; }
+  .header-inner { padding: 10px 12px; }
+}
+@media (max-width: 480px) {
+  .grid2 { grid-template-columns: 1fr; }
+  .grid2 .span2 { grid-column: auto; }
+  .brand-text .tagline { font-size: 10.5px; }
 }

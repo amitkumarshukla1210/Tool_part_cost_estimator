@@ -1,72 +1,60 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-// Typical densities in g/cm³ — a starting point, always check the material datasheet.
-const MATERIALS = {
-  plastic: [
-    ["PP (polypropylene)", 0.905],
-    ["ABS", 1.04],
-    ["PC (polycarbonate)", 1.2],
-    ["PC/ABS", 1.13],
-    ["PA6", 1.13],
-    ["PA66 GF30", 1.36],
-    ["PBT GF30", 1.53],
-    ["POM (acetal)", 1.41],
-  ],
-  die_casting: [
-    ["Aluminium ADC12 / A383", 2.74],
-    ["Aluminium A380", 2.71],
-    ["Zinc Zamak 3", 6.6],
-    ["Magnesium AZ91D", 1.81],
-  ],
-  foundry: [
-    ["Grey cast iron FG260", 7.2],
-    ["SG / ductile iron", 7.1],
-    ["Cast steel", 7.85],
-    ["Aluminium LM6 / A356", 2.68],
-    ["Bronze", 8.8],
-  ],
-  sheet_metal: [
-    ["Mild steel CRCA / HR", 7.85],
-    ["Galvanised steel GI", 7.85],
-    ["Stainless steel 304", 7.93],
-    ["Aluminium 5052", 2.68],
-    ["Copper", 8.96],
-  ],
-};
-
 const $ = (id) => document.getElementById(id);
 const fmt = (n, d = 2) => Number(n).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 
+// Material presets (density, RM rate, scrap value) come from the master data file.
+let materials = [];
+
+async function loadMaterials() {
+  try {
+    const res = await fetch("/api/master-data");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail);
+    materials = data.Materials;
+  } catch (err) {
+    setStatus(`Master data could not be loaded: ${err.message}`, true);
+  }
+  fillMaterials();
+}
+
 function fillMaterials() {
-  const list = MATERIALS[$("partType").value];
+  const list = materials.filter((m) => m.part_type === $("partType").value);
   $("material").innerHTML =
     '<option value="">— enter density manually —</option>' +
-    list.map(([name, rho]) => `<option value="${rho}">${name} (${rho})</option>`).join("");
-  $("material").value = String(list[0][1]);
-  $("density").value = list[0][1];
+    list.map((m) => `<option value="${materials.indexOf(m)}">${m.material} (${m.density_g_cm3})</option>`).join("");
+  if (list.length) {
+    $("material").value = String(materials.indexOf(list[0]));
+    $("density").value = list[0].density_g_cm3;
+  }
 }
+const chosenMaterial = () => ($("material").value === "" ? null : materials[Number($("material").value)]);
+
 $("partType").addEventListener("change", fillMaterials);
 $("material").addEventListener("change", () => {
-  if ($("material").value) $("density").value = $("material").value;
+  if (chosenMaterial()) $("density").value = chosenMaterial().density_g_cm3;
 });
 $("density").addEventListener("input", () => ($("material").value = ""));
-fillMaterials();
+loadMaterials();
 
 // ---------- 3D viewer ----------
 const container = $("viewer");
 let renderer, scene, camera, controls, partGroup;
 
+// Viewer colours come from the Design to Cost theme variables.
+const themeColor = (name) => new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue(name).trim());
+
 function initViewer() {
   container.innerHTML = "";
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
-  renderer.setClearColor(0xf7f9fb);
+  renderer.setClearColor(themeColor("--grey-light"));
   container.appendChild(renderer.domElement);
 
   scene = new THREE.Scene();
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.6));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+  scene.add(new THREE.HemisphereLight(themeColor("--white"), themeColor("--grey"), 1.6));
+  const sun = new THREE.DirectionalLight(themeColor("--white"), 1.6);
   sun.position.set(1, 2, 3);
   scene.add(sun);
 
@@ -103,8 +91,8 @@ function showMesh(mesh) {
 
   partGroup = new THREE.Group();
   partGroup.add(
-    new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: 0x8fa9c4, metalness: 0.2, roughness: 0.55, side: THREE.DoubleSide })),
-    new THREE.LineSegments(new THREE.EdgesGeometry(geom, 25), new THREE.LineBasicMaterial({ color: 0x2b3a4a })),
+    new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: themeColor("--table-row-hover"), metalness: 0.15, roughness: 0.6, side: THREE.DoubleSide })),
+    new THREE.LineSegments(new THREE.EdgesGeometry(geom, 25), new THREE.LineBasicMaterial({ color: themeColor("--ink") })),
   );
 
   geom.computeBoundingBox();
@@ -113,7 +101,7 @@ function showMesh(mesh) {
   const center = box.getCenter(new THREE.Vector3());
   const diag = size.length() || 1;
 
-  const helper = new THREE.Box3Helper(box, 0xff8c00);
+  const helper = new THREE.Box3Helper(box, themeColor("--accent"));
   helper.material.transparent = true;
   helper.material.opacity = 0.5;
   partGroup.add(helper, new THREE.AxesHelper(diag * 0.25));
@@ -149,9 +137,11 @@ $("form").addEventListener("submit", async (e) => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || res.statusText);
     showResults(data.metrics);
-    startStageB(data);
+    resetMould();
+    startStageB(data, chosenMaterial());
     showMesh(data.mesh);
     setStatus(`${data.file_name} · ${data.part_type_label}`);
+    $("fileInfo").textContent = `${data.file_name} · ${data.part_type_label} · density ${data.metrics.density_g_cm3} g/cm³`;
   } catch (err) {
     setStatus(err.message, true);
   } finally {
@@ -175,10 +165,10 @@ function showResults(m) {
   $("r-solids").textContent = m.solid_count;
   $("r-axes").innerHTML = ["x", "y", "z"]
     .map(
-      (a) => `<tr class="${a === m.pull_direction ? "pull" : ""}">
-        <td>${a.toUpperCase()}</td>
-        <td>${fmt(m.bbox_axes_mm[a], 1)}</td>
-        <td>${fmt(m.projected_area_mm2[a] / 100, 2)}</td></tr>`,
+      (a) => `<tr class="${a === m.pull_direction ? "total" : ""}">
+        <td>${a.toUpperCase()}${a === m.pull_direction ? " · opening direction" : ""}</td>
+        <td class="calc num">${fmt(m.bbox_axes_mm[a], 1)}</td>
+        <td class="calc num">${fmt(m.projected_area_mm2[a] / 100, 2)}</td></tr>`,
     )
     .join("");
   $("results").hidden = false;
@@ -203,24 +193,29 @@ const LABELS = {
 
 const formB = $("formB");
 let analysis = null; // last Stage A response
-let defaultsB = null;
 let timerB = null;
 
-async function startStageB(data) {
+async function startStageB(data, material) {
   analysis = data;
   const type = data.metrics.part_type;
-  defaultsB ??= await (await fetch("/api/gross-weight/defaults")).json();
+  // Re-read every time so changes saved on the Master data page apply at once.
+  const defaultsB = await (await fetch("/api/gross-weight/defaults")).json();
 
   // Only show the inputs and result rows that belong to this part type.
-  document.querySelectorAll("#stageB [class*='t-']").forEach((el) => {
-    el.hidden = !el.classList.contains(`t-${type}`);
+  document.querySelectorAll("#stageB [data-types]").forEach((el) => {
+    el.hidden = !el.dataset.types.split(" ").includes(type);
   });
   document.querySelectorAll("#stageB [data-label]").forEach((el) => {
     el.textContent = LABELS[el.dataset.label][type] ?? "";
   });
 
-  // Fresh defaults for each analysed part; rates and currency are kept.
+  // Fresh defaults for each analysed part. Rates come from the chosen
+  // material; with density typed by hand, the last rates entered are kept.
   for (const [key, value] of Object.entries(defaultsB[type])) formB.elements[key].value = value;
+  if (material) {
+    formB.elements.material_rate_per_kg.value = material.rate_per_kg;
+    formB.elements.scrap_rate_per_kg.value = material.scrap_rate_per_kg;
+  }
   if (data.sheet_metal) {
     formB.elements.thickness_mm.value = data.sheet_metal.thickness_mm;
     formB.elements.blank_length_mm.value = data.sheet_metal.blank_mm.length;
@@ -231,11 +226,16 @@ async function startStageB(data) {
 
   $("stageB").hidden = false;
   calculateB();
+  startStageC(data);
 }
 
 formB.addEventListener("input", () => {
   clearTimeout(timerB);
-  timerB = setTimeout(calculateB, 300);
+  timerB = setTimeout(() => {
+    calculateB();
+    // Sheet-metal cavity layout uses the blank size from Stage B.
+    if (analysis.metrics.part_type === "sheet_metal") calculateC();
+  }, 300);
 });
 
 async function calculateB() {
@@ -288,4 +288,226 @@ function showResultsB(r) {
   $("b-rm").textContent = priced ? money(r.rm_cost) : "enter material rate";
   $("b-credit").textContent = priced || r.scrap_credit ? `− ${money(r.scrap_credit)}` : "";
   $("b-net-rm").textContent = priced ? money(r.net_rm_cost) : "—";
+}
+
+// ---------- Stage C: cavities & number of tools ----------
+const LABELS_C = {
+  plastic: { cycle: "Cycle time per shot (s)", max: "Max cavities per mould", plate: "Mould plate", life: "Mould life (shots)" },
+  die_casting: { cycle: "Cycle time per shot (s)", max: "Max cavities per die", plate: "Die plate", life: "Die life (shots)" },
+  foundry: { cycle: "Moulding line cycle per mould (s)", max: "Max castings per mould", plate: "Moulding box (flask)", life: "Pattern life (moulds)" },
+  sheet_metal: { cycle: "Time per stroke (s)", max: "Max parts per stroke", plate: "Die area / press bed", life: "Die life (strokes)" },
+};
+
+const formC = $("formC");
+// Kept between parts once entered; everything else resets per part type.
+const KEEP_C = ["annual_volume", "programme_years", "working_days", "shifts_per_day", "hours_per_shift"];
+let timerC = null;
+
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+const int = (n) => Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+async function startStageC(data) {
+  const type = data.metrics.part_type;
+  const defaultsC = await (await fetch("/api/capacity/defaults")).json();
+  const terms = defaultsC.terms[type];
+
+  document.querySelectorAll("#stageC [data-types]").forEach((el) => {
+    el.hidden = !el.dataset.types.split(" ").includes(type);
+  });
+  const text = {
+    ...LABELS_C[type],
+    "cavity-cap": cap(terms.cavity),
+    "tool-cap": cap(terms.tool),
+    "shot-cap": cap(terms.shot),
+    "plate-lc": LABELS_C[type].plate.toLowerCase(),
+  };
+  document.querySelectorAll("#stageC [data-c]").forEach((el) => (el.textContent = text[el.dataset.c]));
+
+  for (const [key, value] of Object.entries(defaultsC.by_part_type[type])) {
+    if (!KEEP_C.includes(key) || formC.elements[key].value === "") formC.elements[key].value = value;
+  }
+
+  const p = data.process;
+  if (p.cycle_time_s_estimate) {
+    formC.elements.cycle_time_s.value = p.cycle_time_s_estimate;
+    $("cycleNote").textContent =
+      `Cycle time estimated from the ${fmt(p.wall_thickness_mm, 2)} mm main wall (cooling ≈ 2 × wall² s + 8 s). ` +
+      "Replace it with your process or mould-flow figure.";
+  } else {
+    $("cycleNote").textContent = "Cycle time and tool life are typical values. Replace them with your own figures.";
+  }
+
+  $("stageC").hidden = false;
+  calculateC();
+}
+
+formC.addEventListener("input", () => {
+  clearTimeout(timerC);
+  timerC = setTimeout(calculateC, 300);
+});
+
+function footprint() {
+  const m = analysis.metrics;
+  if (m.part_type === "sheet_metal") {
+    const l = Number(formB.elements.blank_length_mm.value);
+    const w = Number(formB.elements.blank_width_mm.value);
+    $("footprintNote").textContent = `Layout uses the Stage B flat blank: ${fmt(l, 1)} × ${fmt(w, 1)} mm.`;
+    return [l, w];
+  }
+  const f = analysis.process.footprint_mm;
+  $("footprintNote").textContent =
+    `Layout uses the part size across the parting plane: ${fmt(f.length, 1)} × ${fmt(f.width, 1)} mm ` +
+    `(viewed along ${m.pull_direction.toUpperCase()}).`;
+  return [f.length, f.width];
+}
+
+async function calculateC() {
+  const [l, w] = footprint();
+  const body = { part_type: analysis.metrics.part_type, footprint_length_mm: l, footprint_width_mm: w };
+  for (const input of formC.querySelectorAll("label:not([hidden]) input")) {
+    if (input.value !== "") body[input.name] = Number(input.value);
+  }
+
+  try {
+    const res = await fetch("/api/capacity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(errorText(data.detail));
+    $("statusC").textContent = "";
+    $("resultsC").hidden = false;
+    showResultsC(data);
+  } catch (err) {
+    $("statusC").textContent = err.message;
+    $("resultsC").hidden = true;
+  }
+}
+
+function showResultsC(r) {
+  startMould(r);
+  const t = r.terms;
+  const lay = r.layout;
+  $("c-planned").textContent = `${int(r.planned_hours_per_year)} h`;
+  $("c-hours").textContent = `${int(r.available_hours_per_year)} h`;
+  $("c-pph").textContent = `${fmt(r.required_parts_per_hour, 1)} parts / h`;
+  $("c-needed").textContent = fmt(r.cavities_needed, 2);
+  $("c-fit").textContent = `${r.cavities_fit_on_plate}  (${lay.along} × ${lay.across}${lay.rotated ? ", turned 90°" : ""})`;
+  $("c-cav").textContent = r.cavities_per_tool + (r.limited_by ? `  (limited by ${r.limited_by})` : "");
+  $("c-out").textContent = `${fmt(r.output_per_tool_per_hour, 1)} parts / h`;
+  $("c-tools").textContent = r.tools_for_capacity;
+  $("c-shots").textContent = int(r.shots_per_year);
+  $("c-prog").textContent = `${int(r.programme_shots)}  (life ${int(r.inputs.tool_life_shots)} per ${t.tool.replace(/s$/, "")})`;
+  $("c-sets").textContent = r.tool_sets_over_programme;
+  $("c-dies").textContent = `${r.total_dies}  (${r.dies_per_set} per set)`;
+  $("c-mh").textContent = `${int(r.machine_hours_per_year)} h`;
+  $("c-util").textContent = `${fmt(r.machine_utilisation_pct, 1)} %` + (r.tools_for_capacity > 1 ? ` across ${r.tools_for_capacity} machines` : "");
+}
+
+// ---------- Mould / die size & BOM (from the mould database) ----------
+const formM = $("formM");
+let timerM = null;
+let lastCavities = null;
+
+// A new part starts from its own Stage C cavities and no side actions.
+function resetMould() {
+  formM.reset();
+  formM.elements.cavities.value = "";
+  lastCavities = null;
+  $("resultsM").hidden = true;
+  $("bomBlock").hidden = true;
+}
+
+function startMould(stageC) {
+  const type = analysis.metrics.part_type;
+  if (!["plastic", "die_casting"].includes(type)) {
+    $("stageM").hidden = true;
+    return;
+  }
+  // Follow Stage C until the user types their own cavity count.
+  if (formM.elements.cavities.value === "" || Number(formM.elements.cavities.value) === lastCavities) {
+    formM.elements.cavities.value = stageC.cavities_per_tool;
+  }
+  lastCavities = stageC.cavities_per_tool;
+  formM.elements.hot_runner.closest("label").hidden = type !== "plastic";
+  formM.elements.lifters_per_cavity.closest("label").hidden = type !== "plastic";
+  $("stageM").hidden = false;
+  clearTimeout(timerM);
+  timerM = setTimeout(calculateMould, 200);
+}
+
+formM.addEventListener("input", () => {
+  clearTimeout(timerM);
+  timerM = setTimeout(calculateMould, 300);
+});
+
+async function calculateMould() {
+  const m = analysis.metrics;
+  const f = analysis.process.footprint_mm;
+  const body = {
+    part_type: m.part_type,
+    cavities: Number(formM.elements.cavities.value),
+    part_length_mm: f.length,
+    part_width_mm: f.width,
+    part_height_mm: m.bbox_axes_mm[m.pull_direction],
+    projected_area_cm2: m.projected_area_cm2,
+    part_weight_g: m.net_weight_g,
+    hot_runner: formM.elements.hot_runner.checked && m.part_type === "plastic",
+  };
+  for (const k of ["slides_per_cavity", "lifters_per_cavity", "inserts_per_cavity"]) {
+    body[k] = formM.elements[k].closest("label").hidden ? 0 : Number(formM.elements[k].value || 0);
+  }
+  try {
+    const res = await fetch("/api/mould/estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(errorText(data.detail));
+    $("statusM").textContent = "";
+    $("resultsM").hidden = false;
+    $("bomBlock").hidden = false;
+    showMould(data);
+  } catch (err) {
+    $("statusM").textContent = err.message;
+    $("resultsM").hidden = true;
+    $("bomBlock").hidden = true;
+  }
+}
+
+function showMould(r) {
+  const cur = formB.elements.currency.value || "";
+  const money = (v) => `${cur} ${int(v)}`;
+  const L = r.layout;
+  const b = r.base;
+  const examples = r.example_lines + (r.sizing_rules_are_examples ? 1 : 0);
+  $("m-examples").hidden = !examples;
+  $("m-examples").textContent =
+    `${r.example_lines} of ${r.lines.length} BOM lines` + (r.sizing_rules_are_examples ? " and the sizing rules" : "") +
+    " still use EXAMPLE placeholder values (marked •). Replace them in Master data → Mould & die database.";
+  $("m-layout").textContent = `${L.rows} × ${L.cols}` + (L.empty ? ` (${L.empty} empty position)` : "");
+  $("m-insert").textContent = `${fmt(L.each_l, 0)} × ${fmt(L.each_w, 0)} × ${fmt(L.half_h, 0)} mm`;
+  $("m-pocket").textContent = `${fmt(L.pocket_l, 0)} × ${fmt(L.pocket_w, 0)} mm`;
+  $("m-base").textContent =
+    `${b.series} ${b.size_code} · ${b.width_mm} × ${b.length_mm} mm` + (r.base_turned ? " (layout turned 90°)" : "");
+  $("m-plates").textContent = `${b.a_plate_mm} / ${b.b_plate_mm} mm · ${b.stack_height_mm} mm`;
+  $("m-weight").textContent = `${fmt(b.weight_kg, 0)} kg`;
+  const CATEGORY = { made: "Made", bought_out: "Bought-out", process: "Process" };
+  const blank = (v, f) => (v ? f(v) : "");
+  $("m-bom").innerHTML = r.lines
+    .map((l) => `<tr><td>${l.element}${l.is_example ? '<span class="example-mark" title="Example value">•</span>' : ""}</td>` +
+      `<td>${CATEGORY[l.category] ?? l.category}</td>` +
+      `<td class="calc num">${fmt(l.quantity, l.quantity % 1 ? 2 : 0)}</td><td>${l.material || ""}</td>` +
+      `<td class="calc num">${blank(l.material_cost, money)}</td><td class="calc num">${blank(l.bought_out_cost, money)}</td>` +
+      `<td class="calc num">${blank(l.hours, (h) => fmt(h, 1))}</td><td class="calc num">${blank(l.process_cost, money)}</td>` +
+      `<td class="calc num">${money(l.total)}</td></tr>`)
+    .join("");
+  const t = r.totals;
+  $("m-total").innerHTML =
+    `<tr class="total"><td>Total mould cost</td><td></td><td></td><td></td><td class="num">${money(t.material_cost)}</td>` +
+    `<td class="num">${money(t.bought_out_cost)}</td><td class="num">${fmt(t.hours, 0)}</td>` +
+    `<td class="num">${money(t.process_cost)}</td><td class="num">${money(t.total)}</td></tr>`;
+  $("m-warnings").textContent = r.warnings.join(" ");
 }
