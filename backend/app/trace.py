@@ -11,6 +11,9 @@ from __future__ import annotations
 
 from . import formula
 
+# Shown on screen and in every Excel / PDF export of a cost that uses a rate still marked EXAMPLE.
+EXAMPLE_WARNING = "Uses example rates – not for negotiation"
+
 
 class Trace:
     def __init__(self, currency: str = ""):

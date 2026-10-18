@@ -345,6 +345,11 @@ Thailand, Vietnam, Germany, USA) for the costing month. Choose what to see, in t
 - **First set-up.** The India values that were in Master data became the first approved version (source "Moved from
   Master data in Stage 3"). The other 8 countries are approved **EXAMPLE** values from the indices (all marked •).
   Replace them with supplier quotes or market rates (**New version** in the Rate library, or Excel import as drafts).
+- **Example-rate warning.** Any cost that uses a rate still marked EXAMPLE shows a red banner
+  **"Uses example rates – not for negotiation"**: on the Parts list and part panel, the Dashboard, the Estimate page
+  (RM cost and mould preview) and the Rates page (machine & labour rates). The same banner is the first row of every sheet
+  of the Excel exports (RM cost sheet, part register) and a red box on the PDFs (RM cost sheet, project summary). It goes
+  away when every rate used has been replaced by a real approved rate.
 - Because part-material rates now exist for every country, **a part set to another producing country gets its RM cost
   straight away** (stage 2), in that country's currency and in INR.
 - The mould preview and its BOM still read the India steel and process prices of the Master data tables. They move to

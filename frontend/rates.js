@@ -85,9 +85,8 @@ async function loadMhr() {
 
   const exIds = new Set();
   all.forEach((r) => (r.rates_used || []).forEach((x) => x.is_example && exIds.add(x.id)));
-  $("mhrExamples").hidden = !exIds.size;
-  $("mhrExamples").textContent = `${exIds.size} of the rate versions used for ${mhrData.country.name} are still EXAMPLE values. ` +
-    "Replace them in the Rate library before using these rates for negotiations.";
+  $("mhrExamples").innerHTML = exIds.size
+    ? window.exampleBanner(`${exIds.size} of the rate versions used for ${esc(mhrData.country.name)} are still EXAMPLE values. Replace them in the Rate library.`) : "";
 
   $("mhrTable").innerHTML = `<thead><tr><th>Machine</th><th>Process</th>
     ${MHR_COLS.map(([, l]) => `<th class="num">${l} (${cur}/h)</th>`).join("")}
@@ -116,8 +115,8 @@ document.addEventListener("click", (e) => {
 
 // ---------- Material & process rates by country ----------
 let gridData = null;
-async function loadGrid() {
-  $("gridStatus").textContent = "";
+async function loadGrid(keepStatus = false) {
+  if (!keepStatus) $("gridStatus").textContent = "";
   try {
     gridData = await api(`/api/rates/grid?as_of=${month()}`);
   } catch (err) {
@@ -170,7 +169,7 @@ $("proposeRates").addEventListener("click", async () => {
       : `Nothing to propose: every country already has a rate for each item.${skipped}`;
     $("gridStatus").className = "status ok";
     updateReviewCount();
-    loadGrid();
+    loadGrid(true);
   } catch (err) {
     $("gridStatus").textContent = err.message;
     $("gridStatus").className = "status error";

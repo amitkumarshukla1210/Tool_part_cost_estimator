@@ -24,12 +24,13 @@ from datetime import datetime
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font
+from openpyxl.styles import Font, PatternFill
 from sqlalchemy import and_, func, or_, select
 
 from . import cad_import, costing_setup, file_store, formula, master_data, rates, register_setup, rm_cost
 from . import projects_db as db
 from .table_set import EXAMPLE_FILL, HEADER_FILL
+from .trace import EXAMPLE_WARNING
 
 
 class RegisterError(ValueError):
@@ -499,7 +500,18 @@ def search(q="", project_id=None, process="", status="", sourcing="", rev="", fi
         total = conn.execute(select(func.count()).select_from(query.subquery())).scalar()
         rows = conn.execute(query.order_by(sort_cols.get(sort, db.parts.c.part_code))
                             .limit(min(int(limit), 500)).offset(int(offset))).mappings().all()
-    return {"total": total, "rows": [_plain(x) for x in rows]}
+        example = _rm_example_parts(conn, [x["id"] for x in rows])
+    return {"total": total, "rows": [_plain(x) | {"rm_is_example": x["id"] in example} for x in rows],
+            "example_warning": EXAMPLE_WARNING}
+
+
+def _rm_example_parts(conn, part_ids) -> set:
+    """Parts whose stored (latest) RM cost used a rate that is still an EXAMPLE."""
+    if not part_ids:
+        return set()
+    q = (select(db.parts.c.id, db.rm_costs.c.rates_used).join(db.rm_costs, db.rm_costs.c.id == db.parts.c.rm_cost_id)
+         .where(db.parts.c.id.in_(list(part_ids))))
+    return {r["id"] for r in conn.execute(q).mappings() if any(x.get("is_example") for x in r["rates_used"] or [])}
 
 
 def part_detail(part_id: int, with_rm: bool = True) -> dict:
@@ -1039,6 +1051,7 @@ def export_rm_excel(part_id: int, version: int | None = None) -> bytes:
     d = part_detail(part_id, with_rm=False)
     tr = rm_trace(part_id, version)
     nodes = tr["nodes"]
+    example = any(x.get("is_example") for x in tr["rates_used"])
     wb = Workbook()
     wb.properties.title = f"Design to Cost — RM cost {d['part_code']}"
     wb.properties.creator = "Design to Cost"
@@ -1046,8 +1059,11 @@ def export_rm_excel(part_id: int, version: int | None = None) -> bytes:
     def sheet(title, head, rows, first=False):
         ws = wb.active if first else wb.create_sheet()
         ws.title = title
+        if example:
+            _excel_banner(ws, len(head))
         ws.append(head)
-        for c in ws[1]:
+        top = ws.max_row
+        for c in ws[top]:
             c.font = Font(bold=True, color="FFFFFF")
             c.fill = HEADER_FILL
         for r in rows:
@@ -1057,16 +1073,15 @@ def export_rm_excel(part_id: int, version: int | None = None) -> bytes:
                     c.fill = EXAMPLE_FILL
         for i, h in enumerate(head, start=1):
             ws.column_dimensions[chr(64 + i)].width = min(max([len(str(h))] + [len(str(r[i - 1])) for r in rows]) + 2, 70)
-        ws.freeze_panes = "A2"
+        ws.freeze_panes = f"A{top + 1}"
 
-    example = any(x.get("is_example") for x in tr["rates_used"])
     sheet("Summary", ["Item", "Value"], [
         ["Part code", d["part_code"]], ["Part name", d["name"]], ["Revision", tr.get("revision", {}).get("rev", "")],
         ["Material", tr["material"]], ["Process", tr.get("process", d["process"])], ["Producing country", tr["country"]],
         ["Costing month", tr["as_of"]], ["RM cost version", tr["version"] if tr["version"] else "not stored (live preview)"],
         [f"Net RM cost per part ({tr['currency']})", tr["value"]], ["Net RM cost per part (INR)", tr["value_inr"]],
         ["Rate versions used", ", ".join(f"#{x['id']}" for x in tr["rates_used"])],
-        ["Includes EXAMPLE values", "yes - replace them on the Rates page" if example else "no"],
+        ["Includes EXAMPLE values", f"yes - {EXAMPLE_WARNING}. Replace them on the Rates page" if example else "no"],
         ["Calculated by / when", f"{tr.get('created_by', '')} {tr.get('created_at', '')}".strip()]], first=True)
     sheet("Steps", ["Step", "Formula", "Value", "Unit"],
           [[n["label"], n["formula"], n["value"], n["unit"]] for n in nodes.values() if n["kind"] == "calculated"])
@@ -1532,11 +1547,12 @@ def _rm_rollup(bom: list[dict]) -> dict:
     lines = [b for b in bom if b["kind"] == "bom" and not b["is_assembly"]]
     ids = {b["child_part_id"] for b in lines}
     if not ids:
-        return {"rm_cost_inr": None, "rm_parts_costed": 0, "rm_parts_missing": 0}
+        return {"rm_cost_inr": None, "rm_parts_costed": 0, "rm_parts_missing": 0, "rm_is_example": False}
     costed = register_setup.sourcing()
     with db.engine().connect() as conn:
         rm = {r["id"]: r["rm_cost_inr"] for r in conn.execute(
             select(db.parts.c.id, db.parts.c.rm_cost_inr).where(db.parts.c.id.in_(ids))).mappings()}
+        example = _rm_example_parts(conn, ids)
     total, have, missing = 0.0, 0, 0
     for b in lines:
         if rm.get(b["child_part_id"]) is not None:
@@ -1544,7 +1560,8 @@ def _rm_rollup(bom: list[dict]) -> dict:
             have += 1
         elif costed.get(b["sourcing"], {}).get("is_costed"):
             missing += 1
-    return {"rm_cost_inr": total if have else None, "rm_parts_costed": have, "rm_parts_missing": missing}
+    return {"rm_cost_inr": total if have else None, "rm_parts_costed": have, "rm_parts_missing": missing,
+            "rm_is_example": any(b["child_part_id"] in example and rm.get(b["child_part_id"]) is not None for b in lines)}
 
 
 def dashboard(project_id: int) -> dict:
@@ -1582,6 +1599,8 @@ def dashboard(project_id: int) -> dict:
         "capex": {"budget_inr": project["capex_budget_inr"], "tool_cost_inr": None, "machine_cost_inr": None},
         "open_corrections": corrections,
         "parts_rm_costed": rm_costed,
+        "rm_is_example": any(v.get("rm_is_example") for v in variants),
+        "example_warning": EXAMPLE_WARNING,
         "not_costed_note": "RM cost is the raw-material cost only (quantity × net RM cost per part, from the latest stored "
                            "version). Process cost, tools and the full BOM cost come from the part-costing and "
                            "tool-costing stages (roadmap stages 4 and 8).",
@@ -1589,6 +1608,15 @@ def dashboard(project_id: int) -> dict:
 
 
 # ---------- exports ----------
+
+def _excel_banner(ws, width: int) -> None:
+    """Red warning row at the top of a sheet whose costs use EXAMPLE rates."""
+    ws.append([EXAMPLE_WARNING])
+    ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=max(width, 2))
+    cell = ws.cell(ws.max_row, 1)
+    cell.font = Font(bold=True, color="FFFFFF", size=12)
+    cell.fill = PatternFill("solid", fgColor="B91C1C")
+
 
 def export_parts_excel(**filters) -> bytes:
     res = search(**filters, limit=500, offset=0)
@@ -1605,8 +1633,11 @@ def export_parts_excel(**filters) -> bytes:
     cols = ["part_code", "name", "project_code", "rev", "material", "process", "sourcing", "status", "annual_volume",
             "programme_life_years", "target_piece_cost_inr", "unit_price", "price_currency", "price_source", "price_month",
             "volume_cm3", "bbox_mm", "file", "country", "net_rm_cost_inr", "updated_at"]
+    if any(r["rm_is_example"] for r in rows):
+        _excel_banner(ws, len(cols))
     ws.append(cols)
-    for cell in ws[1]:
+    head = ws.max_row
+    for cell in ws[head]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = HEADER_FILL
     for r in rows:
@@ -1616,8 +1647,11 @@ def export_parts_excel(**filters) -> bytes:
                    r["status"], r["annual_volume"], r["programme_life_years"], r["target_piece_cost_inr"],
                    r["unit_price"], r["price_currency"], r["price_source"], r["price_month"], g.get("volume_cm3"), f"{b.get('length')} x {b.get('width')} x {b.get('height')}" if b else "",
                    "yes" if r["file_id"] else "File missing", r["country"], r["rm_cost_inr"], r["updated_at"]])
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = ws.dimensions
+        if r["rm_is_example"]:
+            for cell in ws[ws.max_row]:
+                cell.fill = EXAMPLE_FILL
+    ws.freeze_panes = f"A{head + 1}"
+    ws.auto_filter.ref = f"A{head}:{ws.cell(head, len(cols)).column_letter}{ws.max_row}"
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
