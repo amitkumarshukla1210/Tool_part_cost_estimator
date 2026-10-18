@@ -362,6 +362,20 @@ def rates_status(inp: StatusIn):
     return rates.set_status(inp.ids, inp.status, inp.comment)
 
 
+@app.get("/api/rates/updates")
+def rates_updates():
+    """Log of the monthly rate update runs (roadmap stage 12)."""
+    from . import rate_update
+    return {"runs": rate_update.runs()}
+
+
+@app.post("/api/rates/fetch-now")
+def rates_fetch_now():
+    """Fetch the free official sources now; everything arrives as Drafts on the Rate review page."""
+    from . import rate_update
+    return rate_update.run_update(user=rates.settings().get("approver_name") or "local user")
+
+
 @app.get("/api/rates/review")
 def rates_review():
     return rates.review()

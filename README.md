@@ -512,6 +512,19 @@ shown; Excel and PDF carry the full data and the rate versions used. HS codes: *
 import rates are approved versions in the rate library (categories `duty`, `freight`, `import`). All are EXAMPLE values;
 check the tariff heading and rates with your customs broker.
 
+## Monthly rate update (roadmap stage 12)
+
+**Rates → Rate review → Fetch now**, or the GitHub Action *Monthly rate update* (1st of each month 05:17 UTC; also *Run workflow*), fetches:
+- **Forex** from the ECB euro reference rates (USD, EUR, CNY, JPY, KRW, THB as INR per unit; TWD and VND are not published by the ECB and stay manual).
+- **Price index** (World Bank WDI, consumer prices, annual; Taiwan is not published) and from it **index-based proposals**:
+  new rate = last approved rate × (latest index ÷ index of the year it was approved). Which rate categories get proposals is
+  **Mould & die database → Update rules**. Rates still marked EXAMPLE are left alone (replace them first, see *Replace example values*).
+
+Everything arrives as a **Draft** with its source link and fetch date; nothing is approved automatically. If a source fails the
+reason is written to the **Update log** (Rate review tab), the last approved values stay in use and costing is not affected.
+The Action opens a pull request with the changed `costing_db.sqlite`; it needs *Settings → Actions → General → Allow GitHub Actions to create and approve pull requests*.
+The same run works from the command line: `python -m backend.app.rate_update`.
+
 ## Rates page: country rate library, MHR & labour rates
 
 Open **Rates** in the header. Pick the **producing country** and the **costing month**.
@@ -589,7 +602,8 @@ stage) are in **[ROADMAP.md](ROADMAP.md)**. The two briefs it is built from are 
 
 ### Free official data sources planned for the monthly update (roadmap stage 12)
 Only sources that publish free data for reuse are used, and nothing is scraped from sites that forbid it. Each licence
-is checked again before its fetcher is switched on. Until then every rate stays a manually approved value.
+is checked again before its fetcher is switched on. **Switched on in stage 12:** the ECB euro reference rates (forex) and the
+World Bank WDI consumer price index (indexation). The others in the table are not fetched yet: their rates stay manual or index-based.
 
 | Data | Source | URL | Frequency | Licence / terms |
 |---|---|---|---|---|

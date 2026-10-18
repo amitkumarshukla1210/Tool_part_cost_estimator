@@ -386,6 +386,30 @@ async function updateReviewCount() {
   }
 }
 
+// ---------- monthly update (stage 12) ----------
+async function loadUpdateLog() {
+  const { runs } = await api("/api/rates/updates").catch(() => ({ runs: [] }));
+  $("updateLog").innerHTML = `<thead><tr><th>When</th><th>Source</th><th>Status</th><th class="num">Drafts</th><th>Note</th><th>By</th></tr></thead><tbody>${
+    runs.map((r) => `<tr><td>${esc(r.at.replace("T", " "))}</td><td>${esc(r.source)}</td><td>${r.status === "ok" ? "ok" : `<b>${esc(r.status)}</b>`}</td>
+      <td class="num">${r.created}</td><td>${esc(r.message)}</td><td>${esc(r.user)}</td></tr>`).join("") || '<tr><td colspan="6" class="empty">No update has run yet.</td></tr>'}</tbody>`;
+}
+$("fetchNow").addEventListener("click", async () => {
+  setReviewStatus("Fetching from the official sources…");
+  try {
+    const res = await api("/api/rates/fetch-now", { method: "POST" });
+    const failed = res.runs.filter((r) => r.status !== "ok");
+    setReviewStatus(`${res.drafts} new draft(s) to review.` + (failed.length ? ` ${failed.length} source(s) failed: the last approved values stay in use (see the log).` : ""), failed.length ? "error" : "ok");
+    await loadReview();
+    await loadUpdateLog();
+  } catch (err) {
+    setReviewStatus(err.message, "error");
+  }
+});
+function setReviewStatus(msg, kind = "") {
+  $("reviewStatus").textContent = msg;
+  $("reviewStatus").className = `status ${kind}`;
+}
+
 // ---------- start ----------
 (async function init() {
   const setup = await api("/api/costing-setup");
@@ -393,5 +417,6 @@ async function updateReviewCount() {
   $("country").innerHTML = countries.map((c) => `<option value="${esc(c.code)}">${esc(c.name)} (${esc(c.currency)})</option>`).join("");
   $("month").value = new Date().toISOString().slice(0, 7);
   const start = location.hash.slice(1);
+  loadUpdateLog();
   showTab(["mhr", "grid", "library", "review"].includes(start) ? start : "mhr");
 })();
