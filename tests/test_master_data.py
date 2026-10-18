@@ -25,7 +25,6 @@ def test_every_part_type_has_its_defaults():
         assert client.get("/api/capacity/defaults").json()["by_part_type"][pt]["oee_pct"] > 0
     tables = client.get("/api/master-data").json()
     assert {m["part_type"] for m in tables["Materials"]} == set(master_data.PART_TYPES)
-    assert tables["Machines"]
 
 
 def test_saved_change_is_used_by_calculations(master_data_copy):
@@ -57,7 +56,7 @@ def test_bad_value_is_rejected_and_file_unchanged(master_data_copy):
     assert "density" in client.put("/api/master-data", json=data).json()["detail"]
 
     data = client.get("/api/master-data").json()
-    data["Machines"][0]["part_type"] = "forging"
+    data["Materials"][0]["part_type"] = "forging"
     assert "part_type" in client.put("/api/master-data", json=data).json()["detail"]
 
 

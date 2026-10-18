@@ -34,28 +34,27 @@ const DATASETS = {
           { key: "notes", label: "Notes", kind: "wide" },
         ],
       },
-      Machines: {
-        title: "Machines",
-        columns: [
-          { key: "part_type", label: "Part type", kind: "part_type" },
-          { key: "machine", label: "Machine", kind: "text" },
-          { key: "tonnage_t", label: "Tonnage (t)", kind: "number" },
-          { key: "length_mm", label: "Tie-bar / bed length (mm)", kind: "number" },
-          { key: "width_mm", label: "Tie-bar / bed width (mm)", kind: "number" },
-          { key: "mhr_per_hour", label: "MHR / hour", kind: "number" },
-          { key: "notes", label: "Notes", kind: "wide" },
-        ],
-      },
     },
   },
   mould: {
     api: "/api/mould-db",
-    file: "master_data/mould_db.sqlite",
+    file: "master_data/costing_db.sqlite",
     intro:
       "Data that sizes a mould or die and builds its BOM: cavities + part size → insert size → standard mould base → BOM. " +
       "Rows marked Example are placeholders. Replace them with your catalogue and supplier values; editing a row clears its " +
       "Example flag. Export to Excel and import it back to edit in bulk.",
-    tables: null, // loaded from /api/mould-db/schema
+    schemaApi: "/api/mould-db/schema",
+    tables: null, // loaded from the schema
+  },
+  setup: {
+    api: "/api/costing-setup",
+    file: "master_data/costing_db.sqlite",
+    intro:
+      "The calculation logic of the rate engine: countries and currencies, machines (technical data; prices and consumables " +
+      "are country rates in the Rate library), labour grades, every MHR and labour-rate step as a formula, and where each " +
+      "formula variable comes from. Change a formula here and every MHR changes with it. Saves are checked first.",
+    schemaApi: "/api/costing-setup/schema",
+    tables: null,
   },
 };
 
@@ -75,15 +74,22 @@ const cols = () => conf().tables[sheet].columns;
 const hasExample = () => cols().some((c) => c.key === "is_example");
 
 async function loadSchema() {
-  if (DATASETS.mould.tables) return;
-  const s = await (await fetch("/api/mould-db/schema")).json();
-  DATASETS.mould.tables = Object.fromEntries(
-    Object.entries(s.tables).map(([key, t]) => [key, { title: t.title, columns: t.columns }]),
-  );
-  formulaVars = s.formula_variables;
-  $("variables").innerHTML = Object.entries(formulaVars)
-    .map(([k, v]) => `<dt><code>${k}</code></dt><dd>${v}</dd>`)
-    .join("");
+  const d = conf();
+  if (!d.schemaApi || d.tables) return;
+  const s = await (await fetch(d.schemaApi)).json();
+  d.tables = Object.fromEntries(Object.entries(s.tables).map(([key, t]) => [key, { title: t.title, columns: t.columns }]));
+  d.formulaVars = s.formula_variables || null;
+}
+
+// Formula help: fixed mould variables, or this data set's own formula inputs and steps.
+function renderHelp() {
+  let vars = conf().formulaVars;
+  if (!vars && data?.formula_inputs) {
+    vars = {};
+    for (const r of data.formula_inputs) vars[`${r.variable} (${r.scope})`] = `${r.label}: ${r.source === "machine" ? "machine field " + r.item : "rate " + r.category + " / " + r.item}`;
+    for (const r of data.cost_formulas || []) vars[`${r.name} (${r.scope})`] = `${r.label}: result of another formula`;
+  }
+  $("variables").innerHTML = Object.entries(vars || {}).map(([k, v]) => `<dt><code>${escapeHtml(k)}</code></dt><dd>${escapeHtml(v)}</dd>`).join("");
 }
 
 async function switchDataset(name) {
@@ -95,7 +101,7 @@ async function switchDataset(name) {
   data = null;
   setStatus("Loading…");
   try {
-    if (ds === "mould") await loadSchema();
+    await loadSchema();
     const res = await fetch(conf().api);
     const body = await res.json();
     if (!res.ok) throw new Error(body.detail);
@@ -121,6 +127,7 @@ function setData(body) {
   saved = body;
   data = clone(body);
   badRow = null;
+  renderHelp();
   render();
 }
 
@@ -142,6 +149,7 @@ function cell(col, row, i) {
     return `<input type="text" class="name" data-i="${i}" data-k="${col.key}" value="${escapeHtml(display(v))}" />`;
   }
   const attrs = `data-i="${i}" data-k="${col.key}"`;
+  if (col.choices) return `<select ${attrs}>${options(col.choices.filter(Boolean), v, col.choices.includes(""))}</select>`;
   switch (col.kind) {
     case "part_type":
     case "part_type_all":
@@ -153,7 +161,7 @@ function cell(col, row, i) {
     case "process":
       return `<select ${attrs}>${options(data.process_rates.map((p) => p.code), v, true)}</select>`;
     case "bool":
-      return `<label class="flag"><input type="checkbox" ${attrs} ${v ? "checked" : ""} />${v ? "Example" : ""}</label>`;
+      return `<label class="flag"><input type="checkbox" ${attrs} ${v ? "checked" : ""} />${v ? (col.key === "is_example" ? "Example" : "Yes") : ""}</label>`;
     case "number":
       return `<input type="number" step="any" ${attrs} value="${escapeHtml(display(v))}" />`;
     case "formula":
@@ -356,4 +364,5 @@ function showError(msg) {
   setStatus(`Not saved: ${msg}`, "error");
 }
 
-switchDataset(new URLSearchParams(location.search).get("set") === "mould" ? "mould" : "general");
+const startSet = new URLSearchParams(location.search).get("set");
+switchDataset(DATASETS[startSet] ? startSet : "general");

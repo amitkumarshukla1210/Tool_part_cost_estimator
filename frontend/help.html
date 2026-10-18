@@ -19,6 +19,7 @@
       <nav>
         <ul>
           <li><a href="/">Estimate</a></li>
+          <li><a href="/rates">Rates</a></li>
           <li><a href="/master-data">Master data</a></li>
           <li><a href="/help" class="active" aria-current="page">Help</a></li>
         </ul>
@@ -112,6 +113,32 @@
     <section class="bg-grey">
       <div class="container">
         <div class="section-head">
+          <p class="kicker">Rates</p>
+          <h2>Machine hour rates, labour rates &amp; approvals</h2>
+        </div>
+        <div class="table-wrap">
+          <table class="cost-table">
+            <thead><tr><th>Value</th><th>Formula (stored in Master data → Countries, machines &amp; formulas)</th></tr></thead>
+            <tbody>
+              <tr><td>Machine hours / year</td><td class="calc">Working days × shifts × hours per shift × utilisation %</td></tr>
+              <tr><td>Depreciation</td><td class="calc">(Price − residual) ÷ life years ÷ machine hours</td></tr>
+              <tr><td>Interest</td><td class="calc">(Price + residual) ÷ 2 × interest % ÷ machine hours</td></tr>
+              <tr><td>Power</td><td class="calc">kW × load factor × electricity rate</td></tr>
+              <tr><td>Maintenance · floor space · consumables</td><td class="calc">Price × maintenance % ÷ hours · m² × rent × 12 ÷ hours · rate per hour</td></tr>
+              <tr class="total"><td>MHR</td><td class="calc">Machine cost subtotal × (1 + overhead %)</td></tr>
+              <tr class="total"><td>Labour rate</td><td class="calc">Salary × 12 × (1 + employer %) ÷ (days × hours per shift) × (1 + supervision %) ÷ productive %</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">Every rate has monthly versions. Only <b>approved</b> versions are used, and approved versions are never changed:
+          a new value is a new version (Draft, or Save &amp; approve). Click any number on the <a class="link" href="/rates">Rates</a>
+          page to see its formula, inputs, sources, approval and history.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="container">
+        <div class="section-head">
           <p class="kicker">Mould / die</p>
           <h2>Mould size &amp; BOM</h2>
         </div>
@@ -130,7 +157,7 @@
       </div>
     </section>
 
-    <section>
+    <section class="bg-grey">
       <div class="container">
         <div class="section-head">
           <p class="kicker">Master data</p>
@@ -144,7 +171,7 @@
           </div>
           <div class="card">
             <h3>Mould &amp; die database · SQLite</h3>
-            <p><code>master_data/mould_db.sqlite</code> has mould bases, tool steels, BOM elements with rules, process rates and
+            <p><code>master_data/costing_db.sqlite</code> has mould bases, tool steels, BOM elements with rules, process rates and
               sizing rules. Export it to Excel, edit it, and import it back.</p>
           </div>
           <div class="card">

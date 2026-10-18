@@ -1,0 +1,138 @@
+/* Rates page and traceability panel layout. Colours and fonts come from theme/dtc-theme.css. */
+
+.rates-head { padding-bottom: 24px; }
+.rates-head .section-head { margin-bottom: 20px; }
+.rates-toolbar { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; padding: 14px 18px; }
+.rates-toolbar label.inline { margin: 0; }
+.tab-pane { padding-top: 24px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.tabs .btn[aria-selected="true"] { background: var(--brand); border-color: var(--brand); color: var(--white); }
+.count { font-weight: 800; }
+.md-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 12px; }
+.md-toolbar .spacer, .review-settings .spacer { flex: 1; }
+label.inline { margin: 0; }
+label.grow { flex: 1; min-width: 200px; }
+label.btn { margin: 0; text-transform: none; font-size: 12px; color: var(--ink); cursor: pointer; }
+.btn.small { padding: 4px 10px; font-size: 11px; }
+.table-wrap.tall { max-height: 560px; }
+.cost-table td.strong { font-weight: 800; }
+.cost-table td.empty { padding: 20px; text-align: center; color: var(--grey); }
+.cost-table td.src { max-width: 260px; white-space: normal; color: var(--grey); }
+.cost-table td.actions { white-space: nowrap; }
+.cost-table td.flag { color: var(--danger) !important; font-weight: 800; }
+.cost-table tr.over td:first-child { box-shadow: inset 4px 0 0 var(--danger); }
+.cost-table td.input input { width: 100%; min-width: 90px; }
+.cost-table td.input input[type="number"] { text-align: right; }
+.cost-table .error { color: var(--danger); font-style: normal; white-space: normal; }
+.review-settings { display: flex; flex-wrap: wrap; gap: 14px; align-items: end; padding: 14px 18px; margin-bottom: 12px; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--brand); font: inherit; font-weight: 700; cursor: pointer; }
+
+/* Clickable traced values */
+button.tv {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-bottom: 1px dotted var(--brand);
+}
+button.tv:hover, button.tv:focus-visible { color: var(--brand); outline: none; border-bottom-style: solid; }
+.trace-var { font-family: Consolas, "Courier New", monospace; font-size: 10.5px; color: var(--grey); font-style: normal; }
+
+/* Status badges: text label always present, colour is secondary */
+.badge {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--grey-border);
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  font-style: normal;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--white);
+}
+.badge-approved { border-color: var(--brand); color: var(--brand-dark); }
+.badge-draft { border-color: var(--input-cell-border); background: var(--input-cell-bg); }
+.badge-reviewed { border-color: var(--brand); background: var(--blue-soft); }
+.badge-rejected { border-color: var(--grey); color: var(--grey); }
+.badge-example { border-color: var(--accent); color: var(--accent); }
+
+/* New-version dialog */
+.rate-dialog { width: min(640px, calc(100vw - 32px)); border: 1px solid var(--grey-border); }
+.rate-dialog::backdrop { background: rgba(14, 26, 44, 0.45); }
+.rate-dialog h3 { margin-bottom: 4px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+
+/* Traceability panel */
+.trace-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 200;
+  width: min(560px, 100vw);
+  height: 100vh;
+  overflow-y: auto;
+  background: var(--white);
+  border-left: 1px solid var(--grey-border);
+  box-shadow: -8px 0 28px rgba(14, 26, 44, 0.18);
+}
+.trace-head {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 18px;
+  background: var(--grey-light);
+  border-bottom: 1px solid var(--grey-border);
+}
+.trace-head .kicker { margin: 0; flex: 1; }
+.trace-close { background: none; border: 0; font-size: 18px; cursor: pointer; color: var(--grey); }
+.trace-close:hover { color: var(--ink); }
+.trace-body { padding: 16px 18px 28px; }
+.trace-body h3 { font-size: 17px; font-weight: 800; color: var(--ink); }
+.trace-value { font-size: 26px; font-weight: 800; color: var(--brand-dark); margin: 2px 0 6px; }
+.trace-label { margin: 18px 0 6px; font-size: 11.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--brand-dark); }
+.trace-formula {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--blue-soft);
+  color: var(--ink);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+}
+.trace-body .table-wrap { max-height: none; }
+.trace-body .cost-table td { white-space: normal; }
+
+/* Trend chart (single series, recessive axes) */
+.trend { position: relative; margin: 4px 0 12px; }
+.trend svg { width: 100%; height: auto; display: block; }
+.trend .grid { stroke: var(--grey-border); stroke-width: 1; }
+.trend .axis { fill: var(--grey); font-size: 10px; font-family: Arial, sans-serif; }
+.trend .series { fill: none; stroke: var(--brand); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.trend .dot { fill: var(--brand); stroke: var(--white); stroke-width: 2; }
+.trend .dot.open { fill: var(--white); stroke: var(--brand); stroke-width: 2; }
+.trend .hit { fill: transparent; cursor: default; }
+.trend .tip {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--table-head-dark);
+  color: var(--table-head-dark-text);
+  font-size: 11.5px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.trend figcaption { margin-top: 2px; }
+
+@media (max-width: 700px) {
+  .trace-panel { width: 100vw; }
+}
+.trace-body .cost-table tr.subtotal td { font-weight: 800; }

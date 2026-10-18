@@ -1,4 +1,4 @@
-"""Design to Cost: web server for the Part Cost Estimator module (Stages A to C).
+"""Design to Cost: web server for the Part Cost Estimator module (Stages A to C, rate library and MHR).
 
 Run from the repository root:
     uvicorn backend.app.main:app --reload
@@ -14,15 +14,17 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from typing import Optional
 
 from .geometry import PART_TYPES, analyze, blank_estimate, load_step, sheet_thickness, tessellate
-from . import capacity, gross_weight, master_data, mould, mould_db
+from . import capacity, costing_setup, gross_weight, master_data, mould, mould_db, rate_engine, rates
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 THEME_DIR = Path(__file__).resolve().parents[2] / "theme"
 MAX_UPLOAD_MB = 100
 
-app = FastAPI(title="Design to Cost — Part Cost Estimator", version="0.3.0 (Stage C)")
+app = FastAPI(title="Design to Cost — Part Cost Estimator", version="0.4.0 (rate library & MHR)")
 
 
 @app.get("/api/part-types")
@@ -185,8 +187,148 @@ def mould_estimate(inp: mould.MouldInput):
         raise HTTPException(400, str(exc)) from exc
 
 
+# ---------- costing setup: countries, machines, labour grades, formulas ----------
+
+@app.get("/api/costing-setup/schema")
+def costing_setup_schema():
+    return costing_setup.schema()
+
+
+@app.get("/api/costing-setup")
+def costing_setup_get():
+    return costing_setup.tables()
+
+
+@app.put("/api/costing-setup")
+def costing_setup_put(data: dict):
+    costing_setup.write(data)
+    return costing_setup.tables()
+
+
+@app.get("/api/costing-setup/download")
+def costing_setup_download():
+    return _xlsx(costing_setup.to_excel(), "costing_setup.xlsx")
+
+
+@app.post("/api/costing-setup/upload")
+async def costing_setup_upload(file: UploadFile = File(...)):
+    _require_xlsx(file)
+    costing_setup.from_excel(await file.read())
+    return costing_setup.tables()
+
+
+# ---------- rate library ----------
+
+class RateIn(BaseModel):
+    category: str
+    item: str
+    country: str = ""
+    value: float
+    unit: str = ""
+    currency: str = ""
+    month: Optional[str] = None
+    source: str = ""
+    source_url: str = ""
+    fetched_date: str = ""
+    comment: str = ""
+    is_example: bool = False
+    approve: bool = False
+
+
+class StatusIn(BaseModel):
+    ids: list[int]
+    status: str
+    comment: str = ""
+
+
+@app.get("/api/rates")
+def rates_current(as_of: Optional[str] = None, country: Optional[str] = None, category: Optional[str] = None):
+    return {"as_of": as_of or rates.current_month(), "rows": rates.current(as_of, country, category)}
+
+
+@app.get("/api/rates/history")
+def rates_history(category: str, item: str, country: str = ""):
+    return rates.history(category, item, country)
+
+
+@app.post("/api/rates")
+def rates_create(inp: RateIn):
+    data = inp.model_dump()
+    approve = data.pop("approve")
+    return rates.create(data, approve=approve)
+
+
+@app.put("/api/rates/{rate_id}")
+def rates_update(rate_id: int, inp: RateIn):
+    data = inp.model_dump()
+    approve = data.pop("approve")
+    return rates.update(rate_id, data, approve=approve)
+
+
+@app.post("/api/rates/status")
+def rates_status(inp: StatusIn):
+    return rates.set_status(inp.ids, inp.status, inp.comment)
+
+
+@app.get("/api/rates/review")
+def rates_review():
+    return rates.review()
+
+
+@app.get("/api/settings")
+def settings_get():
+    return rates.settings()
+
+
+@app.put("/api/settings")
+def settings_put(data: dict):
+    return rates.save_settings(data)
+
+
+@app.get("/api/rates/download")
+def rates_download():
+    return _xlsx(rates.to_excel(), "rate_library.xlsx")
+
+
+@app.post("/api/rates/upload")
+async def rates_upload(file: UploadFile = File(...)):
+    _require_xlsx(file)
+    created = rates.import_excel(await file.read())
+    return {"drafts_created": len(created)}
+
+
+# ---------- machine hour rates and labour rates ----------
+
+@app.get("/api/mhr")
+def mhr_overview(country: str = "IN", as_of: Optional[str] = None):
+    return rate_engine.overview(country.upper(), as_of)
+
+
+@app.get("/api/mhr/{machine_id}")
+def mhr_one(machine_id: str, country: str = "IN", as_of: Optional[str] = None):
+    return rate_engine.mhr(machine_id, country.upper(), as_of)
+
+
+@app.get("/api/labour-rate/{grade}")
+def labour_one(grade: str, country: str = "IN", as_of: Optional[str] = None):
+    return rate_engine.labour_rate(grade, country.upper(), as_of)
+
+
+def _xlsx(content: bytes, name: str) -> Response:
+    return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+def _require_xlsx(file: UploadFile) -> None:
+    if not (file.filename or "").lower().endswith(".xlsx"):
+        raise HTTPException(400, "Please upload an Excel .xlsx file.")
+
+
 @app.exception_handler(master_data.MasterDataError)
 @app.exception_handler(mould_db.MouldDbError)
+@app.exception_handler(costing_setup.SetupError)
+@app.exception_handler(rates.RateError)
+@app.exception_handler(rate_engine.EngineError)
 def master_data_error(request, exc):
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
@@ -199,6 +341,11 @@ def index():
 @app.get("/master-data")
 def master_data_page():
     return FileResponse(FRONTEND_DIR / "master-data.html")
+
+
+@app.get("/rates")
+def rates_page():
+    return FileResponse(FRONTEND_DIR / "rates.html")
 
 
 @app.get("/help")

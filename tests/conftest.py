@@ -2,7 +2,7 @@ import shutil
 
 import pytest
 
-from backend.app import master_data, mould_db
+from backend.app import costing_db, master_data
 
 
 @pytest.fixture(autouse=True)
@@ -11,7 +11,7 @@ def master_data_copy(tmp_path, monkeypatch):
     copy = tmp_path / "master_data.xlsx"
     shutil.copy(master_data.DEFAULT_PATH, copy)
     monkeypatch.setenv("MASTER_DATA_PATH", str(copy))
-    db = tmp_path / "mould_db.sqlite"
-    shutil.copy(mould_db.DEFAULT_PATH, db)
-    monkeypatch.setenv("MOULD_DB_PATH", str(db))
+    db = tmp_path / "costing_db.sqlite"
+    shutil.copy(costing_db.DEFAULT_PATH, db)
+    monkeypatch.setenv("COSTING_DB_PATH", str(db))
     return copy

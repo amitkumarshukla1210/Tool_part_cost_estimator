@@ -132,12 +132,15 @@ stays unchanged.
 |---|---|
 | Parameters | All Stage B / C defaults and rules per part type (`all` = every type): runner %, yields, melt/process loss, sheet size, working days, shifts, OEE, cycle time, max cavities, plate size, spacing, tool life, `standard_cavities`, plastic cycle rule, and the Stage F tonnage factors (cavity pressure, safety factors) |
 | Materials | Part materials with density, RM rate/kg and scrap value/kg. These are the presets on the estimator, and choosing one fills its rates in Stage B |
-| Machines | Machines with tonnage, tie-bar / bed size and MHR, for the tool-cost and tonnage stages |
 
 You can also edit this file directly in Excel while the server runs. It is re-read when it changes.
 Write lists like `standard_cavities` as `1, 2, 4, 8`, with spaces, so Excel keeps them as text.
 
-### 2. Mould & die database: `master_data/mould_db.sqlite`
+### 2. Costing database: `master_data/costing_db.sqlite`
+One SQLite file holds the mould & die tables, the rate engine set-up and the country rate library. The Master data
+page edits the first two; country rates are edited on the **Rates** page (see below).
+
+#### Mould & die tables
 | Table | Contents |
 |---|---|
 | Mould bases | Standard sizes: L × W, insert pocket L × W, A / B / clamp / support / spacer / ejector plate thicknesses, stack height, weight, cost |
@@ -158,28 +161,125 @@ filter shows what is still left to replace.
 `lifters_per_cavity`, `inserts_per_cavity`, `density`. The exported Excel file has a *Formula help* sheet listing them.
 Rules are checked when you save, and they cannot run any other code.
 
+#### Countries, machines & formulas (the rate engine's logic)
+| Table | Contents |
+|---|---|
+| Countries | Code, name and currency. India, China, Korea, Japan, Taiwan, Thailand, Vietnam, Germany and USA to start with; add more as rows |
+| Machines | Technical data only: connected kW, power load factor, floor area, life, residual %, maintenance % per year, plus tonnage and tie-bar/bed size for presses. **Prices and consumables are country rates** |
+| Labour grades | Operator, skilled machinist, toolmaker, designer |
+| Cost formulas | Every step of the MHR and the labour rate as a formula, e.g. `depreciation = depreciation_per_year / annual_hours`. Exactly one row per scope is the final result |
+| Formula inputs | Where each variable comes from: a country rate (category + item; `{machine}` / `{grade}` are filled in) or a machine field. Money inputs are converted to the producing country's currency with that month's forex rates |
+
+Change a formula here and every MHR changes with it. Saves are checked first: unknown names, a formula that depends on
+itself, or a missing final result are refused with the row number.
+
 **Back up your data:** both files are in the `master_data/` folder. Copy that folder, or use *Download Excel*, before
 big changes.
 
 ---
 
+## Rates page: country rate library, MHR & labour rates
+
+Open **Rates** in the header. Pick the **producing country** and the **costing month**.
+
+- **Machine & labour rates:** the MHR of every machine and the labour rate of every skill level, in the country's
+  currency and in INR. **Click any number** to open the traceability panel, which shows:
+  - the formula, and each input with its value and source (rate version, month, approval, source URL, EXAMPLE flag)
+  - the full breakup with each component's share
+  - the list of rate versions used, so a report can be reproduced later
+
+  Click an input to drill down further (MHR → Power → Electricity rate → its history and trend chart).
+- **Rate library:** the approved value of every rate for the chosen month. A rate can be:
+  - **New version:** saved as a Draft for review, or with **Save & approve** in one step
+  - downloaded with its full history to Excel
+  - **imported from Excel**, where every row becomes a Draft and nothing existing is changed
+- **Rate review:** every Draft or Reviewed version next to the approved value it would replace. It shows:
+  - % change, highlighted above your threshold (5 % by default)
+  - source link and comment
+
+  You can edit the proposed value, then Approve, Mark reviewed or Reject, one by one or in bulk.
+  Your name for approvals is asked once and remembered.
+
+Rules: approved versions are never changed or deleted, and costing uses only the latest **approved** version up to the
+costing month. A missing rate shows a clear message on that row and does not break the rest of the page.
+
+**MHR** = depreciation + interest + power + maintenance + floor space + consumables + overhead (per hour), with:
+- annual hours = working days × shifts × hours per shift × utilisation %
+- depreciation = (price − residual) ÷ life ÷ annual hours
+- interest = (price + residual) ÷ 2 × interest % ÷ annual hours
+- power = kW × load factor × electricity rate
+- floor space = m² × rent per m² per month × 12 ÷ annual hours
+- overhead = overhead % × machine cost subtotal
+
+**Labour rate** = (monthly salary × 12 × (1 + employer %)) ÷ (working days × hours per shift) × (1 + supervision %) ÷ productive %.
+
+All seeded country rates, machine prices and machine data are **EXAMPLE values** (approved as "Example seed", 2026-10).
+Use *Examples only* in the Rate library to work through them.
+
+---
+
 ## Full roadmap
 
-| Stage | Adds | Main inputs | Main outputs |
-|---|---|---|---|
-| **A ✅** | Geometry & net weight | STEP file, part type, density | Volume, net weight, bounding box, projected area |
-| **B ✅** | Gross weight & RM cost | Runner/feeder/overflow % (plastic, die casting), gating & riser yield (foundry), blank nesting and scrap (sheet metal) | Gross (shot/pour/blank) weight, material yield %, raw-material cost per part (from ₹/kg or $/kg) |
-| **C ✅** | Number of cavities / tools | Annual volume, working days & shifts, cycle time, OEE, machine platen / bed size | Recommended cavities per tool, number of tools (or dies) needed, tool life check |
-| **D** | Bill of Materials (BOM) | Multi-part assemblies (STEP with several bodies or several files), bought-out items | Structured BOM with weight and cost for each line, roll-up to product cost |
-| **E** | Tool cost | Cavities, part size, complexity (slides, lifters, cores), tool steel grade, region rate | Mould / die / pattern / press-tool cost estimate and cost per part (amortised over volume) |
-| **F** | Machine / press tonnage | Projected area × cavities, cavity pressure (plastic ~300–600 bar, die casting ~400–1000 bar), shear length × thickness × shear strength (sheet metal) | Clamping force / press tonnage, suggested machine class, machine-hour rate |
-| **G** | Should-cost report | All the above + conversion cost, overheads, margin | Part should-cost breakdown, export to Excel/PDF, dashboard for comparing suppliers |
+Stages A–C are done. Next come five requirement sets, built one PR at a time:
+**A** sheet-metal tools, **B** tool / mould / die cost, **C** country rate library,
+**D** country comparison for parts, and **E** dynamic rate library with monthly update and approval.
 
-### Key formulas planned for later stages
-- **Clamping force (plastic / die casting)**: `F (tonnes) = projected area (cm²) × number of cavities × cavity pressure (bar) × safety factor / 1000`. The safety factor is usually 1.1–1.2.
-- **Sheet-metal blanking force**: `F (tonnes) = cut perimeter (mm) × thickness (mm) × shear strength (N/mm²) / 9810`
-- **Gross weight**: `net weight / material yield`
-- **Cavities**: limited by the smallest of: volume needed, machine platen size, shot capacity and tool budget.
+### Ground rules for everything that follows
+- **No hard-coded values.** Every number comes from master data or from a formula stored in master data.
+- **Traceability.** Every value on screen can be clicked. It opens a panel showing:
+  - the formula
+  - every input and where it came from (master-data sheet/row, rate version and month, your input, or calculated)
+  - approval status and history, and the full breakup.
+- **Only approved rates are used in costing.** Every result records which rate versions it used, so old reports stay reproducible.
+- **Example values** are clearly marked until you replace them with market rates.
+- All results are shown in **INR and in the producing country's currency**.
+
+### Decisions taken (from your answers)
+| Topic | Decision |
+|---|---|
+| Users | Runs on your PC for one user, no login. Approvals record a name that is asked once and remembered. |
+| MHR vs labour | **Separate.** MHR = machine cost only. Process cost = hours × (MHR + operators × labour rate of the skill level). |
+| Depreciation / interest | Straight line: (price − residual) ÷ life years. Interest on average investment: (price + residual) ÷ 2 × interest %. |
+| Hours basis | Fixed machine costs are spread over working days × shifts × hours per shift × utilisation %. |
+| Overhead | Overhead % × machine cost subtotal (depreciation + interest + power + maintenance + space + consumables). |
+| Labour rate | Monthly salary/CTC × 12 × (1 + employer extra-cost %) ÷ paid hours per year × (1 + supervision %) ÷ productive-time %. Employer % is per country (0 % if the CTC is all-inclusive). |
+| Rate versions | One version per **month**. A costing "as of" a month uses the latest **approved** version up to that month. |
+| Your own edits | Saved as a new version (old values never overwritten). By default it is a Draft for review; **Save & approve** approves it in one step. |
+| Data home | **Costing database** (SQLite, `master_data/costing_db.sqlite`) with Excel import/export and editing in the app. |
+
+### PR plan
+| PR | Contents | Requirements |
+|---|---|---|
+| **4 (this)** | This roadmap. **Versioned country rate library**: history, Draft → Reviewed → Approved, Rate review page, approved-only lookup. Countries and forex. Machines with price per country. **MHR & labour-rate engine** with all formulas in data. **Traceability panel.** | B3, B5, B6, C1–C3, C5, E1, E4–E6 |
+| 5 | Material rates by grade and process rates by country (₹/kg, ₹/h, ₹/mm, ₹/cm², ₹/m², per unit). **Tool cost engine:** process list (raw-material cutting, CNC, wire cut/EDM, grinding, polishing, heat treatment, surface treatment, assembly, try-out); process time from logic (volume removed, area, feature count…); machine, MHR, labour skill and operators per process; trial, design, overhead & profit, packing & transport, warranty/spares. The mould BOM becomes fully traced. **Tool cost sheet** exported to Excel and PDF. | B1, B2, B4, B7, C2 |
+| 6 | **Country comparison** for tools and parts side by side: RM, process, tool amortisation, overhead, rejection, profit, packing. Ex-works in local currency, USD and INR. **Landed cost in India:** freight, insurance, BCD, SWS, IGST (credit shown separately), clearance & port charges, inland transport. Duty per HS code and country incl. FTA rates. Forex sensitivity (e.g. USD ±5 %). Stacked bar chart with the cheapest country highlighted. Excel/PDF export. Traceability added to Stages A–C. | C4, D1–D7 |
+| 7 | **Monthly auto-update:** a GitHub Actions job on the 1st of each month plus a **Fetch now** button. It uses only free, official, legally usable sources (list below). Index-based proposals for rates with no free source: new = last approved × (index now ÷ index at approval), with the formula editable. New values arrive as Drafts with change % and a threshold highlight. A failed fetch keeps the last approved value and shows a warning. Trend chart per rate. | E1–E3, E7 |
+| 8 | **Sheet-metal tools:** multi-stage or progressive. Operation sequence auto-suggested from part features (editable). Per stage: weight incl. scrap removed, cutting / forming / drawing force and tonnage (formula shown), press selected from your machine list. Drawings: blank / flat pattern as DXF + dimensioned PDF, per-stage CAD upload or simplified sketch, and one PDF pack. Progressive strip layout: pitch, strip width, bridge/web, stations, pilots, utilisation %, as DXF + PDF. | A1–A5 |
+| later | Stage D product BOM (multi-part assemblies) and the full should-cost report and dashboard. | |
+
+### Free official data sources planned for the monthly update (PR 7)
+Only sources that publish free data for reuse are used, and nothing is scraped from sites that forbid it. Each licence
+is checked again before its fetcher is switched on. Until then every rate stays a manually approved value.
+
+| Data | Source | URL | Frequency | Licence / terms |
+|---|---|---|---|---|
+| Forex (EUR base: USD, INR, CNY, JPY, KRW, THB…) | European Central Bank euro reference rates | https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html | Daily (working days) | Free reuse with source attribution (to confirm) |
+| Forex INR reference rate | Financial Benchmarks India (FBIL) | https://www.fbil.org.in | Daily | Terms to confirm |
+| Forex TWD, VND | Central Bank of the Republic of China (Taiwan); State Bank of Vietnam | https://www.cbc.gov.tw · https://www.sbv.gov.vn | Daily | Terms to confirm |
+| Metal commodity prices (aluminium, copper, nickel, zinc, iron ore…) | World Bank Commodity Price Data ("Pink Sheet") | https://www.worldbank.org/en/research/commodity-markets | Monthly | CC BY 4.0 (to confirm) |
+| Labour earnings by occupation and country | ILO ILOSTAT | https://ilostat.ilo.org | Annual | Free reuse with attribution (to confirm) |
+| Inflation / producer price indices (for index-based proposals) | World Bank World Development Indicators; national statistics offices | https://data.worldbank.org | Annual / monthly | CC BY 4.0 for WDI (to confirm) |
+| Electricity, Germany (non-household) | Eurostat | https://ec.europa.eu/eurostat | Half-yearly | Free reuse with attribution (to confirm) |
+| Electricity, USA (industrial) | US Energy Information Administration | https://www.eia.gov/electricity/data.php | Monthly | US government public data (to confirm) |
+| Electricity, other countries | National regulators / utility tariff orders (e.g. Indian state commissions, KEPCO, TEPCO, Taipower, EGAT, EVN) | per country | When tariffs change | Manual entry unless an open API with clear terms exists |
+| Steel grades, MHR, process rates, freight, duty | No free official API | — | — | Index-based proposals or manual entry, always approved by you |
+
+### Key formulas
+- **MHR** = depreciation + interest + power + maintenance + floor space + consumables + overhead, all per hour. The formula for each component is stored in master data.
+- **Labour rate** = salary × 12 × (1 + employer %) ÷ paid hours/yr × (1 + supervision %) ÷ productive %.
+- **Clamping force (plastic / die casting)**: `F (t) = projected area (cm²) × cavities × cavity pressure (bar) × safety factor ÷ 1000`.
+- **Sheet-metal cutting force**: `F (t) = cut perimeter (mm) × thickness (mm) × shear strength (N/mm²) ÷ 9810`.
+- **Gross weight** = net weight ÷ material yield.
 
 ---
 
@@ -246,15 +346,23 @@ backend/app/geometry.py       STEP reading and all geometry calculations (CadQue
 backend/app/gross_weight.py   Stage B: gross weight, yield, sheet nesting and RM cost
 backend/app/capacity.py       Stage C: cavities, tools, tool life, machine hours
 backend/app/master_data.py    Reads, checks and saves master_data.xlsx
-backend/app/mould_db.py       Mould & die SQLite database: tables, checks, Excel import/export
+backend/app/mould_db.py       Mould & die tables in the costing database
 backend/app/mould.py          Mould sizing (layout, insert, base) and BOM from the database
-backend/app/formula.py        Safe evaluation of the BOM rules
+backend/app/formula.py        Safe evaluation of the BOM rules and cost formulas
+backend/app/costing_db.py     The shared SQLite file (costing_db.sqlite)
+backend/app/table_set.py      Editable table sets: validation, Excel import/export
+backend/app/costing_setup.py  Countries, machines, labour grades, cost formulas, formula inputs
+backend/app/rates.py          Versioned country rate library with approval
+backend/app/rate_engine.py    MHR and labour rate per country, fully traced
+backend/app/trace.py          Traceable calculations (formula, inputs, sources)
 backend/app/main.py           FastAPI web server: all /api endpoints + serves the pages
-master_data/                  master_data.xlsx and mould_db.sqlite (your editable data)
+master_data/                  master_data.xlsx and costing_db.sqlite (your editable data)
 frontend/index.html           Estimator page (form + results + 3D viewer)
 frontend/app.js               Estimator logic and three.js viewer
 frontend/master-data.*        Master data page (editor for both data sets)
 frontend/help.*               Help page
+frontend/rates.*              Rates page (MHR & labour, rate library, rate review)
+frontend/trace.js             Traceability panel used by every page
 theme/                        Design to Cost theme: dtc-theme.css, logo.png, THEME.md
 frontend/style.css            Page styling
 frontend/vendor/three/        three.js r160 (MIT licence), bundled for offline use
