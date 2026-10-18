@@ -125,6 +125,10 @@ $("uploadForm").addEventListener("submit", async (e) => {
   }
 });
 (async () => {
+  api("/api/bom-extract-tools").then((t) => {
+    $("toolStatus").innerHTML = `Scanned PDFs and images (OCR): ${t.tesseract ? "Tesseract is installed." : `<b>Tesseract not installed.</b> ${esc(t.ocr_help)}`}<br/>
+      DWG drawings: ${t.dwg_converter ? `converter found (${esc(t.dwg_converter_kind)}).` : `<b>no converter installed.</b> ${esc(t.dwg_help)} DXF and text PDFs need nothing extra.`}`;
+  }).catch(() => {});
   await costSetup();
   const projects = await api("/api/projects").catch(() => []);
   $("project").innerHTML = '<option value="">None</option>' + projects.map((p) => `<option value="${p.id}">${esc(p.code)} · ${esc(p.name)}</option>`).join("");

@@ -40,7 +40,7 @@
           <p>Read the BOM from a harness (KBL / VEC XML or a text PDF drawing) or a PCB (KiCad / Altium / generic BOM, optional pick-and-place file). Check the yellow lines, edit, mark reviewed.</p>
         </div>
         <form class="card grid2" id="uploadForm">
-          <label class="span2">BOM file (.xml, .pdf, .csv, .xlsx) <input type="file" name="file" accept=".xml,.pdf,.csv,.tsv,.txt,.xlsx" required /></label>
+          <label class="span2">BOM file (.xml, .pdf text or scan, .dxf, .dwg, scan image, .csv, .xlsx) <input type="file" name="file" accept=".xml,.pdf,.dxf,.dwg,.png,.jpg,.jpeg,.tif,.tiff,.csv,.tsv,.txt,.xlsx" required /></label>
           <label>Name <input name="name" placeholder="e.g. Door harness rev B" /></label>
           <label>Project <select name="project_id" id="project"><option value="">None</option></select></label>
           <label class="span2">PCB only: pick-and-place / CPL file (.csv, optional) <input type="file" name="cpl" accept=".csv,.tsv,.txt,.xlsx" /></label>
@@ -50,6 +50,7 @@
           <label>Board height (mm) <input type="number" name="height_mm" min="0" step="any" /></label>
           <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary">Read BOM</button></div>
           <p class="status span2" id="uploadStatus"></p>
+          <p class="note span2" id="toolStatus"></p>
         </form>
       </div>
     </section>

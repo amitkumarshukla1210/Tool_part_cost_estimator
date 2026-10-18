@@ -2,7 +2,7 @@
 
     harness   KBL / VEC XML (VDA 4964 / 4968)       wires, connectors, terminals, seals, sleeves, tapes, clips, ...
               (a wire line's length_mm is the TOTAL length of its qty wires)
-              text-based PDF drawing with a BOM table (pdfplumber; scanned PDFs need OCR: a later stage)
+              text-based PDF drawing with a BOM table (pdfplumber); scanned PDFs / images by OCR and DXF / DWG drawings: external.py
     PCB       BOM CSV / Excel (KiCad, Altium, generic), pick-and-place CPL CSV (counts, board extents), typed bare-board data
 
 Every line carries a CONFIDENCE (0-1) and the reasons it is lower; lines under the review threshold LOW (0.8)
@@ -181,6 +181,54 @@ def _kind_from_text(text: str) -> str:
     return "other"
 
 
+def table_to_lines(table: list, source: str, conf_table: list | None = None) -> list[dict] | None:
+    """Lines of one table (rows of cell texts) whose header row names a quantity or part number column; None if there is no such header.
+    conf_table (same shape, 0-1): confidence of each cell from OCR; a line is no more sure than its least sure cell."""
+    start = mapping = None
+    for ri, row in enumerate(table):
+        mp = _map_header([c or "" for c in row])
+        if len(mp) >= 3 and ("qty" in mp.values() or "part_number" in mp.values()):
+            mapping, start = mp, ri + 1
+            break
+    if mapping is None:
+        return None
+    out = []
+    for ri, row in enumerate(table[start:], start=start + 1):
+        cells = {f: (row[i] or "").replace("\n", " ").strip() for i, f in mapping.items() if i < len(row)}
+        if not any(cells.values()):
+            continue
+        flags, conf = [], 1.0
+        if conf_table:
+            cc = [conf_table[ri - 1][i] for i, f in mapping.items() if i < len(row) and (row[i] or "").strip()]
+            if cc and min(cc) < 0.9:
+                conf = min(conf, min(cc))
+                flags.append(f"OCR: least sure word {min(cc):.0%}")
+        qty = _num(cells.get("qty"))
+        if qty is None:
+            flags.append("quantity not a number")
+            conf -= 0.4
+        if not cells.get("part_number"):
+            flags.append("no part number")
+            conf -= 0.2
+        length = _num(cells.get("length_mm"))
+        desc = cells.get("description") or ""
+        cat = _kind_from_text(desc + " " + cells.get("wire_type", ""))
+        if cat == "other":
+            flags.append("category guessed: other")
+            conf -= 0.1
+        if cat == "wire" and length is None:
+            flags.append("wire without a length")
+            conf -= 0.2
+        each = length
+        if cat == "wire" and length is not None:
+            length = length * (qty if qty is not None else 1.0)      # a wire line's length is the TOTAL of its wires
+        out.append(line(cat, f"{source} row {ri}", max(conf, 0.0), flags, ref=cells.get("ref"),
+                        part_number=cells.get("part_number"), maker=cells.get("maker") or None, description=desc, qty=qty if qty is not None else 1.0,
+                        notes=f"{each:g} mm each" if cat == "wire" and each is not None else None, length_mm=length, colour=cells.get("colour") or None,
+                        cross_section_mm2=_num(cells.get("cross_section_mm2")), wire_type=cells.get("wire_type") or None, unit="wires" if cat == "wire" else "pcs"))
+    return out
+
+
 def parse_pdf(content: bytes) -> list[dict]:
     import pdfplumber
     out, any_table = [], False
@@ -195,45 +243,13 @@ def parse_pdf(content: bytes) -> list[dict]:
             for tno, table in enumerate(page.extract_tables(), start=1):
                 if not table or len(table) < 2:
                     continue
-                head = None
-                for ri, row in enumerate(table):
-                    mp = _map_header([c or "" for c in row])
-                    if len(mp) >= 3 and ("qty" in mp.values() or "part_number" in mp.values()):
-                        head, mapping, start = row, mp, ri + 1
-                        break
-                if head is None:
-                    continue
-                any_table = True
-                for ri, row in enumerate(table[start:], start=start + 1):
-                    cells = {f: (row[i] or "").replace("\n", " ").strip() for i, f in mapping.items() if i < len(row)}
-                    if not any(cells.values()):
-                        continue
-                    flags, conf = [], 1.0
-                    qty = _num(cells.get("qty"))
-                    if qty is None:
-                        flags.append("quantity not a number")
-                        conf -= 0.4
-                    if not cells.get("part_number"):
-                        flags.append("no part number")
-                        conf -= 0.2
-                    length = _num(cells.get("length_mm"))
-                    desc = cells.get("description") or ""
-                    cat = _kind_from_text(desc + " " + cells.get("wire_type", ""))
-                    if cat == "other":
-                        flags.append("category guessed: other")
-                        conf -= 0.1
-                    if cat == "wire" and length is None:
-                        flags.append("wire without a length")
-                        conf -= 0.2
-                    each = length
-                    if cat == "wire" and length is not None:
-                        length = length * (qty if qty is not None else 1.0)      # a wire line's length is the TOTAL of its wires
-                    out.append(line(cat, f"PDF page {pno} table {tno} row {ri}", conf, flags, ref=cells.get("ref"),
-                                    part_number=cells.get("part_number"), maker=cells.get("maker") or None, description=desc, qty=qty if qty is not None else 1.0,
-                                    notes=f"{each:g} mm each" if cat == "wire" and each is not None else None, length_mm=length, colour=cells.get("colour") or None, cross_section_mm2=_num(cells.get("cross_section_mm2")),
-                                    wire_type=cells.get("wire_type") or None, unit="wires" if cat == "wire" else "pcs"))
+                lines = table_to_lines(table, f"PDF page {pno} table {tno}")
+                if lines is not None:
+                    any_table = True
+                    out += lines
         if n_chars == 0:
-            raise ExtractError("This PDF has no text (a scan). Scanned drawings need OCR, which comes in a later stage; use a text PDF or the KBL / VEC export.")
+            from . import external
+            return external.ocr_pdf(content)               # a scan: Tesseract, or a clear message when it is not installed
     if not any_table:
         raise ExtractError("No BOM table with a quantity or part number column was found in the PDF. Check the table headers.")
     return out
@@ -391,6 +407,12 @@ def extract(content: bytes, filename: str, kind: str = "auto", typed: dict | Non
         return {"kind": "harness", "format": "KBL/VEC XML", "lines": parse_xml(content)}
     if n.endswith(".pdf"):
         return {"kind": "harness", "format": "PDF table", "lines": parse_pdf(content)}
+    if n.endswith((".dxf", ".dwg")):
+        from . import external
+        return {"kind": "harness", "format": "DXF drawing" if n.endswith(".dxf") else "DWG drawing (converted to DXF)", "lines": external.parse_drawing(content, n)}
+    if n.endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff")):
+        from . import external
+        return {"kind": "harness", "format": "image (OCR)", "lines": external.ocr_image(content)}
     if n.endswith((".csv", ".tsv", ".txt", ".xlsx", ".xlsm")):
         lines = parse_pcb_bom(content, filename)
         cp = parse_cpl(*cpl) if cpl else None
@@ -403,7 +425,7 @@ def extract(content: bytes, filename: str, kind: str = "auto", typed: dict | Non
                 board["confidence"] = min(board["confidence"], 0.6)
             board["notes"] = (board["notes"] + f"; {counts['placements']} placements ({counts['sides']})").strip("; ")
         return {"kind": "pcb", "format": "BOM + CPL" if cpl else "BOM", "lines": lines + [board]}
-    raise ExtractError("Unsupported file. Use KBL / VEC .xml or a text .pdf for a harness, and .csv / .xlsx for a PCB BOM (plus an optional pick-and-place CSV).")
+    raise ExtractError("Unsupported file. Use KBL / VEC .xml, a .pdf (text or scanned), a .dxf / .dwg drawing or a scan image for a harness, and .csv / .xlsx for a PCB BOM (plus an optional pick-and-place CSV).")
 
 
 # ---------- storage, review and export ----------

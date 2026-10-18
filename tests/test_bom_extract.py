@@ -126,7 +126,7 @@ def test_altium_and_excel_headers():
     with pytest.raises(bom_extract.ExtractError, match="No BOM header"):
         bom_extract.extract(b"a,b\n1,2\n", "x.csv")
     with pytest.raises(bom_extract.ExtractError, match="Unsupported"):
-        bom_extract.extract(b"x", "drawing.dwg")
+        bom_extract.extract(b"x", "drawing.step")
 
 
 def test_api_review_edit_status_and_export():
@@ -152,7 +152,7 @@ def test_api_review_edit_status_and_export():
     assert client.delete(f"/api/bom-extracts/{e['id']}/lines/{low['id']}").status_code == 200
     assert client.delete(f"/api/bom-extracts/{e['id']}").status_code == 200
     assert client.get(f"/api/bom-extracts/{e['id']}").status_code == 400
-    bad = client.post("/api/bom-extracts", files={"file": ("x.dwg", b"x")})
+    bad = client.post("/api/bom-extracts", files={"file": ("x.step", b"x")})
     assert bad.status_code == 400 and "Unsupported" in bad.json()["detail"]
 
 
