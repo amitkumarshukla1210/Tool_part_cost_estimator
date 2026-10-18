@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Part Cost Estimator</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/static/style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/static/vendor/three/three.module.js",
+        "three/addons/controls/OrbitControls.js": "/static/vendor/three/OrbitControls.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <header>
+    <h1>Part Cost Estimator</h1>
+    <span class="stage">Stage A · Geometry &amp; net weight</span>
+  </header>
+
+  <main>
+    <section class="panel">
+      <form id="form">
+        <label>
+          3D model (STEP: .step / .stp, units mm)
+          <input type="file" id="file" accept=".step,.stp" required />
+        </label>
+
+        <label>
+          Part type
+          <select id="partType" required>
+            <option value="plastic">Plastic injection moulding</option>
+            <option value="die_casting">Pressure die casting</option>
+            <option value="foundry">Foundry / sand / gravity casting</option>
+            <option value="sheet_metal">Sheet metal</option>
+          </select>
+        </label>
+
+        <label>
+          Material preset (optional)
+          <select id="material"></select>
+        </label>
+
+        <label>
+          Material density (g/cm³)
+          <input type="number" id="density" step="0.001" min="0.001" required />
+        </label>
+
+        <button type="submit" id="submit">Analyse part</button>
+        <p id="status" role="status"></p>
+      </form>
+
+      <div id="results" hidden>
+        <h2>Results</h2>
+        <table>
+          <tbody>
+            <tr><th>Volume</th><td id="r-volume"></td></tr>
+            <tr><th>Net part weight</th><td id="r-weight"></td></tr>
+            <tr><th>Bounding box L × W × H</th><td id="r-bbox"></td></tr>
+            <tr><th>Projected area</th><td id="r-proj"></td></tr>
+            <tr><th>Surface area</th><td id="r-surface"></td></tr>
+            <tr><th>Solid bodies</th><td id="r-solids"></td></tr>
+          </tbody>
+        </table>
+        <h3>Projected area by viewing axis</h3>
+        <table class="small">
+          <thead><tr><th>Axis</th><th>Box size (mm)</th><th>Projected area (cm²)</th></tr></thead>
+          <tbody id="r-axes"></tbody>
+        </table>
+        <p class="note">
+          Projected area is the shadow of the part seen along an axis, with through-holes removed.
+          The highlighted axis (largest shadow) is taken as the mould / die opening direction.
+        </p>
+      </div>
+    </section>
+
+    <section class="viewer">
+      <div id="viewer"><p class="placeholder">Upload a STEP file to see it here.<br />Drag to rotate · scroll to zoom · right-drag to pan</p></div>
+    </section>
+  </main>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

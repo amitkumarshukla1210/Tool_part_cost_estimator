@@ -1,0 +1,5 @@
+cadquery>=2.4
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9
+shapely>=2.0
