@@ -1,0 +1,97 @@
+:root {
+  --bg: #f4f6f8;
+  --panel: #ffffff;
+  --text: #1d2733;
+  --muted: #5d6b7a;
+  --accent: #1f6feb;
+  --border: #d6dde4;
+  --highlight: #e8f0fe;
+  --error: #c62828;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 20px;
+  background: #102a43;
+  color: #fff;
+}
+header h1 { margin: 0; font-size: 1.3rem; }
+.stage { color: #9fb3c8; font-size: 0.9rem; }
+
+main {
+  display: grid;
+  grid-template-columns: minmax(300px, 420px) 1fr;
+  gap: 16px;
+  padding: 16px;
+  min-height: calc(100vh - 56px);
+}
+
+.panel, .viewer {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.panel { padding: 16px; overflow-y: auto; }
+
+form { display: grid; gap: 12px; }
+label { display: grid; gap: 4px; font-size: 0.9rem; color: var(--muted); }
+input, select {
+  font: inherit;
+  color: var(--text);
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+button {
+  font: inherit;
+  font-weight: 600;
+  padding: 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.6; cursor: wait; }
+#status { margin: 0; min-height: 1.2em; font-size: 0.9rem; color: var(--muted); }
+#status.error { color: var(--error); }
+
+h2 { margin: 20px 0 8px; font-size: 1.1rem; }
+h3 { margin: 16px 0 6px; font-size: 0.95rem; }
+table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+th { font-weight: 500; color: var(--muted); }
+td { font-variant-numeric: tabular-nums; font-weight: 600; }
+table.small td { font-weight: 400; }
+tr.pull td { background: var(--highlight); font-weight: 600; }
+.note { font-size: 0.8rem; color: var(--muted); }
+
+.viewer { position: relative; min-height: 420px; overflow: hidden; }
+#viewer { position: absolute; inset: 0; }
+.placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  color: var(--muted);
+  margin: 0;
+}
+
+@media (max-width: 800px) {
+  main { grid-template-columns: 1fr; padding: 12px; }
+  .viewer { min-height: 360px; }
+}
