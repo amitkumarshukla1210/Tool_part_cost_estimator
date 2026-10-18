@@ -7,7 +7,8 @@ Holds the data that sizes a mould or die and builds its BOM:
     bom_elements    BOM lines with formula rules for quantity, cost, weight, hours
     process_rates   machining and other process rates per hour (India values; other countries are in the rate library)
     process_unit_rates  heat treatment per kg, wire cut per cm², polishing per cm², painting per m², transport per kg, ...
-    concept_rules   gate / runner / cooling / ejection / insert proposals (first rule that applies), and\n                    sizing_rules undercut_* thresholds for the concept analysis\n    sizing_rules    walls and gaps that turn part size into insert size
+    concept_rules   gate / runner / cooling / ejection / insert proposals (first rule that applies), and\n                    sizing_rules undercut_* thresholds for the concept analysis\n    simulation_rules  cooling / cycle, pressure / clamp formulas and map thresholds (roadmap stage 6)
+    sizing_rules    walls and gaps that turn part size into insert size
     tool_processes  how each tool process is priced: machine hours (MHR + operators × labour rate), labour hours,
                     or a rate per unit (kg, cm², ...); its machine, labour grade, operators and cost group
     time_parameters removal rates, set-up hours and shares that the BOM hour / amount rules use
@@ -120,6 +121,16 @@ TABLES = {
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
     ]},
+    "simulation_rules": {"title": "Simulation rules", "unique": ("part_type", "name"), "columns": [
+        col("part_type", "Part type", "part_type", PART_TYPES),
+        col("step", "Order", "number"),
+        col("name", "Name"),
+        col("formula", "Formula", "formula"),
+        col("unit", "Unit"),
+        col("label", "Meaning"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
     "tool_processes": {"title": "Tool processes", "unique": ("code",), "columns": [
         col("code", "Process"),
         col("pricing", "Priced by", "pricing", PRICING),
@@ -148,6 +159,19 @@ def _check(clean: dict) -> None:
             formula.evaluate(r["condition"], {k: 1.0 for k in concept.CONCEPT_VARS})
         except formula.FormulaError as exc:
             raise MouldDbError(f"Concept rules row {i}, condition: {exc}") from None
+    from . import simulation
+    for pt in PART_TYPES:
+        env = simulation.sample_env(pt)
+        for i, r in sorted(((i, r) for i, r in enumerate(clean["simulation_rules"], start=2) if r["part_type"] == pt),
+                           key=lambda x: x[1]["step"]):
+            if not r["name"].isidentifier():
+                raise MouldDbError(f"Simulation rules row {i}: '{r['name']}' must be one word (letters, digits and _).")
+            try:
+                env[r["name"]] = formula.evaluate(r["formula"], env)
+            except formula.FormulaError as exc:
+                raise MouldDbError(f"Simulation rules row {i} ({r['name']}): {exc}") from None
+            except (ArithmeticError, ValueError):
+                env[r["name"]] = 1.0  # e.g. log of a sample value; checked again with the real part
     from . import costing_setup
     materials = {r["code"] for r in clean["tool_materials"]}
     unit_rates = {r["code"] for r in clean["process_unit_rates"]}

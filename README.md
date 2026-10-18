@@ -442,6 +442,20 @@ slides / lifters and recalculates. Gate, runner, cooling, ejection and insert pr
 **Mould & die database → Concept rules**; thresholds are `undercut_*` rows of Sizing rules. All are EXAMPLE values and
 all results are proposals to check.
 
+## Simulation & analysis v1 (roadmap stage 6)
+
+On a part's panel (plastic or die casting), open **Simulation & analysis** and press *Analyse*, or download the **PDF report with maps**.
+- **Maps** (ray casting on the 3D model): wall thickness per face, draft angle to the opening direction, sink-risk
+  (thicker than `sink_ratio` × wall), thin walls (below `thin_ratio` × wall) and undercuts.
+- **Cycle time**: cooling (plastic: centre-line formula with diffusivity, melt / mould / eject temperature) or
+  solidification (die casting) + fill + open / eject + insert loading (Insert moulding rules, less the share a shuttle hides).
+- **Clamp force** = projected area × cavities × cavity pressure (from flow length ÷ wall) × safety factor. The smallest
+  machine of `trial_machine_process` with enough tonnage is selected.
+- **Corrections required**: low draft, sink risk, thin walls, undercuts, no machine large enough, cycle above plan.
+
+Every formula is a row of **Mould & die database → Simulation rules**, evaluated in order (each may use the ones above
+it, Parameters and Insert moulding rules; `log` and `exp` are allowed). All rows are EXAMPLE values. This is an analytical estimate, not Moldflow.
+
 ## Rates page: country rate library, MHR & labour rates
 
 Open **Rates** in the header. Pick the **producing country** and the **costing month**.

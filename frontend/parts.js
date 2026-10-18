@@ -288,7 +288,12 @@ function toolBlock(p) {
     html += `<details class="card add-insert"><summary class="btn btn-outline small">Mould concept (opening direction, undercuts, proposals)</summary>
       <p class="note">A proposal from ray casting on the 3D model and the Concept rules in Master data. Check it before you use it.</p>
       <button type="button" class="btn btn-outline small" id="conceptRun">Analyse</button> <span class="status" id="conceptStatus"></span>
-      <div id="conceptOut"></div></details>`;
+      <div id="conceptOut"></div></details>
+      <details class="card add-insert"><summary class="btn btn-outline small">Simulation &amp; analysis (wall, draft, sink, cycle, clamp)</summary>
+      <p class="note">Analytical estimate from the 3D model and the Simulation rules in Master data, not a flow simulation.</p>
+      <button type="button" class="btn btn-outline small" id="simRun">Analyse</button>
+      <a class="link" href="/api/parts/${p.id}/simulation/report.pdf">PDF report with maps</a> <span class="status" id="simStatus"></span>
+      <div id="simOut"></div></details>`;
   }
   if (t.versions) {
     html += `<details class="card add-insert"><summary class="btn btn-outline small">Tool cost versions (${t.versions})</summary>
@@ -542,6 +547,24 @@ $("panelBody").addEventListener("click", async (e) => {
         <button type="button" class="btn btn-primary small" id="conceptApply" data-slides="${c.slides}" data-lifters="${c.lifters}">Use ${c.slides} slide(s) and ${c.lifters} lifter(s) in the tool cost</button>`;
     } catch (err) {
       status($("conceptStatus"), err.message, "error");
+    }
+  }
+  if (e.target.id === "simRun") {
+    status($("simStatus"), "Analysing the 3D model…");
+    try {
+      const r = await api(`/api/parts/${part.id}/simulation`);
+      status($("simStatus"), "");
+      const m = r.maps, mc = r.machine;
+      $("simOut").innerHTML = `${r.is_example ? '<p class="note"><b>Uses EXAMPLE simulation rules.</b></p>' : ""}
+        <h4>${r.corrections.length ? "Corrections required" : "No corrections required"}</h4>
+        <ul>${r.corrections.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+        <p>Opening ${esc(r.opening_axis.toUpperCase())} · wall ${fmt(r.wall_mm, 2)} mm · low draft ${fmt(m.draft_low_cm2, 1)} cm² · sink risk ${fmt(m.sink_risk_cm2, 1)} cm² ·
+          thin ${fmt(m.thin_cm2, 1)} cm² · undercut ${fmt(m.undercut_cm2, 1)} cm²${r.sampled ? " (faces sampled)" : ""}<br/>
+          Cycle <b>${fmt(r.results.cycle_s, 1)} s</b> · clamp <b>${fmt(r.results.clamp_t, 1)} t</b> → machine <b>${esc(mc.machine_id || "none large enough")}</b>${mc.tonnage_t ? ` (${fmt(mc.tonnage_t)} t)` : ""}</p>
+        <div class="table-wrap"><table class="cost-table"><thead><tr><th>Step</th><th>Formula</th><th class="num">Value</th></tr></thead><tbody>
+        ${r.steps.map((x) => `<tr><td>${esc(x.label || x.name)}</td><td><code>${esc(x.formula)}</code></td><td class="num">${fmt(x.value, 2)} ${esc(x.unit)}</td></tr>`).join("")}</tbody></table></div>`;
+    } catch (err) {
+      status($("simStatus"), err.message, "error");
     }
   }
   if (e.target.id === "conceptApply") {

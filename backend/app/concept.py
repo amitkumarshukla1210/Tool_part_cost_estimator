@@ -125,7 +125,7 @@ def analyze(vertices, triangles, part_type: str, projected_area_mm2: dict) -> di
             "regions": regions, "slides": sum(r["kind"] == "slide" for r in regions),
             "lifters": sum(r["kind"] == "lifter" for r in regions),
             "undercut_area_cm2": best["undercut_area_mm2"] / 100, "rules": p, "triangles": len(tri),
-            "sampled": best["step"] > 1}
+            "sampled": best["step"] > 1, "_mask": best["hit"]}
 
 
 def proposals(part_type: str, facts: dict) -> list[dict]:

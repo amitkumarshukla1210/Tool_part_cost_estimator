@@ -617,6 +617,25 @@ def parts_concept(part_id: int):
         raise HTTPException(400, str(exc)) from None
 
 
+@app.get("/api/parts/{part_id}/simulation")
+def parts_simulation(part_id: int):
+    """Simulation & analysis v1: maps, cycle time, clamp force, machine, corrections required (roadmap stage 6)."""
+    try:
+        return register.simulation_result(part_id)
+    except register.ToolNotApplicable as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/simulation/report.pdf")
+def parts_simulation_pdf(part_id: int):
+    try:
+        content = register.simulation_pdf(part_id)
+    except register.ToolNotApplicable as exc:
+        raise HTTPException(400, str(exc)) from None
+    return Response(content, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="simulation_part_{part_id}.pdf"'})
+
+
 @app.get("/api/parts/{part_id}/tool-cost")
 def parts_tool_versions(part_id: int):
     return register.tool_versions(part_id)

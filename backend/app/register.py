@@ -1297,8 +1297,8 @@ def _tool_compute(part_id: int) -> dict:
     return r
 
 
-def mould_concept(part_id: int) -> dict:
-    """Concept v1 of the part's current revision: opening direction, undercuts -> slides / lifters, proposals."""
+def _concept_inputs(part_id: int):
+    """(part detail, revision, part type, vertices, triangles, concept result, part facts) of the current revision."""
     from .geometry import load_step, tessellate
     d = part_detail(part_id, with_rm=False)
     why = tool_eligibility(d)
@@ -1319,6 +1319,7 @@ def mould_concept(part_id: int) -> dict:
         res = concept.analyze(verts, tris, part_type, g["projected_area_mm2"])
     except ValueError as exc:
         raise ToolNotApplicable(str(exc)) from None
+    res.pop("_mask")
     axis = res["opening_axis"]
     across = sorted((v for a, v in g["bbox_axes_mm"].items() if a != axis), reverse=True)
     typed = d["tool_inputs"] or {}
@@ -1333,9 +1334,40 @@ def mould_concept(part_id: int) -> dict:
              "cavities": cavities, "slides": typed.get("slides_per_cavity", res["slides"]),
              "lifters": typed.get("lifters_per_cavity", res["lifters"]), "undercut_area_cm2": res["undercut_area_cm2"],
              "inserts": d["insert_count"]}
-    return res | {"part_id": part_id, "rev": rev["rev"], "stored_pull_direction": g["pull_direction"],
+    return d, rev, part_type, verts, tris, res, facts
+
+
+def mould_concept(part_id: int) -> dict:
+    """Concept v1 of the part's current revision: opening direction, undercuts -> slides / lifters, proposals."""
+    d, rev, part_type, _, _, res, facts = _concept_inputs(part_id)
+    typed = d["tool_inputs"] or {}
+    return res | {"part_id": part_id, "rev": rev["rev"], "stored_pull_direction": rev["geometry"]["pull_direction"],
                   "facts": facts, "proposals": concept.proposals(part_type, facts),
                   "typed": {k: typed[k] for k in ("slides_per_cavity", "lifters_per_cavity") if k in typed}}
+
+
+def _simulate(part_id: int):
+    from . import simulation
+    d, rev, part_type, verts, tris, _, facts = _concept_inputs(part_id)
+    try:
+        res = simulation.run(verts, tris, part_type, facts, rev["geometry"]["projected_area_mm2"])
+    except ValueError as exc:
+        raise ToolNotApplicable(str(exc)) from None
+    return d, rev, res
+
+
+def simulation_result(part_id: int) -> dict:
+    """Simulation & analysis v1 of the part's current revision (roadmap stage 6)."""
+    from . import simulation
+    d, rev, res = _simulate(part_id)
+    return simulation.public(res) | {"part_id": part_id, "rev": rev["rev"], "part_code": d["part_code"]}
+
+
+def simulation_pdf(part_id: int) -> bytes:
+    from . import simulation
+    from .pdf_report import simulation_pdf as pdf
+    d, rev, res = _simulate(part_id)
+    return pdf(simulation.public(res), simulation.pictures(res), d, rev["rev"])
 
 
 def _tool_row(row) -> dict:
