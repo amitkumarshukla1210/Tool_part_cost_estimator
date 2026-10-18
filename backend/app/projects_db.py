@@ -34,6 +34,7 @@ projects = Table(
     Column("customer", String(200), default=""),
     Column("description", Text, default=""),
     Column("capex_budget_inr", Float),
+    Column("sop_date", String(10), default=""),        # start of production, YYYY-MM-DD: the CAPEX timeline hangs on it
     Column("created_by", String(100), default=""),
     Column("created_at", DateTime, default=now),
     Column("updated_at", DateTime, default=now, onupdate=now),
@@ -231,6 +232,25 @@ piece_costs = Table(
     Column("created_at", DateTime, default=now),
     UniqueConstraint("part_id", "version"),
     Index("ix_piece_costs_part", "part_id"),
+)
+
+capex_items = Table(
+    "capex_items", meta,
+    Column("id", Integer, primary_key=True),
+    Column("project_id", ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
+    Column("kind", String(20), nullable=False),        # tool, machine, other
+    Column("description", String(300), nullable=False),
+    Column("part_id", Integer),
+    Column("supplier", String(200), default=""),
+    Column("country", String(10), default=""),
+    Column("amount_inr", Float, nullable=False),
+    Column("need_by", String(10), default=""),         # blank = the project's SOP date
+    Column("payments", JSON),                          # {milestone name: paid date}
+    Column("source_key", String(80), default=""),      # set for lines built from costed tools / machines
+    Column("notes", Text, default=""),
+    Column("created_by", String(100), default=""),
+    Column("created_at", DateTime, default=now),
+    Index("ix_capex_project", "project_id"),
 )
 
 history = Table(

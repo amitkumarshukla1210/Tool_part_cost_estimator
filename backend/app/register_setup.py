@@ -52,6 +52,14 @@ TABLES = {
         col("on_new_revision", "Status after a new revision upload (blank = keep)", required=False),
         col("notes", "Notes"),
     ]},
+    "capex_milestones": {"title": "CAPEX payment milestones", "unique": ("name",), "columns": [
+        col("name", "Milestone"),
+        col("pct", "Share of the amount (%)", "number"),
+        col("weeks", "Weeks from the need-by date", "number"),
+        col("is_after", "After the need-by date (else before)", "bool"),
+        col("sort_order", "Order", "number"),
+        col("notes", "Notes", required=False),
+    ]},
     "sourcing_types": {"title": "Sourcing", "unique": ("code",), "columns": [
         col("code", "Code"),
         col("name", "Sourcing"),
@@ -172,6 +180,9 @@ def _check(clean: dict) -> None:
         bad = [c for c in next_codes(r) + ([r["on_new_revision"]] if r.get("on_new_revision") else []) if c not in codes]
         if bad:
             raise RegisterSetupError(f"Part statuses row {i}: '{', '.join(bad)}' is not a status code.")
+    if clean["capex_milestones"] and abs(sum(r["pct"] for r in clean["capex_milestones"]) - 100) > 0.01:
+        raise RegisterSetupError("CAPEX payment milestones: the shares must add up to 100 % "
+                                 f"(now {sum(r['pct'] for r in clean['capex_milestones']):g} %).")
     if not any(r["is_assembly"] for r in clean["processes"]):
         raise RegisterSetupError("Processes: one process must be marked 'Assembly' (used for split assemblies).")
 
@@ -216,6 +227,10 @@ def processes() -> dict:
 
 def statuses() -> list[dict]:
     return sorted(tables()["part_statuses"], key=lambda r: r["sort_order"])
+
+
+def capex_milestones() -> list[dict]:
+    return sorted(tables()["capex_milestones"], key=lambda r: r["sort_order"])
 
 
 def next_codes(row: dict) -> list[str]:

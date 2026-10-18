@@ -525,6 +525,20 @@ reason is written to the **Update log** (Rate review tab), the last approved val
 The Action opens a pull request with the changed `costing_db.sqlite`; it needs *Settings → Actions → General → Allow GitHub Actions to create and approve pull requests*.
 The same run works from the command line: `python -m backend.app.rate_update`.
 
+## Project leader view (roadmap stage 13)
+
+The project dashboard now starts with the **Project leader view**:
+- **BOM cost vs target** per variant: Σ quantity × the part's latest stored part cost (parts we make) or its bought-out price; moulded-in
+  inserts are inside their body's cost. *Recalculate part costs* refreshes every part after rates change.
+- **CAPEX**: tool & mould CAPEX (stored tool costs), **machine CAPEX** (machine type chosen by each part's clamp force; hours = annual volume
+  ÷ parts per hour ÷ OEE, divided by the hours one machine runs per year, rounded up per type; price from the rate library), other lines,
+  total against the budget.
+- **CAPEX plan**: *Add lines for costed tools and machines* creates one line per tool and machine type (amounts refresh, your supplier, dates and
+  payments are kept); add other lines by hand. Set the project's **SOP date** (Edit project): each line's payment milestones
+  (**Part register setup → CAPEX payment milestones**: share % and weeks before / after the need-by date) get due dates; tick a milestone when paid; overdue ones are flagged.
+  Cash-out by month and totals by supplier and country follow.
+- **Open corrections** from the design loop, and the consolidated **Excel and PDF** (summary, BOM cost, machines, plan, payments, timeline).
+
 ## Rates page: country rate library, MHR & labour rates
 
 Open **Rates** in the header. Pick the **producing country** and the **costing month**.

@@ -526,6 +526,56 @@ def projects_dashboard_pdf(project_id: int):
                     headers={"Content-Disposition": f'attachment; filename="{code}_project_summary.pdf"'})
 
 
+@app.get("/api/projects/{project_id}/leader")
+def projects_leader(project_id: int):
+    """Project leader view: BOM cost vs target, CAPEX, CAPEX plan, open corrections (roadmap stage 13)."""
+    from . import leader
+    return leader.view(project_id)
+
+
+@app.get("/api/projects/{project_id}/leader.xlsx")
+def projects_leader_xlsx(project_id: int):
+    from . import leader
+    return _xlsx(leader.to_excel(project_id), f"{register.get_project(project_id)['code']}_project_leader.xlsx")
+
+
+@app.get("/api/projects/{project_id}/leader.pdf")
+def projects_leader_pdf(project_id: int):
+    from . import leader
+    return Response(leader.to_pdf(project_id), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{register.get_project(project_id)["code"]}_project_leader.pdf"'})
+
+
+@app.post("/api/projects/{project_id}/piece-cost/recalculate")
+def projects_piece_recalculate(project_id: int):
+    from . import leader
+    return leader.recalculate_pieces(project_id)
+
+
+@app.post("/api/projects/{project_id}/capex/build")
+def projects_capex_build(project_id: int):
+    from . import leader
+    return leader.build_plan(project_id)
+
+
+@app.post("/api/projects/{project_id}/capex")
+def projects_capex_add(project_id: int, data: dict):
+    from . import leader
+    return leader.add_item(project_id, data)
+
+
+@app.put("/api/capex/{item_id}")
+def capex_update(item_id: int, data: dict):
+    from . import leader
+    return leader.update_item(item_id, data)
+
+
+@app.delete("/api/capex/{item_id}")
+def capex_delete(item_id: int):
+    from . import leader
+    return leader.delete_item(item_id)
+
+
 # ---------- part register: parts ----------
 
 def _filters(q, project_id, process, status, sourcing, rev, file_missing, target_min, target_max,
