@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design to Cost — Part Cost Estimator · Replace example values</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/register.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img src="/theme/logo.png" alt="Design to Cost logo" />
+        <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/dashboard">Dashboard</a></li>
+          <li><a href="/parts">Parts</a></li>
+          <li><a href="/import">Import</a></li>
+          <li><a href="/">Estimate</a></li>
+          <li><a href="/rates">Rates</a></li>
+          <li><a href="/master-data" class="active" aria-current="page">Master data</a></li>
+          <li><a href="/help">Help</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="bg-grey">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker"><a class="link" href="/master-data">Master data</a> · checklist</p>
+          <h2>Replace example values</h2>
+          <p>Every value still marked EXAMPLE, counted by category. Work through them step by step: type the real value and
+            click <b>Replace</b>, or <b>Keep</b> when the example value is already right. A replaced rate is saved as a new
+            approved version (old versions are kept), so stored costs only change when you recalculate them. The
+            “Uses example rates” warnings disappear once every value a cost uses is replaced.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="container">
+        <div id="approver" class="card ex-approver" hidden>
+          <label>Your name for approvals <input id="approverName" placeholder="e.g. Amit" /></label>
+          <button type="button" class="btn btn-primary small" id="approverSave">Save</button>
+          <span class="note">A replaced rate is approved in your name.</span>
+        </div>
+        <div class="tiles" id="tiles"></div>
+
+        <form class="card toolbar" id="filters">
+          <label>Country <select name="country" id="country"><option value="">All countries</option></select></label>
+          <label class="grow">Search <input type="search" name="q" id="q" placeholder="item, material, machine…" /></label>
+          <label class="check"><input type="checkbox" id="usedOnly" /> Used in stored costs only</label>
+          <a class="btn btn-outline" href="/api/examples/export.xlsx">Export checklist (Excel)</a>
+        </form>
+        <p class="status" id="status" role="status"></p>
+
+        <h3 class="block-title">Rates in the rate library <span class="note" id="ratesNote"></span></h3>
+        <div class="table-wrap"><table class="cost-table ex-table" id="rates"></table></div>
+
+        <h3 class="block-title">Master-data rows <span class="note">(Example flag still on)</span></h3>
+        <div class="table-wrap"><table class="cost-table ex-table" id="rows"></table></div>
+        <p class="note">Tables with one value (sizing rules, time parameters, mould base cost, densities, insert rules) can be
+          replaced here. For the others, <b>Edit</b> opens the row in Master data (Examples only), and <b>Keep</b> confirms the
+          row as it is.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container"><p class="footnote">© Design to Cost</p></div>
+  </footer>
+
+  <script src="/static/common.js"></script>
+  <script src="/static/examples.js"></script>
+</body>
+</html>

@@ -108,3 +108,18 @@ details.add-insert summary { list-style: none; display: inline-block; }
 details.add-insert[open] summary { margin-bottom: 10px; }
 details.bop summary { cursor: pointer; font-size: 12.5px; color: var(--brand); margin: 4px 0 8px; }
 details.bop fieldset { margin-bottom: 10px; }
+
+/* ===== Replace example values checklist (stage 4b) ===== */
+.ex-approver { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 16px; padding: 12px 16px; }
+.ex-bar { position: relative; height: 8px; min-width: 120px; border-radius: 4px; background: var(--grey-border); overflow: hidden; }
+.ex-bar span { position: absolute; inset: 0 auto 0 0; background: var(--brand); }
+.ex-table tr.group { cursor: pointer; }
+.ex-table tr.group td:first-child::before { content: "▸ "; color: var(--grey); }
+.ex-table tr.group.open td:first-child::before { content: "▾ "; }
+.ex-table tr.detail > td { padding: 0; background: var(--grey-light); }
+.ex-table .inner { width: 100%; }
+.ex-table .inner td { font-size: 12.5px; }
+.ex-table input.new { width: 110px; }
+.ex-table .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.ex-table .chip { font-size: 11px; padding: 1px 6px; border-radius: 10px; background: var(--grey-light); color: var(--ink); }
+.ex-table .done { color: var(--grey); }

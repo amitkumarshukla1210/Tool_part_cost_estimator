@@ -118,7 +118,8 @@ async function switchDataset(name) {
     const res = await fetch(conf().api);
     const body = await res.json();
     if (!res.ok) throw new Error(body.detail);
-    sheet = Object.keys(conf().tables)[0];
+    const want = new URLSearchParams(location.search).get("sheet");
+    sheet = name === startSet && conf().tables[want] ? want : Object.keys(conf().tables)[0];
     $("tabs").innerHTML = Object.entries(conf().tables)
       .map(([key, t]) => `<button role="tab" class="btn btn-outline" data-sheet="${key}" aria-selected="${key === sheet}">${t.title}</button>`)
       .join("");
@@ -380,4 +381,6 @@ function showError(msg) {
 }
 
 const startSet = new URLSearchParams(location.search).get("set");
+// Links from the Replace example values checklist open a sheet with "Examples only" ticked.
+$("examplesOnly").checked = new URLSearchParams(location.search).has("examples");
 switchDataset(DATASETS[startSet] ? startSet : "general");

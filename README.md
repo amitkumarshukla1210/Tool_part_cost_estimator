@@ -174,6 +174,32 @@ Dashboard, the first row of every sheet of the Excel exports, and a red box on t
 
 ---
 
+## Replace example values (roadmap stage 4b)
+
+**Master data → Replace example values** (`/master-data/examples`) is your checklist for getting rid of every EXAMPLE value,
+step by step:
+
+- **Tiles at the top:** example rates left (of all approved rates), how many of them a stored RM or tool cost uses, example
+  master-data rows left, and the % replaced so far.
+- **Rates in the rate library, by category** (part materials, scrap values, tool steels, process rates per hour / per unit,
+  minimum charges, machine prices, consumables, salaries, electricity, rent, interest, hours, overhead, profit, toolmaker terms,
+  forex): how many are still EXAMPLE, of how many, a progress bar and the count per country. Click a category for its list: item,
+  country, current value, month and *used by* (parts whose latest stored cost uses it; those come first).
+  - **Replace:** type the real value. It is saved as a new **approved** version, and the old version is kept.
+  - **Keep:** the example value is right; it is approved again as a real value.
+  - You need your approver name once (asked on the page).
+- **Master-data rows, by table** (BOM elements, mould bases, machines, time parameters, tool processes, process rates, tool
+  materials, country index, sizing rules, insert rules and materials). Tables with one value (sizing rules, time parameters,
+  mould base cost, densities, insert rules) are replaced right there. **Edit** opens the others in the Master data editor on
+  that sheet with *Examples only* ticked. **Keep** clears the row's Example flag. Every save goes through the table's normal checks.
+- Filter by country, search, or show only the rates used in stored costs. **Export checklist (Excel)** has Summary, Example
+  rates and Example rows sheets.
+
+Stored costs never change by themselves: recalculate them (part panel or Dashboard) to use the replaced values. The
+*"Uses example rates – not for negotiation"* warning goes away once every value a cost uses is replaced.
+
+---
+
 ## Master data
 
 Open **Master data** in the page header. It has two data sets, each with a table editor, **Save**, **Undo**,
@@ -574,6 +600,7 @@ backend/app/capacity.py       Stage C: cavities, tools, tool life, machine hours
 backend/app/master_data.py    Reads, checks and saves master_data.xlsx
 backend/app/mould_db.py       Mould & die tables in the costing database
 backend/app/mould.py          Mould sizing (layout, insert, base) from the database
+backend/app/example_values.py Replace example values checklist: counts by category, replace / keep rates and rows
 backend/app/tool_cost.py      Tool cost engine: BOM, process-wise cost with MHR + labour, try-out, overhead, profit, ... fully traced
 backend/app/formula.py        Safe evaluation of the BOM rules and cost formulas
 backend/app/costing_db.py     The shared SQLite file (costing_db.sqlite)
@@ -595,6 +622,7 @@ frontend/index.html           Estimator page (form + results + 3D viewer)
 frontend/app.js               Estimator logic and three.js viewer
 frontend/master-data.*        Master data page (editor for both data sets)
 frontend/help.*               Help page
+frontend/examples.*           Replace example values checklist (Master data)
 frontend/rates.*              Rates page (MHR & labour, rate library, rate review)
 frontend/dashboard.*          Project dashboard
 frontend/parts.*              Part register (search, part details, revisions, history)
@@ -626,6 +654,8 @@ Tool cost: `POST /api/tool-cost` (Estimate page; `…/export.xlsx` and `…/expo
 and for registered parts `GET/POST /api/parts/{id}/tool-cost` (versions / calculate; with `tool_inputs` or `tool_country` it saves
 them first), `GET /api/parts/{id}/tool-cost/trace?version=`, `…/export.xlsx`, `…/export.pdf` and `POST /api/projects/{id}/tool-cost/recalculate`.
 `GET/PUT /api/master-data` and `GET/PUT /api/mould-db` read and save the data sets.
+Example checklist: `GET /api/examples`, `GET /api/examples/export.xlsx`, `POST /api/examples/rate` (`rate_id`, optional `value`)
+and `POST /api/examples/row` (`set`, `table`, `key`, optional `value`).
 `…/download` and `…/upload` move them to and from Excel.
 Interactive API docs are at http://127.0.0.1:8000/docs while the server runs.
 
