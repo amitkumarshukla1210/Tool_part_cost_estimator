@@ -160,10 +160,7 @@ def test_missing_rate_gives_a_clear_message_and_stores_nothing():
 def test_other_country_uses_its_own_rates_and_currency():
     pid = add_part(project())
     client.put(f"/api/parts/{pid}", json={"country": "CN"})
-    assert "No approved rate" in detail(pid)["rm"]["problem"]              # no CN material rates yet (stage 3)
-    approver()
-    new_rate("ABS", 14, country="CN", month="2026-10")
-    new_rate("ABS", 0, category="material_scrap", country="CN", month="2026-10")
+    assert detail(pid)["rm"]["problem"] == ""                              # CN material rates seeded in stage 3
     r = client.post(f"/api/parts/{pid}/rm-cost", json={}).json()
     v = detail(pid)["rm"]["latest"]
     assert v["country"] == "CN" and v["currency"] == "CNY"

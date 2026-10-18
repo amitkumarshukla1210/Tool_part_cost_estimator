@@ -349,6 +349,12 @@ costing month. A missing rate shows a clear message on that row and does not bre
 
 **Labour rate** = (monthly salary × 12 × (1 + employer %)) ÷ (working days × hours per shift) × (1 + supervision %) ÷ productive %.
 
+**Stage 3 rates (all 9 countries, local currency):** `material` / `material_scrap` for every part material, `tool_material`
+(P20, 2738, S136, H13, 1.2343, C45/S50C, D2, SKD11, BeCu per kg) and `tool_process` (hourly CNC, EDM, wire cut, grinding,
+polishing, heat treatment, fitting, design, tryout, plus per-unit `heat_treatment_per_kg`, `wire_cut_per_mm`,
+`wire_cut_per_cm2`, `polishing_per_cm2`, `painting_per_m2`, `transport_per_kg`). Seeded by `samples/seed_stage3_rates.py`
+as India × a country cost factor. The tool cost engine (stage 4) will read them.
+
 All seeded country rates, machine prices and machine data are **EXAMPLE values** (approved as "Example seed", 2026-10).
 Use *Examples only* in the Rate library to work through them.
 
@@ -356,7 +362,7 @@ Use *Examples only* in the Rate library to work through them.
 
 ## Full roadmap
 
-Stages A–C, the rate library and MHR engine, the part register (stages 1 and 1b) and the RM cost on the register (stage 2) are done.
+Stages A–C, the rate library and MHR engine, the part register (stages 1 and 1b) the RM cost on the register (stage 2) and the country material & process rates (stage 3) are done.
 Next come five requirement sets, built one PR at a time:
 **A** sheet-metal tools, **B** tool / mould / die cost, **C** country rate library,
 **D** country comparison for parts, and **E** dynamic rate library with monthly update and approval.

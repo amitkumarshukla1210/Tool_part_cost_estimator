@@ -180,7 +180,7 @@ def test_api_save_and_approve_and_edit_draft():
 def test_excel_export_and_import_as_drafts():
     xlsx = client.get("/api/rates/download")
     ws = load_workbook(io.BytesIO(xlsx.content))["Rates"]
-    assert ws.max_row - 1 == len([1 for _ in rates.history("forex", "USD")]) + 591
+    assert ws.max_row - 1 == len([1 for _ in rates.history("forex", "USD")]) + 591 + 577
     new = io.BytesIO()
     from openpyxl import Workbook
     wb = Workbook()
@@ -193,3 +193,27 @@ def test_excel_export_and_import_as_drafts():
     assert rates.history("forex", "USD")[-1]["status"] == "draft"
     assert rate_engine.fx_to_inr  # still only approved values are used
     assert rates.lookup("forex", "USD", "", "2026-11")["value"] == 83.5
+
+
+# ---------- Stage 3: tool material and process rates by country ----------
+
+def test_stage3_rates_seeded_for_every_country():
+    countries = ["IN", "CN", "KR", "JP", "TW", "TH", "VN", "DE", "US"]
+    for c in countries:
+        for cat, item in [("tool_material", "P20 (1.2311)"), ("tool_material", "SKD11"), ("tool_material", "H13 (1.2344)"),
+                          ("tool_material", "D2 (1.2379)"), ("tool_material", "C45 / S50C"),
+                          ("tool_process", "heat_treatment_per_kg"), ("tool_process", "wire_cut_per_mm"),
+                          ("tool_process", "wire_cut_per_cm2"), ("tool_process", "polishing_per_cm2"),
+                          ("tool_process", "painting_per_m2"), ("tool_process", "transport_per_kg"),
+                          ("tool_process", "CNC milling"), ("material", "Mild steel CRCA / HR"),
+                          ("material", "Stainless steel 304"), ("material", "ABS")]:
+            r = rates.lookup(cat, item, c, MONTH)
+            assert r["status"] == "approved" and r["is_example"] and r["value"] > 0
+
+
+def test_stage3_values_follow_country_factor_and_forex():
+    inr = rates.lookup("tool_material", "P20 (1.2311)", "IN", MONTH)
+    de = rates.lookup("tool_material", "P20 (1.2311)", "DE", MONTH)
+    fx = rates.lookup("forex", "EUR", "", MONTH)["value"]
+    assert de["currency"] == "EUR" and de["unit"] == "EUR/kg"
+    assert de["value"] * fx == pytest.approx(inr["value"] * 1.4, rel=1e-3)
