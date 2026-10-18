@@ -102,6 +102,8 @@ parts = Table(
     Column("tool_capex_inr", Float),     # per tool × tools over the programme
     # part (piece) cost (stage 8): typed inputs (cycle, cavities, secondary ops %), latest version
     Column("piece_inputs", JSON),
+    # sheet-metal tools (stage 9): die type, edited operation sequence, draw depth / bend radius typed over the model
+    Column("sheet_inputs", JSON),
     Column("piece_cost_inr", Float),
     Column("created_by", String(100), default=""),
     Column("created_at", DateTime, default=now),

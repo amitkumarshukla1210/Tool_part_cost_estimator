@@ -206,7 +206,7 @@ def update_variant(vid: int, data: dict) -> dict:
 
 PART_FIELDS = ("name", "material", "process", "sourcing", "status", "annual_volume", "programme_life_years",
                "target_piece_cost_inr", "notes", "unit_price", "price_currency", "price_source", "price_month",
-               "price_is_example", "dimensions", "country", "costing_month", "rm_inputs", "tool_country", "tool_inputs", "piece_inputs")
+               "price_is_example", "dimensions", "country", "costing_month", "rm_inputs", "tool_country", "tool_inputs", "piece_inputs", "sheet_inputs")
 
 
 def next_part_code(conn, project_code: str) -> str:
@@ -319,6 +319,8 @@ def _part_values(data, where="Part"):
             out[k] = _tool_inputs(v, where)
         elif k == "piece_inputs":
             out[k] = _piece_inputs(v, where)
+        elif k == "sheet_inputs":
+            out[k] = _sheet_inputs(v, where)
         elif k == "price_is_example":
             out[k] = v is True or str(v).strip().lower() in ("1", "true", "yes", "on", "example")
         elif k == "dimensions":
@@ -1203,6 +1205,61 @@ TOOL_INPUTS = {"cavities": "Cavities per tool", "hot_runner": "Hot runner", "sli
                "lifters_per_cavity": "Lifters per cavity", "inserts_per_cavity": "Small inserts per cavity",
                "warranty": "Warranty / spares included"}
 TOOL_FLAGS = ("hot_runner", "warranty")
+
+
+def _sheet_inputs(v, where):
+    """Sheet-metal tool choices typed per part: {mode, operations: [codes], draw_depth_mm, bend_radius_mm}."""
+    if v in (None, "", {}):
+        return None
+    out = {}
+    if v.get("mode") not in (None, ""):
+        if v["mode"] not in ("progressive", "multi_stage"):
+            raise RegisterError(f"{where}: die type must be progressive or multi_stage.")
+        out["mode"] = v["mode"]
+    if v.get("operations") is not None:
+        codes = {r["code"] for r in mould_db.tables()["sheet_operations"]}
+        bad = [c for c in v["operations"] if c not in codes]
+        if bad:
+            raise RegisterError(f"{where}: operation '{bad[0]}' is not in Sheet operations ({', '.join(sorted(codes))}).")
+        out["operations"] = list(v["operations"])
+    for k in ("draw_depth_mm", "bend_radius_mm"):
+        if v.get(k) not in (None, ""):
+            n = _num(v[k], f"{where}: {k}", required=True)
+            if n < 0:
+                raise RegisterError(f"{where}: {k} must not be negative.")
+            out[k] = n
+    return out or None
+
+
+def sheet_tools_result(part_id: int) -> dict:
+    """Sheet-metal tools I for the part's current revision (roadmap stage 9)."""
+    from . import sheet_tools
+    from .geometry import blank_estimate, load_step
+    d = part_detail(part_id, with_rm=False)
+    proc = register_setup.processes().get(d["process"])
+    if d["is_assembly"] or not proc or proc["part_type"] != "sheet_metal":
+        raise ToolNotApplicable("Sheet-metal tools are for parts whose process is sheet metal.")
+    rev = d["revisions"][0] if d["revisions"] else None
+    if not rev or not rev["file_id"]:
+        raise ToolNotApplicable("This part has no 3D file yet. Upload a revision first.")
+    with db.engine().connect() as conn:
+        row = conn.execute(select(db.files).where(db.files.c.id == rev["file_id"])).mappings().first()
+    path = file_store.path_of(dict(row))
+    if not path.exists():
+        raise ToolNotApplicable(f"The 3D file is missing from the storage folder ({row['stored_path']}).")
+    density, _ = _density(d["material"])
+    if not density:
+        raise ToolNotApplicable("Set the part's material (with a density in Master data → Materials).")
+    g, typed = rev["geometry"], d["sheet_inputs"] or {}
+    blank = blank_estimate(g["volume_mm3"], g["bbox_mm"], g.get("wall_mm") or 1.0)
+    volume, _ = _annual_volume(d)
+    feat = sheet_tools.features(load_step(str(path)), g, blank, typed, density, volume, d["programme_life_years"])
+    try:
+        by_process = {"sheet_metal_progressive": "progressive", "sheet_metal_multistage": "multi_stage"}.get(d["process"], "")
+        res = sheet_tools.run(feat, d["material"], typed, by_process)
+    except ValueError as exc:
+        raise ToolNotApplicable(str(exc)) from None
+    return res | {"part_id": part_id, "rev": rev["rev"], "typed": typed, "process": d["process"]}
 
 
 def _piece_inputs(v, where):

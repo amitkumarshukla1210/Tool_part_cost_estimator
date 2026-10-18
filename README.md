@@ -477,6 +477,18 @@ down to the electricity rate inside the MHR. Type over cycle time, cavities or s
 The steps are Cost formulas of scope **piece**, their inputs Formula inputs of that scope (Parameters, the rate
 library or values worked out by the app: see the Formula help sheet). All are EXAMPLE values.
 
+## Sheet-metal tools I (roadmap stage 9)
+
+For parts whose process is sheet metal, the **Sheet-metal tools** block on the part panel reads the 3D model (thickness, holes,
+bends, blank) and proposes the **operation sequence** (blanking, piercing, drawing, bending, trimming), the **force of each
+operation** (perimeter × thickness × shear strength, bend and draw formulas), the **tonnage** with the press safety factor, the
+**smallest press** (Machines whose process is `press_machine_process`) and **formability checks** (bend radius, hole size,
+draw ratio, springback). *Progressive* puts all operations in one die (one press); *multi-stage* gives each operation its own
+press. The die type follows the part's process (progressive / multi-stage); the block also shows what the rules suggest
+(volume, size, draw depth). Edit the die type, draw depth, bend radius or the operation list per part and save.
+Everything is data in **Mould & die database → Sheet materials, Sheet operations, Sheet rules, Sheet checks** and the sheet-metal
+Parameters; all rows are EXAMPLE values.
+
 ## Rates page: country rate library, MHR & labour rates
 
 Open **Rates** in the header. Pick the **producing country** and the **costing month**.

@@ -95,6 +95,10 @@ async function openPart(id) {
     ? await api(`/api/parts/${id}/tool-cost/trace`).catch(() => null) : null;
   part.toolVersions = part.tool?.versions ? await api(`/api/parts/${id}/tool-cost`).catch(() => []) : [];
   part.piece = part.is_assembly || !part.tool?.applicable ? null : await api(`/api/parts/${id}/piece-cost`).catch(() => null);
+  part.sheet = null;
+  if (!part.is_assembly && /sheet_metal/.test(part.process || "")) {
+    part.sheet = await api(`/api/parts/${id}/sheet-tools`).catch((err) => ({ problem: err.message }));
+  }
   part.loop = part.is_assembly ? null : await api(`/api/parts/${id}/design-loop`).catch(() => null);
   renderPart();
   $("panel").hidden = false;
@@ -399,6 +403,7 @@ function renderPart() {
     ${rmBlock(p)}
     ${toolBlock(p)}
     ${pieceBlock(p)}
+    ${sheetBlock(p)}
     ${insertsBlock(p)}
     ${mouldedIntoBlock(p)}
 
@@ -634,6 +639,51 @@ $("panelBody").addEventListener("input", async (e) => {
     const res = await api(`/api/parts?q=${encodeURIComponent(e.target.value)}&limit=15`).catch(() => null);
     if (res) $("codeList").innerHTML = res.rows.filter((r) => r.id !== part.id && !r.is_assembly)
       .map((r) => `<option value="${esc(r.part_code)}">${esc(r.name)}</option>`).join("");
+  }
+});
+
+// sheet-metal tools I: operation sequence, die type, forces, press, formability
+function sheetBlock(p) {
+  const s = p.sheet;
+  if (!s) return "";
+  let html = `<h3 class="block-title">Sheet-metal tools</h3>`;
+  if (s.problem) return html + `<p class="note">${esc(s.problem)}</p>`;
+  const f = s.features, pr = s.press["all stations"];
+  html += `${s.is_example ? '<p class="note"><span class="badge badge-example">EXAMPLE</span> Uses example sheet rules.</p>' : ""}
+    <p>Die type <b>${s.mode === "progressive" ? "Progressive" : "Multi-stage"}</b> (suggested: ${s.recommended === "progressive" ? "progressive" : "multi-stage"}) ·
+      sequence ${esc(s.sequence_source)} · thickness ${fmt(f.t, 2)} mm · ${f.hole_count} hole(s) · ${f.bends} bend(s) · draw ${fmt(f.draw_depth, 1)} mm</p>
+    <div class="table-wrap"><table class="cost-table"><thead><tr><th>#</th><th>Operation</th><th class="num">Force (t)</th><th class="num">Stage weight (g)</th><th>Press</th></tr></thead><tbody>
+    ${s.operations.map((o) => `<tr><td>${o.n}</td><td>${esc(o.name)}</td><td class="calc num">${fmt(o.force_t, 1)}</td><td class="calc num">${fmt(o.stage_weight_g, 1)}</td>
+      <td>${o.press ? esc(o.press.machine_id || "none large enough") : ""}</td></tr>`).join("")}
+    <tr class="total"><td></td><td>Total × safety ${fmt(s.safety_factor, 2)}</td><td class="calc num">${fmt(s.design_force_t, 1)}</td><td></td>
+      <td>${pr ? esc(pr.machine_id ? `${pr.machine_id} (${fmt(pr.tonnage_t)} t)` : "none large enough") : ""}</td></tr></tbody></table></div>
+    ${s.problems.length ? `<h4>Formability</h4><ul>${s.problems.map((x) => `<li>${esc(x.message)}</li>`).join("")}</ul>` : '<p class="note">Formability checks passed.</p>'}
+    <form id="sheetForm" class="card grid2">
+      <label>Die type <select name="mode"><option value="">Follow the part's process</option>
+        <option value="progressive" ${p.sheet_inputs?.mode === "progressive" ? "selected" : ""}>Progressive</option>
+        <option value="multi_stage" ${p.sheet_inputs?.mode === "multi_stage" ? "selected" : ""}>Multi-stage</option></select></label>
+      <label>Draw depth (mm) <input type="number" min="0" step="any" name="draw_depth_mm" value="${p.sheet_inputs?.draw_depth_mm ?? ""}" placeholder="from the model" /></label>
+      <label>Inside bend radius (mm) <input type="number" min="0" step="any" name="bend_radius_mm" value="${p.sheet_inputs?.bend_radius_mm ?? ""}" placeholder="from the model" /></label>
+      <label class="span2">Operations in order (codes, comma-separated; blank = suggested). Available: ${s.available_operations.map((o) => esc(o.code)).join(", ")}
+        <input name="operations" value="${esc((p.sheet_inputs?.operations || []).join(", "))}" /></label>
+      <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary small">Save and recalculate</button></div>
+      <p class="status span2" id="sheetStatus"></p></form>`;
+  return html;
+}
+
+$("panelBody").addEventListener("submit", async (e) => {
+  if (e.target.id !== "sheetForm") return;
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const inputs = {};
+  if (f.get("mode")) inputs.mode = f.get("mode");
+  for (const k of ["draw_depth_mm", "bend_radius_mm"]) if (f.get(k) !== "") inputs[k] = Number(f.get(k));
+  if (f.get("operations").trim()) inputs.operations = f.get("operations").split(",").map((x) => x.trim()).filter(Boolean);
+  try {
+    await api(`/api/parts/${part.id}`, { method: "PUT", body: JSON.stringify({ sheet_inputs: inputs }) });
+    await openPart(part.id);
+  } catch (err) {
+    status($("sheetStatus"), err.message, "error");
   }
 });
 
