@@ -69,7 +69,7 @@ def test_pdf_bom_table_with_low_confidence_cells():
                      ["3", "", "Cable tie", "x", "", ""]])
     lines = bom_extract.parse_pdf(pdf)
     assert [l["category"] for l in lines] == ["wire", "connector", "clip"]
-    assert lines[0]["qty"] == 4 and lines[0]["length_mm"] == 350 and lines[0]["colour"] == "RD" and lines[0]["confidence"] == 1.0
+    assert lines[0]["qty"] == 4 and lines[0]["length_mm"] == 1400 and lines[0]["notes"] == "350 mm each" and lines[0]["colour"] == "RD" and lines[0]["confidence"] == 1.0
     assert lines[2]["confidence"] < bom_extract.LOW and "quantity not a number" in lines[2]["flags"]
     with pytest.raises(bom_extract.ExtractError, match="No BOM table"):
         bom_extract.parse_pdf(make_pdf([["a", "b"], ["c", "d"]]))

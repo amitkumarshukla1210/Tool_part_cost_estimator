@@ -1,6 +1,7 @@
 """Harness and PCB BOM extraction (roadmap stage 14, "Page A"): read a BOM from a file, review it, edit it, export it.
 
     harness   KBL / VEC XML (VDA 4964 / 4968)       wires, connectors, terminals, seals, sleeves, tapes, clips, ...
+              (a wire line's length_mm is the TOTAL length of its qty wires)
               text-based PDF drawing with a BOM table (pdfplumber; scanned PDFs need OCR: a later stage)
     PCB       BOM CSV / Excel (KiCad, Altium, generic), pick-and-place CPL CSV (counts, board extents), typed bare-board data
 
@@ -224,9 +225,12 @@ def parse_pdf(content: bytes) -> list[dict]:
                     if cat == "wire" and length is None:
                         flags.append("wire without a length")
                         conf -= 0.2
+                    each = length
+                    if cat == "wire" and length is not None:
+                        length = length * (qty if qty is not None else 1.0)      # a wire line's length is the TOTAL of its wires
                     out.append(line(cat, f"PDF page {pno} table {tno} row {ri}", conf, flags, ref=cells.get("ref"),
                                     part_number=cells.get("part_number"), maker=cells.get("maker") or None, description=desc, qty=qty if qty is not None else 1.0,
-                                    length_mm=length, colour=cells.get("colour") or None, cross_section_mm2=_num(cells.get("cross_section_mm2")),
+                                    notes=f"{each:g} mm each" if cat == "wire" and each is not None else None, length_mm=length, colour=cells.get("colour") or None, cross_section_mm2=_num(cells.get("cross_section_mm2")),
                                     wire_type=cells.get("wire_type") or None, unit="wires" if cat == "wire" else "pcs"))
         if n_chars == 0:
             raise ExtractError("This PDF has no text (a scan). Scanned drawings need OCR, which comes in a later stage; use a text PDF or the KBL / VEC export.")

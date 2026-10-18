@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from .geometry import PART_TYPES, analyze, blank_estimate, load_step, sheet_thickness, tessellate
+from . import bom_extract as bom_extract_mod
 from . import (capacity, costing_setup, country_rates, file_store, gross_weight, master_data, mould, mould_db, rate_engine, rates,
                register, register_setup, rm_cost, tool_cost, example_values)
 from . import projects_db
@@ -643,6 +644,33 @@ def bom_extract_delete(eid: int):
 def bom_extract_xlsx(eid: int):
     from . import bom_extract
     return _xlsx(_bom(bom_extract.to_excel, eid), f"bom_extract_{eid}.xlsx")
+
+
+def _electro(eid: int, country: Optional[str], month: Optional[str]) -> dict:
+    from . import electro_cost
+    try:
+        return electro_cost.run(eid, country, month)
+    except (electro_cost.ElectroError, bom_extract_mod.ExtractError, rates.RateError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/bom-extracts/{eid}/cost")
+def bom_extract_cost(eid: int, country: Optional[str] = None, month: Optional[str] = None):
+    """Cost per harness / per board from a BOM extract (roadmap stage 15)."""
+    return _electro(eid, country, month)
+
+
+@app.get("/api/bom-extracts/{eid}/cost.xlsx")
+def bom_extract_cost_xlsx(eid: int, country: Optional[str] = None, month: Optional[str] = None):
+    from . import electro_cost
+    return _xlsx(electro_cost.to_excel(_electro(eid, country, month)), f"electro_cost_{eid}.xlsx")
+
+
+@app.get("/api/bom-extracts/{eid}/cost.pdf")
+def bom_extract_cost_pdf(eid: int, country: Optional[str] = None, month: Optional[str] = None):
+    from . import electro_cost
+    return Response(electro_cost.to_pdf(_electro(eid, country, month)), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="electro_cost_{eid}.pdf"'})
 
 
 @app.get("/bom-extract")
