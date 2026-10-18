@@ -18,7 +18,7 @@
 <body>
   <header>
     <h1>Part Cost Estimator</h1>
-    <span class="stage">Stage A · Geometry &amp; net weight</span>
+    <span class="stage">Stage A · Geometry &amp; net weight · Stage B · Gross weight &amp; RM cost</span>
   </header>
 
   <main>
@@ -74,6 +74,59 @@
           Projected area is the shadow of the part seen along an axis, with through-holes removed.
           The highlighted axis (largest shadow) is taken as the mould / die opening direction.
         </p>
+      </div>
+
+      <div id="stageB" hidden>
+        <h2>Stage B · Gross weight &amp; RM cost</h2>
+        <form id="formB" class="grid2">
+          <label class="t-plastic">Runner weight (% of net)
+            <input type="number" name="runner_pct" step="0.1" min="0" /></label>
+          <label class="t-die_casting t-foundry">Casting yield (%)
+            <input type="number" name="yield_pct" step="0.1" min="0.1" max="100" /></label>
+          <label class="t-plastic t-die_casting t-foundry">
+            <span data-label="process_loss_pct"></span>
+            <input type="number" name="process_loss_pct" step="0.1" min="0" /></label>
+
+          <label class="t-sheet_metal">Thickness (mm)
+            <input type="number" name="thickness_mm" step="0.01" min="0.01" /></label>
+          <label class="t-sheet_metal">Blank length (mm)
+            <input type="number" name="blank_length_mm" step="0.1" min="0.1" /></label>
+          <label class="t-sheet_metal">Blank width (mm)
+            <input type="number" name="blank_width_mm" step="0.1" min="0.1" /></label>
+          <label class="t-sheet_metal">Sheet length (mm)
+            <input type="number" name="sheet_length_mm" step="1" min="1" /></label>
+          <label class="t-sheet_metal">Sheet width (mm)
+            <input type="number" name="sheet_width_mm" step="1" min="1" /></label>
+          <label class="t-sheet_metal">Gap between blanks (mm)
+            <input type="number" name="gap_mm" step="0.5" min="0" /></label>
+          <label class="t-sheet_metal">Sheet edge trim (mm)
+            <input type="number" name="edge_mm" step="0.5" min="0" /></label>
+
+          <label>Currency
+            <input type="text" name="currency" value="INR" maxlength="5" /></label>
+          <label>Material rate per kg
+            <input type="number" name="material_rate_per_kg" step="0.01" min="0" placeholder="e.g. 180" /></label>
+          <label class="span2"><span data-label="scrap_rate_per_kg"></span>
+            <input type="number" name="scrap_rate_per_kg" step="0.01" min="0" value="0" /></label>
+        </form>
+        <p class="note t-sheet_metal" id="sheetHint"></p>
+        <p id="statusB" role="status"></p>
+
+        <table id="resultsB">
+          <tbody>
+            <tr><th>Net weight</th><td id="b-net"></td></tr>
+            <tr><th>Gross weight</th><td id="b-gross"></td></tr>
+            <tr><th data-label="returns"></th><td id="b-returns"></td></tr>
+            <tr class="t-plastic t-die_casting t-foundry"><th>Process / melt loss</th><td id="b-loss"></td></tr>
+            <tr><th>Material used per part</th><td id="b-input"></td></tr>
+            <tr><th>Material yield</th><td id="b-yield"></td></tr>
+            <tr class="t-sheet_metal"><th>Blanks per sheet</th><td id="b-nest"></td></tr>
+            <tr class="t-sheet_metal"><th>Sheet weight</th><td id="b-sheet"></td></tr>
+            <tr><th>RM cost (gross)</th><td id="b-rm"></td></tr>
+            <tr><th>Scrap credit</th><td id="b-credit"></td></tr>
+            <tr class="total"><th>Net RM cost per part</th><td id="b-net-rm"></td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
 

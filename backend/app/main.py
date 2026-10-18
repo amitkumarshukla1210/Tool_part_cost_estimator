@@ -1,4 +1,4 @@
-"""FastAPI web server for the part cost estimator (Stage A).
+"""FastAPI web server for the part cost estimator (Stages A and B).
 
 Run from the repository root:
     uvicorn backend.app.main:app --reload
@@ -15,12 +15,13 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .geometry import PART_TYPES, analyze, load_step, tessellate
+from .geometry import PART_TYPES, analyze, blank_estimate, load_step, sheet_thickness, tessellate
+from .gross_weight import DEFAULTS, GrossWeightInput, calculate
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 MAX_UPLOAD_MB = 100
 
-app = FastAPI(title="Tool & Part Cost Estimator", version="0.1.0 (Stage A)")
+app = FastAPI(title="Tool & Part Cost Estimator", version="0.2.0 (Stage B)")
 
 
 @app.get("/api/part-types")
@@ -60,16 +61,35 @@ async def analyze_part(
     vertices, triangles = tessellate(shape)
     metrics = analyze(shape, part_type, density, mesh=(vertices, triangles))
 
+    sheet = None
+    if part_type == "sheet_metal":
+        t = sheet_thickness(shape)
+        sheet = {"thickness_mm": t, "blank_mm": blank_estimate(metrics.volume_mm3, metrics.bbox_mm, t)}
+
     return {
         "file_name": file.filename,
         "part_type_label": PART_TYPES[part_type],
         "metrics": metrics.to_dict(),
+        "sheet_metal": sheet,
         # Flat arrays are what three.js BufferGeometry expects.
         "mesh": {
             "positions": [c for v in vertices for c in v],
             "indices": [i for t in triangles for i in t],
         },
     }
+
+
+@app.get("/api/gross-weight/defaults")
+def gross_weight_defaults():
+    return DEFAULTS
+
+
+@app.post("/api/gross-weight")
+def gross_weight(inp: GrossWeightInput):
+    try:
+        return calculate(inp)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/")

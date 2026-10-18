@@ -79,7 +79,23 @@ table.small td { font-weight: 400; }
 tr.pull td { background: var(--highlight); font-weight: 600; }
 .note { font-size: 0.8rem; color: var(--muted); }
 
-.viewer { position: relative; min-height: 420px; overflow: hidden; }
+.grid2 { grid-template-columns: 1fr 1fr; gap: 10px; }
+.grid2 .span2 { grid-column: span 2; }
+.grid2 label { font-size: 0.82rem; min-width: 0; }
+.grid2 input { width: 100%; min-width: 0; }
+#stageB { margin-top: 8px; padding-top: 4px; border-top: 2px solid var(--border); }
+#statusB { margin: 8px 0 0; min-height: 1.2em; font-size: 0.85rem; color: var(--error); }
+tr.total th, tr.total td { border-top: 2px solid var(--text); font-weight: 700; color: var(--text); }
+[hidden] { display: none !important; }
+
+.viewer {
+  position: sticky;
+  top: 16px;
+  align-self: start;
+  height: calc(100vh - 88px);
+  min-height: 420px;
+  overflow: hidden;
+}
 #viewer { position: absolute; inset: 0; }
 .placeholder {
   position: absolute;
@@ -93,5 +109,5 @@ tr.pull td { background: var(--highlight); font-weight: 600; }
 
 @media (max-width: 800px) {
   main { grid-template-columns: 1fr; padding: 12px; }
-  .viewer { min-height: 360px; }
+  .viewer { position: relative; top: 0; height: 60vh; min-height: 360px; }
 }
