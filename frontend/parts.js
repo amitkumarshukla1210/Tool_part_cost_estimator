@@ -405,6 +405,7 @@ function renderPart() {
     ${toolBlock(p)}
     ${pieceBlock(p)}
     ${sheetBlock(p)}
+    ${compareBlock(p)}
     ${insertsBlock(p)}
     ${mouldedIntoBlock(p)}
 
@@ -640,6 +641,59 @@ $("panelBody").addEventListener("input", async (e) => {
     const res = await api(`/api/parts?q=${encodeURIComponent(e.target.value)}&limit=15`).catch(() => null);
     if (res) $("codeList").innerHTML = res.rows.filter((r) => r.id !== part.id && !r.is_assembly)
       .map((r) => `<option value="${esc(r.part_code)}">${esc(r.name)}</option>`).join("");
+  }
+});
+
+// country comparison and landed cost in India (stage 11)
+function compareBlock(p) {
+  if (p.is_assembly || !p.tool?.applicable) return "";
+  return `<h3 class="block-title">Country comparison and landed cost</h3>
+    <form id="cmpForm" class="card grid2">
+      <label>Freight <select name="mode"><option value="sea">Sea</option><option value="air">Air</option></select></label>
+      <label class="check"><input type="checkbox" name="use_fta" checked /> Use FTA / preferential duty where there is one</label>
+      <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary small">Compare all countries</button></div>
+      <p class="status span2" id="cmpStatus"></p></form><div id="cmpOut"></div>`;
+}
+
+const CMP_COLORS = ["#1f6feb", "#2da44e", "#bf8700", "#8250df", "#8b949e", "#0969da", "#cf222e", "#6e7781"];
+function renderCompare(res) {
+  const ok = res.rows.filter((r) => !r.error);
+  const seg = (r) => [r.components_inr.rm, r.components_inr.process, r.components_inr.tool, r.components_inr.packing, r.components_inr.other,
+    r.landed.freight + r.landed.insurance, r.landed.bcd + r.landed.sws + r.landed.igst - r.landed.igst_credit, r.landed.clearance + r.landed.inland];
+  const labels = ["RM", "Process", "Tool", "Packing", "Other", "Freight+ins.", "Duty+IGST net", "Clearance+inland"];
+  const max = Math.max(...ok.map((r) => r.landed.landed), 1e-9);
+  const bars = ok.map((r) => `<div style="display:flex;align-items:center;gap:6px;margin:2px 0"><b style="width:28px">${esc(r.country)}</b>
+    <div style="display:flex;height:16px;width:${(r.landed.landed / max) * 70}%">${seg(r).map((v, i) => `<span title="${labels[i]} ${fmt(v, 2)}"
+      style="background:${CMP_COLORS[i]};width:${(v / r.landed.landed) * 100}%"></span>`).join("")}</div>
+    <span class="${r.country === res.cheapest ? "strong" : ""}">${fmt(r.landed.landed, 2)}${r.country === res.cheapest ? " ◀ cheapest" : ""}</span></div>`).join("");
+  const q = `mode=${res.mode}&use_fta=${res.use_fta}`;
+  return `${ok.some((r) => r.is_example) ? '<p class="note"><span class="badge badge-example">EXAMPLE</span> Uses example rates and duties – not for negotiation.</p>' : ""}
+    <div>${bars}</div><p class="note">${labels.map((l, i) => `<span style="color:${CMP_COLORS[i]}">■</span> ${l}`).join(" · ")}</p>
+    <div class="table-wrap"><table class="cost-table"><thead><tr><th>Country</th><th class="num">Ex-works (local)</th><th class="num">USD</th><th class="num">Ex-works INR</th>
+      <th class="num">Freight+ins.</th><th class="num">BCD+SWS</th><th class="num">IGST</th><th class="num">IGST credit</th><th class="num">Landed INR</th>
+      <th class="num">Forex −${res.fx_pct}% / +${res.fx_pct}%</th><th class="num">Tool landed INR</th></tr></thead><tbody>
+    ${res.rows.map((r) => r.error ? `<tr><td>${esc(r.country)}</td><td colspan="10" class="empty">${esc(r.error)}</td></tr>` : `<tr class="${r.country === res.cheapest ? "total" : ""}">
+      <td>${esc(r.country)}</td><td class="calc num">${fmt(r.exw_local, 2)} ${esc(r.currency)}</td><td class="calc num">${fmt(r.exw_usd, 2)}</td><td class="calc num">${fmt(r.exw_inr, 2)}</td>
+      <td class="calc num">${fmt(r.landed.freight + r.landed.insurance, 2)}</td><td class="calc num">${fmt(r.landed.bcd + r.landed.sws, 2)} <small>${esc(r.landed.duty_basis)}</small></td>
+      <td class="calc num">${fmt(r.landed.igst, 2)}</td><td class="calc num">${fmt(r.landed.igst_credit, 2)}</td><td class="calc num"><b>${fmt(r.landed.landed, 2)}</b></td>
+      <td class="calc num">${Object.entries(r.forex.scenario).filter(([k]) => k !== "0%").map(([, v]) => fmt(v, 2)).join(" / ")}</td>
+      <td class="calc num">${fmt(r.tool.landed.landed, 0)}</td></tr>`).join("")}</tbody></table></div>
+    <p class="note">Part and tool made in each country with that country's approved rates; the landed cost adds freight, insurance, duty, IGST (credit shown apart),
+      clearance and inland transport in India. Cheapest tool landed: ${esc(res.cheapest_tool || "—")}.
+      <a class="link" href="/api/parts/${part.id}/country-comparison/export.xlsx?${q}">Excel</a> · <a class="link" href="/api/parts/${part.id}/country-comparison/export.pdf?${q}">PDF</a></p>`;
+}
+
+$("panelBody").addEventListener("submit", async (e) => {
+  if (e.target.id !== "cmpForm") return;
+  e.preventDefault();
+  const f = new FormData(e.target);
+  status($("cmpStatus"), "Costing the part in every country…");
+  try {
+    const res = await api(`/api/parts/${part.id}/country-comparison?mode=${f.get("mode")}&use_fta=${f.has("use_fta")}`);
+    status($("cmpStatus"), "");
+    $("cmpOut").innerHTML = renderCompare(res);
+  } catch (err) {
+    status($("cmpStatus"), err.message, "error");
   }
 });
 

@@ -694,6 +694,36 @@ def parts_sheet_layout_file(part_id: int, kind: str):
     return Response(content, media_type=media, headers={"Content-Disposition": f'attachment; filename="{kind.split(".")[0]}_part_{part_id}.{kind.split(".")[1]}"'})
 
 
+def _comparison(part_id: int, countries: Optional[str], mode: str, use_fta: bool) -> dict:
+    from . import landed
+    if mode not in ("sea", "air"):
+        raise HTTPException(400, "mode must be sea or air.")
+    try:
+        return landed.compare(part_id, [c for c in (countries or "").split(",") if c.strip()] or None, mode, use_fta)
+    except (ValueError, register.RegisterError) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/country-comparison")
+def parts_country_comparison(part_id: int, countries: Optional[str] = None, mode: str = "sea", use_fta: bool = True):
+    """Part and tool made in each country, ex-works and landed in India with duties (roadmap stage 11)."""
+    return _comparison(part_id, countries, mode, use_fta)
+
+
+@app.get("/api/parts/{part_id}/country-comparison/export.xlsx")
+def parts_country_comparison_xlsx(part_id: int, countries: Optional[str] = None, mode: str = "sea", use_fta: bool = True):
+    from . import landed
+    return _xlsx(landed.to_excel(_comparison(part_id, countries, mode, use_fta)), f"country_comparison_{part_id}.xlsx")
+
+
+@app.get("/api/parts/{part_id}/country-comparison/export.pdf")
+def parts_country_comparison_pdf(part_id: int, countries: Optional[str] = None, mode: str = "sea", use_fta: bool = True):
+    from . import landed
+    res = _comparison(part_id, countries, mode, use_fta)
+    return Response(landed.to_pdf(res, register.part_detail(part_id, with_rm=False)), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="country_comparison_{part_id}.pdf"'})
+
+
 @app.get("/api/parts/{part_id}/simulation")
 def parts_simulation(part_id: int):
     """Simulation & analysis v1: maps, cycle time, clamp force, machine, corrections required (roadmap stage 6)."""
