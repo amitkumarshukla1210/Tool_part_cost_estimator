@@ -235,14 +235,17 @@ def write(data: dict) -> None:
 
 # ---------- Excel ----------
 
-HEADER_FILL = PatternFill("solid", fgColor="102A43")
-EXAMPLE_FILL = PatternFill("solid", fgColor="FFF4CE")
+# Design to Cost theme: table-head-dark and input-cell-bg
+HEADER_FILL = PatternFill("solid", fgColor="0E1A2C")
+EXAMPLE_FILL = PatternFill("solid", fgColor="FFF9DB")
 
 
 def to_excel() -> bytes:
     data = tables()
     wb = Workbook()
     wb.remove(wb.active)
+    wb.properties.title = "Design to Cost — Mould & die database"
+    wb.properties.creator = "Design to Cost"
     for table, (title, cols, _) in TABLES.items():
         ws = wb.create_sheet(title)
         ws.append([c for c, _, _ in cols])
@@ -260,8 +263,11 @@ def to_excel() -> bytes:
         ws.freeze_panes = "A2"
         ws.auto_filter.ref = ws.dimensions
     ws = wb.create_sheet("Formula help")
+    ws.append(["Design to Cost — Mould & die database: formula help"])
+    ws["A1"].font = Font(bold=True, size=13)
+    ws.append([])
     ws.append(["variable", "meaning"])
-    for cell in ws[1]:
+    for cell in ws[3]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = HEADER_FILL
     for name, meaning in formula.VARIABLE_HELP.items():

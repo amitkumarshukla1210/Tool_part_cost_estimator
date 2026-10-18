@@ -101,7 +101,7 @@ async function switchDataset(name) {
     if (!res.ok) throw new Error(body.detail);
     sheet = Object.keys(conf().tables)[0];
     $("tabs").innerHTML = Object.entries(conf().tables)
-      .map(([key, t]) => `<button role="tab" data-sheet="${key}" aria-selected="${key === sheet}">${t.title}</button>`)
+      .map(([key, t]) => `<button role="tab" class="btn btn-outline" data-sheet="${key}" aria-selected="${key === sheet}">${t.title}</button>`)
       .join("");
     setData(body);
     setStatus("");
@@ -185,7 +185,8 @@ function render() {
         row.is_example ? "example" : "",
       ].join(" ");
       // Excel row number = position + 1 for the header row.
-      return `<tr class="${cls}"><td class="rownum">${i + 2}</td>${columns.map((c) => `<td>${cell(c, row, i)}</td>`).join("")}` +
+      // Yellow = cell you type into, grey = row number (theme costing-table style).
+      return `<tr class="${cls}"><td class="calc rownum">${i + 2}</td>${columns.map((c) => `<td class="input">${cell(c, row, i)}</td>`).join("")}` +
         `<td><button class="del" data-del="${i}" title="Delete row">✕</button></td></tr>`;
     })
     .join("");
@@ -209,7 +210,7 @@ function escapeHtml(s) {
 
 function setStatus(msg, kind = "") {
   $("status").textContent = msg;
-  $("status").className = kind;
+  $("status").className = `status ${kind}`;
 }
 
 // ---------- editing ----------

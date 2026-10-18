@@ -1,0 +1,116 @@
+/* Design to Cost theme — taken from "Design to Cost.html" so the Part Cost
+   Estimator looks the same: navy/blue brand, orange accent, Segoe UI,
+   dark-header costing tables with yellow input cells and grey calculated cells. */
+
+:root{
+  --ink:#152238;               /* headings, nav text */
+  --ink-soft:#33414f;
+  --brand:#1f5fa8;             /* primary blue (buttons, links) */
+  --brand-dark:#123a6b;        /* hover, kickers */
+  --accent:#e07b1f;            /* logo orange: use sparingly */
+  --blue-soft:#eef4fb;
+  --grey:#6b7683;              /* secondary text, labels */
+  --grey-light:#f6f8fa;        /* page bands, readonly fields */
+  --grey-border:#dfe5ec;
+  --text:#33414f;
+  --white:#ffffff;
+  --table-head-dark:#0e1a2c;
+  --table-head-dark-text:#eef4fb;
+  --table-row-alt:#e9f2fd;
+  --table-row-hover:#d5e2f3;
+  --input-cell-bg:#FFF9DB;     /* cells the user types into */
+  --input-cell-border:#E6C200;
+  --calc-cell-bg:#F0F0F0;      /* calculated / locked cells */
+  --danger:#c0392b;
+}
+
+*{margin:0;padding:0;box-sizing:border-box;}
+body{
+  font-family:'Segoe UI', Arial, Helvetica, sans-serif;
+  color:var(--text);background:var(--white);line-height:1.6;
+}
+a{text-decoration:none;color:inherit;}
+.container{width:100%;max-width:1440px;margin:0 auto;padding:0 12px;}
+
+/* ===== Header ===== */
+header{
+  position:sticky;top:0;z-index:100;background:var(--white);
+  border-bottom:1px solid var(--grey-border);box-shadow:0 1px 6px rgba(43,43,46,0.06);
+}
+.header-inner{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 12px;max-width:1440px;margin:0 auto;
+}
+.brand{display:flex;align-items:center;gap:14px;}
+.brand img{height:42px;width:auto;}
+.brand-text{display:flex;flex-direction:column;line-height:1.2;}
+.brand-text .name{font-size:15px;font-weight:700;color:var(--ink);letter-spacing:.3px;}
+.brand-text .tagline{font-size:11.5px;color:var(--grey);letter-spacing:.4px;text-transform:uppercase;}
+nav ul{display:flex;gap:30px;list-style:none;}
+nav a{
+  font-size:14.5px;font-weight:600;color:var(--ink);padding:6px 2px;
+  border-bottom:2px solid transparent;transition:border-color .2s, color .2s;
+}
+nav a:hover, nav a.active{color:var(--brand-dark);border-bottom-color:var(--brand);}
+
+/* ===== Sections ===== */
+section{padding:40px 0;}
+.bg-grey{background:var(--grey-light);}
+.section-head{max-width:680px;margin:0 auto 32px;text-align:center;}
+.kicker{
+  font-size:12.5px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
+  color:var(--brand-dark);margin-bottom:10px;
+}
+.section-head h2{font-size:30px;font-weight:800;color:var(--ink);margin-bottom:12px;}
+.section-head p{color:var(--grey);font-size:15px;}
+
+/* ===== Cards / panels ===== */
+.card{background:#fff;border:1px solid var(--grey-border);border-radius:10px;padding:20px;}
+.card h3{font-size:15px;font-weight:800;color:var(--ink);margin-bottom:14px;}
+
+/* ===== Buttons ===== */
+.btn{
+  display:inline-block;padding:8px 16px;border-radius:6px;border:none;cursor:pointer;
+  font-weight:700;font-size:12px;letter-spacing:.3px;
+  transition:transform .15s, box-shadow .15s, background .2s;
+}
+.btn-primary{background:var(--brand);color:#fff;}
+.btn-primary:hover{background:var(--brand-dark);transform:translateY(-2px);box-shadow:0 8px 18px rgba(91,133,184,0.35);}
+.btn-outline{border:1.5px solid var(--grey-border);color:var(--ink);background:#fff;}
+.btn-outline:hover{border-color:var(--grey);background:var(--grey-light);transform:translateY(-2px);}
+
+/* ===== Form fields ===== */
+label{display:block;font-size:12px;font-weight:700;color:var(--grey);margin-bottom:4px;text-transform:uppercase;letter-spacing:.3px;}
+input, select, textarea{
+  width:100%;padding:8px 10px;border:1.5px solid var(--grey-border);border-radius:6px;
+  font-size:13.5px;font-family:inherit;
+}
+input[readonly]{background:var(--grey-light);color:var(--grey);}
+
+/* ===== Costing table (dark sticky header, like the Part Costing Tool) ===== */
+.table-wrap{overflow:auto;max-height:460px;border:1px solid var(--grey-border);border-radius:8px;}
+.cost-table{width:100%;border-collapse:separate;border-spacing:0;font-family:Arial, sans-serif;font-size:12px;}
+.cost-table th{
+  background:var(--table-head-dark);color:var(--table-head-dark-text);
+  text-transform:uppercase;font-size:10.5px;letter-spacing:.3px;
+  padding:9px 10px;text-align:left;white-space:nowrap;
+  position:sticky;top:0;z-index:3;
+}
+.cost-table td{padding:6px 10px;color:#1F2937;border-bottom:1px solid #E5E7EB;vertical-align:middle;}
+.cost-table tbody tr:nth-child(even){background:var(--table-row-alt);}
+.cost-table tbody tr:hover{background:var(--table-row-hover);}
+/* user-input cell = yellow; calculated cell = grey italic */
+.cost-table td.input, .cost-table td:has(> input:not([readonly])), .cost-table td:has(> select){
+  background:var(--input-cell-bg)!important;border:1px solid var(--input-cell-border)!important;
+}
+.cost-table td.calc, .cost-table td:has(> input[readonly]){
+  background:var(--calc-cell-bg)!important;color:#555;font-style:italic;
+}
+.cost-table td input, .cost-table td select{border:none;background:transparent;padding:2px 4px;font-size:12px;}
+.cost-table tr.total td{font-weight:800;color:var(--ink);border-top:2px solid var(--table-head-dark);}
+
+/* ===== Footer ===== */
+footer{background:var(--grey-light);color:var(--grey);padding:28px 0 20px;border-top:1px solid var(--grey-border);}
+footer .footnote{font-size:12.5px;text-align:center;}
+
+@media (max-width:900px){ nav ul{gap:16px;flex-wrap:wrap;} .section-head h2{font-size:24px;} }

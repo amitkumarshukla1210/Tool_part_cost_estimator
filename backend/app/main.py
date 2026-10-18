@@ -1,4 +1,4 @@
-"""FastAPI web server for the part cost estimator (Stages A to C).
+"""Design to Cost: web server for the Part Cost Estimator module (Stages A to C).
 
 Run from the repository root:
     uvicorn backend.app.main:app --reload
@@ -19,9 +19,10 @@ from .geometry import PART_TYPES, analyze, blank_estimate, load_step, sheet_thic
 from . import capacity, gross_weight, master_data, mould, mould_db
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
+THEME_DIR = Path(__file__).resolve().parents[2] / "theme"
 MAX_UPLOAD_MB = 100
 
-app = FastAPI(title="Tool & Part Cost Estimator", version="0.3.0 (Stage C)")
+app = FastAPI(title="Design to Cost — Part Cost Estimator", version="0.3.0 (Stage C)")
 
 
 @app.get("/api/part-types")
@@ -200,4 +201,10 @@ def master_data_page():
     return FileResponse(FRONTEND_DIR / "master-data.html")
 
 
+@app.get("/help")
+def help_page():
+    return FileResponse(FRONTEND_DIR / "help.html")
+
+
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+app.mount("/theme", StaticFiles(directory=THEME_DIR), name="theme")

@@ -42,16 +42,19 @@ loadMaterials();
 const container = $("viewer");
 let renderer, scene, camera, controls, partGroup;
 
+// Viewer colours come from the Design to Cost theme variables.
+const themeColor = (name) => new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue(name).trim());
+
 function initViewer() {
   container.innerHTML = "";
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
-  renderer.setClearColor(0xf7f9fb);
+  renderer.setClearColor(themeColor("--grey-light"));
   container.appendChild(renderer.domElement);
 
   scene = new THREE.Scene();
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.6));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+  scene.add(new THREE.HemisphereLight(themeColor("--white"), themeColor("--grey"), 1.6));
+  const sun = new THREE.DirectionalLight(themeColor("--white"), 1.6);
   sun.position.set(1, 2, 3);
   scene.add(sun);
 
@@ -88,8 +91,8 @@ function showMesh(mesh) {
 
   partGroup = new THREE.Group();
   partGroup.add(
-    new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: 0x8fa9c4, metalness: 0.2, roughness: 0.55, side: THREE.DoubleSide })),
-    new THREE.LineSegments(new THREE.EdgesGeometry(geom, 25), new THREE.LineBasicMaterial({ color: 0x2b3a4a })),
+    new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: themeColor("--table-row-hover"), metalness: 0.15, roughness: 0.6, side: THREE.DoubleSide })),
+    new THREE.LineSegments(new THREE.EdgesGeometry(geom, 25), new THREE.LineBasicMaterial({ color: themeColor("--ink") })),
   );
 
   geom.computeBoundingBox();
@@ -98,7 +101,7 @@ function showMesh(mesh) {
   const center = box.getCenter(new THREE.Vector3());
   const diag = size.length() || 1;
 
-  const helper = new THREE.Box3Helper(box, 0xff8c00);
+  const helper = new THREE.Box3Helper(box, themeColor("--accent"));
   helper.material.transparent = true;
   helper.material.opacity = 0.5;
   partGroup.add(helper, new THREE.AxesHelper(diag * 0.25));
@@ -138,6 +141,7 @@ $("form").addEventListener("submit", async (e) => {
     startStageB(data, chosenMaterial());
     showMesh(data.mesh);
     setStatus(`${data.file_name} · ${data.part_type_label}`);
+    $("fileInfo").textContent = `${data.file_name} · ${data.part_type_label} · density ${data.metrics.density_g_cm3} g/cm³`;
   } catch (err) {
     setStatus(err.message, true);
   } finally {
@@ -161,10 +165,10 @@ function showResults(m) {
   $("r-solids").textContent = m.solid_count;
   $("r-axes").innerHTML = ["x", "y", "z"]
     .map(
-      (a) => `<tr class="${a === m.pull_direction ? "pull" : ""}">
-        <td>${a.toUpperCase()}</td>
-        <td>${fmt(m.bbox_axes_mm[a], 1)}</td>
-        <td>${fmt(m.projected_area_mm2[a] / 100, 2)}</td></tr>`,
+      (a) => `<tr class="${a === m.pull_direction ? "total" : ""}">
+        <td>${a.toUpperCase()}${a === m.pull_direction ? " · opening direction" : ""}</td>
+        <td class="calc num">${fmt(m.bbox_axes_mm[a], 1)}</td>
+        <td class="calc num">${fmt(m.projected_area_mm2[a] / 100, 2)}</td></tr>`,
     )
     .join("");
   $("results").hidden = false;
@@ -198,8 +202,8 @@ async function startStageB(data, material) {
   const defaultsB = await (await fetch("/api/gross-weight/defaults")).json();
 
   // Only show the inputs and result rows that belong to this part type.
-  document.querySelectorAll("#stageB [class*='t-']").forEach((el) => {
-    el.hidden = !el.classList.contains(`t-${type}`);
+  document.querySelectorAll("#stageB [data-types]").forEach((el) => {
+    el.hidden = !el.dataset.types.split(" ").includes(type);
   });
   document.querySelectorAll("#stageB [data-label]").forEach((el) => {
     el.textContent = LABELS[el.dataset.label][type] ?? "";
@@ -307,8 +311,8 @@ async function startStageC(data) {
   const defaultsC = await (await fetch("/api/capacity/defaults")).json();
   const terms = defaultsC.terms[type];
 
-  document.querySelectorAll("#stageC [class*='t-']").forEach((el) => {
-    el.hidden = !el.classList.contains(`t-${type}`);
+  document.querySelectorAll("#stageC [data-types]").forEach((el) => {
+    el.hidden = !el.dataset.types.split(" ").includes(type);
   });
   const text = {
     ...LABELS_C[type],
@@ -412,6 +416,7 @@ function resetMould() {
   formM.elements.cavities.value = "";
   lastCavities = null;
   $("resultsM").hidden = true;
+  $("bomBlock").hidden = true;
 }
 
 function startMould(stageC) {
@@ -463,10 +468,12 @@ async function calculateMould() {
     if (!res.ok) throw new Error(errorText(data.detail));
     $("statusM").textContent = "";
     $("resultsM").hidden = false;
+    $("bomBlock").hidden = false;
     showMould(data);
   } catch (err) {
     $("statusM").textContent = err.message;
     $("resultsM").hidden = true;
+    $("bomBlock").hidden = true;
   }
 }
 
@@ -487,14 +494,20 @@ function showMould(r) {
     `${b.series} ${b.size_code} · ${b.width_mm} × ${b.length_mm} mm` + (r.base_turned ? " (layout turned 90°)" : "");
   $("m-plates").textContent = `${b.a_plate_mm} / ${b.b_plate_mm} mm · ${b.stack_height_mm} mm`;
   $("m-weight").textContent = `${fmt(b.weight_kg, 0)} kg`;
+  const CATEGORY = { made: "Made", bought_out: "Bought-out", process: "Process" };
+  const blank = (v, f) => (v ? f(v) : "");
   $("m-bom").innerHTML = r.lines
-    .map((l) => `<tr class="${l.is_example ? "example" : ""}"><td>${l.element}</td><td>${fmt(l.quantity, l.quantity % 1 ? 2 : 0)}</td>` +
-      `<td>${l.material || ""}</td><td>${l.hours ? fmt(l.hours, 1) : ""}</td><td>${money(l.total)}</td></tr>`)
+    .map((l) => `<tr><td>${l.element}${l.is_example ? '<span class="example-mark" title="Example value">•</span>' : ""}</td>` +
+      `<td>${CATEGORY[l.category] ?? l.category}</td>` +
+      `<td class="calc num">${fmt(l.quantity, l.quantity % 1 ? 2 : 0)}</td><td>${l.material || ""}</td>` +
+      `<td class="calc num">${blank(l.material_cost, money)}</td><td class="calc num">${blank(l.bought_out_cost, money)}</td>` +
+      `<td class="calc num">${blank(l.hours, (h) => fmt(h, 1))}</td><td class="calc num">${blank(l.process_cost, money)}</td>` +
+      `<td class="calc num">${money(l.total)}</td></tr>`)
     .join("");
+  const t = r.totals;
   $("m-total").innerHTML =
-    `<tr><td>Total</td><td></td><td></td><td>${fmt(r.totals.hours, 0)}</td><td>${money(r.totals.total)}</td></tr>`;
-  $("m-split").textContent =
-    `Material ${money(r.totals.material_cost)} · bought-out ${money(r.totals.bought_out_cost)} · ` +
-    `process ${money(r.totals.process_cost)}`;
+    `<tr class="total"><td>Total mould cost</td><td></td><td></td><td></td><td class="num">${money(t.material_cost)}</td>` +
+    `<td class="num">${money(t.bought_out_cost)}</td><td class="num">${fmt(t.hours, 0)}</td>` +
+    `<td class="num">${money(t.process_cost)}</td><td class="num">${money(t.total)}</td></tr>`;
   $("m-warnings").textContent = r.warnings.join(" ");
 }

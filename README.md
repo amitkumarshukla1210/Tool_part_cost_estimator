@@ -1,6 +1,9 @@
-# Tool & Part Cost Estimator
+<img src="theme/logo.png" alt="Design to Cost logo" height="42" />
 
-A web tool that estimates **part cost, tool cost and machine size** straight from a 3D CAD model (STEP file).
+# Design to Cost
+
+**Part Cost Estimator** is the Design to Cost module that estimates **part cost, tool cost and machine size** straight
+from a 3D CAD model (STEP file).
 It covers four manufacturing routes:
 
 | Part type | Process examples |
@@ -180,6 +183,23 @@ big changes.
 
 ---
 
+## Look & feel: Design to Cost theme
+
+Every page uses the company theme in `theme/`, following `theme/THEME.md`:
+
+- `theme/dtc-theme.css` holds the colours (navy `#152238` text, blue `#1f5fa8` primary, orange `#e07b1f` as a small
+  accent), the Segoe UI font, the header, buttons, cards, form fields and costing tables.
+- `theme/logo.png` is the DC logo, shown in the header and used as the browser-tab icon.
+- Header: logo, **Design to Cost**, tagline *Part Cost Estimator*, and links Estimate · Master data · Help.
+  Footer: *© Design to Cost*.
+- Costing tables: dark navy sticky header and alternating light-blue rows. Cells you type into are yellow, calculated
+  cells are grey italic, and totals rows are bold with a dark line above.
+- `frontend/style.css`, `master-data.css` and `help.css` hold only page layout and use the theme's colour variables.
+  To change a colour or font, edit `theme/dtc-theme.css`.
+- The Excel exports have "Design to Cost" as their title and author, and use the theme's header and input-cell colours.
+
+---
+
 ## How to run it on your computer (step by step)
 
 You need **Python 3.10 or newer**. Check it by typing `python --version` in a terminal.
@@ -204,7 +224,7 @@ On Windows, use *Command Prompt* or *PowerShell*.
    ```bash
    uvicorn backend.app.main:app --reload
    ```
-6. **Open** http://127.0.0.1:8000 in your browser. Upload a STEP file and click **Analyse part**.
+6. **Open** http://127.0.0.1:8000 in your browser (the tab shows "Design to Cost — Part Cost Estimator"). Upload a STEP file and click **Analyse part**.
    Sample parts to try are in the `samples/` folder.
 7. To stop the server, press `Ctrl + C` in the terminal.
 
@@ -234,6 +254,8 @@ master_data/                  master_data.xlsx and mould_db.sqlite (your editabl
 frontend/index.html           Estimator page (form + results + 3D viewer)
 frontend/app.js               Estimator logic and three.js viewer
 frontend/master-data.*        Master data page (editor for both data sets)
+frontend/help.*               Help page
+theme/                        Design to Cost theme: dtc-theme.css, logo.png, THEME.md
 frontend/style.css            Page styling
 frontend/vendor/three/        three.js r160 (MIT licence), bundled for offline use
 samples/                      Sample STEP parts + the script that makes them
@@ -250,3 +272,7 @@ cost. `GET /api/gross-weight/defaults` lists the default values.
 `GET/PUT /api/master-data` and `GET/PUT /api/mould-db` read and save the data sets.
 `…/download` and `…/upload` move them to and from Excel.
 Interactive API docs are at http://127.0.0.1:8000/docs while the server runs.
+
+---
+
+© Design to Cost

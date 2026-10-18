@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design to Cost — Part Cost Estimator · Help</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/help.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img src="/theme/logo.png" alt="Design to Cost logo" />
+        <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/">Estimate</a></li>
+          <li><a href="/master-data">Master data</a></li>
+          <li><a href="/help" class="active" aria-current="page">Help</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="bg-grey">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Help</p>
+          <h2>How the Part Cost Estimator works</h2>
+          <p>Upload a STEP file, check the inputs, and read the results stage by stage. Every rate and rule comes from Master data.</p>
+        </div>
+        <div class="help-steps">
+          <div class="card"><p class="step">1</p><h3>Upload</h3><p>On <a class="link" href="/">Estimate</a>, choose the STEP file (units mm), part type and material, then click <b>Analyse part</b>.</p></div>
+          <div class="card"><p class="step">2</p><h3>Check inputs</h3><p>Yellow fields are yours to change. Defaults come from master data, and results update as you type.</p></div>
+          <div class="card"><p class="step">3</p><h3>Read results</h3><p>Grey italic cells are calculated. Bold rows with a dark line above are the totals that matter.</p></div>
+          <div class="card"><p class="step">4</p><h3>Maintain data</h3><p>Replace example values in <a class="link" href="/master-data">Master data</a> with your own rates and catalogues.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Stage A</p>
+          <h2>Geometry &amp; net weight</h2>
+        </div>
+        <div class="table-wrap">
+          <table class="cost-table">
+            <thead><tr><th>Result</th><th>How it is calculated</th></tr></thead>
+            <tbody>
+              <tr><td>Volume</td><td class="calc">Exact solid volume from the CAD kernel (OpenCascade)</td></tr>
+              <tr class="total"><td>Net part weight</td><td class="calc">Volume (cm³) × density (g/cm³)</td></tr>
+              <tr><td>Bounding box L × W × H</td><td class="calc">Tight box along the model's X/Y/Z axes, L ≥ W ≥ H</td></tr>
+              <tr><td>Projected area</td><td class="calc">Shadow of the part along X, Y and Z without through-holes; the largest is the opening direction</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">Export the part in its moulding / casting orientation. CAD units must be millimetres.</p>
+      </div>
+    </section>
+
+    <section class="bg-grey">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Stage B</p>
+          <h2>Gross weight &amp; RM cost</h2>
+        </div>
+        <div class="table-wrap">
+          <table class="cost-table">
+            <thead><tr><th>Part type</th><th>Gross weight</th><th>Material used per part</th></tr></thead>
+            <tbody>
+              <tr><td>Plastic</td><td class="calc">Net × (1 + runner %)</td><td class="calc">Gross × (1 + purge / start-up loss %)</td></tr>
+              <tr><td>Die casting</td><td class="calc">Net ÷ casting yield %</td><td class="calc">Gross × (1 + melt loss %)</td></tr>
+              <tr><td>Foundry</td><td class="calc">Net ÷ casting yield %</td><td class="calc">Gross × (1 + melt loss %)</td></tr>
+              <tr><td>Sheet metal</td><td class="calc">Sheet weight ÷ blanks nested per sheet</td><td class="calc">= gross</td></tr>
+              <tr class="total"><td>Net RM cost</td><td class="calc" colspan="2">Material used × rate/kg − (gross − net) × scrap value/kg</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Stage C</p>
+          <h2>Cavities &amp; number of tools</h2>
+        </div>
+        <div class="table-wrap">
+          <table class="cost-table">
+            <thead><tr><th>Step</th><th>Formula</th></tr></thead>
+            <tbody>
+              <tr><td>Planned hours / year</td><td class="calc">Working days × shifts × hours per shift</td></tr>
+              <tr><td>Productive hours / year</td><td class="calc">Planned hours × OEE (OEE is applied once, here)</td></tr>
+              <tr><td>Cavities needed</td><td class="calc">Annual volume ÷ productive hours × cycle time (s) ÷ 3600</td></tr>
+              <tr class="total"><td>Cavities per tool</td><td class="calc">Needed, rounded up to an allowed count; no more than fit on the plate or the maximum</td></tr>
+              <tr><td>Tools in parallel</td><td class="calc">ceil(cavities needed ÷ cavities per tool)</td></tr>
+              <tr class="total"><td>Tools over programme</td><td class="calc">max(tools in parallel, ceil(shots over programme ÷ tool life))</td></tr>
+              <tr><td>Machine utilisation</td><td class="calc">(shots × cycle ÷ 3600 ÷ OEE) ÷ (planned hours × tools in parallel)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">Plastic cycle time is estimated from the main wall: base time + cooling factor × wall². Replace it with your own figure.</p>
+      </div>
+    </section>
+
+    <section class="bg-grey">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Mould / die</p>
+          <h2>Mould size &amp; BOM</h2>
+        </div>
+        <div class="table-wrap">
+          <table class="cost-table">
+            <thead><tr><th>Step</th><th>Rule (from the mould &amp; die database)</th></tr></thead>
+            <tbody>
+              <tr><td>Insert per cavity</td><td class="calc">Part L × W + 2 × insert wall; height per half = part H ÷ 2 + backing</td></tr>
+              <tr><td>Cavity layout</td><td class="calc">Every rows × columns grid is tried; the one needing the smallest standard base wins</td></tr>
+              <tr><td>Mould base</td><td class="calc">Smallest base whose insert pocket takes all inserts (either way round)</td></tr>
+              <tr class="total"><td>BOM line cost</td><td class="calc">Quantity × (bought-out cost + weight × steel rate/kg + hours × process rate/h)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">Lines marked • still use EXAMPLE placeholder values. Replace them under Master data → Mould &amp; die database.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Master data</p>
+          <h2>Keeping rates and rules up to date</h2>
+        </div>
+        <div class="help-steps two">
+          <div class="card">
+            <h3>General master data · Excel</h3>
+            <p><code>master_data/master_data.xlsx</code> has three sheets: <b>Parameters</b> (defaults and rules), <b>Materials</b>
+              (density, RM rate, scrap value) and <b>Machines</b> (tonnage, tie-bar size, MHR).</p>
+          </div>
+          <div class="card">
+            <h3>Mould &amp; die database · SQLite</h3>
+            <p><code>master_data/mould_db.sqlite</code> has mould bases, tool steels, BOM elements with rules, process rates and
+              sizing rules. Export it to Excel, edit it, and import it back.</p>
+          </div>
+          <div class="card">
+            <h3>Saving is checked</h3>
+            <p>A wrong value is refused with its sheet and row number, the row is highlighted, and the file stays unchanged.</p>
+          </div>
+          <div class="card">
+            <h3>Writing rules</h3>
+            <p>One-line formulas such as <code>max(4, ceil(cavities * projected_area_cm2 / 8))</code> or
+              <code>cavities if hot_runner else 0</code>. The list of variables is on the Master data page.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container"><p class="footnote">© Design to Cost</p></div>
+  </footer>
+</body>
+</html>

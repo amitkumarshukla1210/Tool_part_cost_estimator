@@ -1,0 +1,23 @@
+/* Help page layout. Colours and fonts come from theme/dtc-theme.css. */
+
+.help-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.help-steps.two { grid-template-columns: repeat(2, 1fr); }
+.help-steps .card p { font-size: 13.5px; color: var(--grey); }
+.help-steps .step {
+  display: inline-grid;
+  place-content: center;
+  width: 28px;
+  height: 28px;
+  margin-bottom: 8px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: var(--white) !important;
+  font-weight: 800;
+}
+.help-steps code, .note code { background: var(--blue-soft); color: var(--brand-dark); padding: 1px 5px; border-radius: 4px; }
+.table-wrap { max-width: 1000px; margin: 0 auto; }
+section .container > .note { max-width: 1000px; margin: 10px auto 0; }
+
+@media (max-width: 900px) {
+  .help-steps, .help-steps.two { grid-template-columns: 1fr; }
+}

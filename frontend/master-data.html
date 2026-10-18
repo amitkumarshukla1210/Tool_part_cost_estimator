@@ -3,73 +3,110 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Master Data</title>
-  <link rel="icon" href="data:," />
+  <title>Design to Cost — Part Cost Estimator · Master data</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
   <link rel="stylesheet" href="/static/style.css" />
   <link rel="stylesheet" href="/static/master-data.css" />
 </head>
 <body>
   <header>
-    <h1>Part Cost Estimator</h1>
-    <nav><a href="/">Estimator</a><a href="/master-data" aria-current="page">Master data</a></nav>
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img src="/theme/logo.png" alt="Design to Cost logo" />
+        <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/">Estimate</a></li>
+          <li><a href="/master-data" class="active" aria-current="page">Master data</a></li>
+          <li><a href="/help">Help</a></li>
+        </ul>
+      </nav>
+    </div>
   </header>
 
-  <div class="md">
-    <div class="datasets" role="tablist" aria-label="Data set">
-      <button role="tab" data-dataset="general" aria-selected="true">
-        <b>General master data</b><span>Rates, defaults, materials, machines · Excel file</span>
-      </button>
-      <button role="tab" data-dataset="mould">
-        <b>Mould &amp; die database</b><span>Bases, tool steels, BOM rules, process rates · SQLite</span>
-      </button>
-    </div>
-    <p class="md-intro" id="intro"></p>
+  <main>
+    <section class="bg-grey md-head">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Master data</p>
+          <h2>Rates, rules &amp; tool database</h2>
+          <p>Every value the estimator uses lives here. Nothing is hard-coded, so change it here or in Excel.</p>
+        </div>
+        <div class="datasets" role="tablist" aria-label="Data set">
+          <button role="tab" class="card" data-dataset="general" aria-selected="true">
+            <b>General master data</b><span>Rates, defaults, materials, machines · Excel file</span>
+          </button>
+          <button role="tab" class="card" data-dataset="mould">
+            <b>Mould &amp; die database</b><span>Bases, tool steels, BOM rules, process rates · SQLite</span>
+          </button>
+        </div>
+      </div>
+    </section>
 
-    <div class="md-toolbar">
-      <div class="tabs" role="tablist" id="tabs"></div>
-      <label class="inline">Part type
-        <select id="filter">
-          <option value="">All</option>
-          <option value="all">Common (all)</option>
-          <option value="plastic">Plastic</option>
-          <option value="die_casting">Die casting</option>
-          <option value="foundry">Foundry</option>
-          <option value="sheet_metal">Sheet metal</option>
-        </select>
-      </label>
-      <label class="inline grow">Search
-        <input type="search" id="search" placeholder="name, description or notes" />
-      </label>
-      <label class="check"><input type="checkbox" id="examplesOnly" /> Examples only</label>
-    </div>
+    <section class="md">
+      <div class="container">
+        <p class="md-intro" id="intro"></p>
 
-    <details class="help" id="formulaHelp" hidden>
-      <summary>How to write rules</summary>
-      <p>
-        Rules work like an Excel formula without cells, e.g. <code>max(4, ceil(cavities * projected_area_cm2 / 8))</code>
-        or <code>cavities if hot_runner else 0</code>. Use + − * / ( ), comparisons, <code>a if condition else b</code>,
-        <code>and</code> / <code>or</code> / <code>not</code> and <code>ceil, floor, round, min, max, abs, sqrt</code>.
-        Line cost = quantity × (bought-out cost + weight × material rate/kg + hours × process rate/h).
-      </p>
-      <dl id="variables"></dl>
-    </details>
+        <div class="md-toolbar">
+          <div class="tabs" role="tablist" id="tabs"></div>
+          <label class="inline">Part type
+            <select id="filter">
+              <option value="">All</option>
+              <option value="all">Common (all)</option>
+              <option value="plastic">Plastic</option>
+              <option value="die_casting">Die casting</option>
+              <option value="foundry">Foundry</option>
+              <option value="sheet_metal">Sheet metal</option>
+            </select>
+          </label>
+          <label class="inline grow">Search
+            <input type="search" id="search" placeholder="name, description or notes" />
+          </label>
+          <label class="check"><input type="checkbox" id="examplesOnly" /> Examples only</label>
+        </div>
 
-    <div class="md-table-wrap">
-      <table class="md-table" id="table"></table>
-    </div>
+        <details class="card help" id="formulaHelp" hidden>
+          <summary>How to write rules</summary>
+          <p>
+            Rules work like an Excel formula without cells, e.g. <code>max(4, ceil(cavities * projected_area_cm2 / 8))</code>
+            or <code>cavities if hot_runner else 0</code>. Use + − * / ( ), comparisons, <code>a if condition else b</code>,
+            <code>and</code> / <code>or</code> / <code>not</code> and <code>ceil, floor, round, min, max, abs, sqrt</code>.
+            Line cost = quantity × (bought-out cost + weight × material rate/kg + hours × process rate/h).
+          </p>
+          <dl id="variables"></dl>
+        </details>
 
-    <div class="md-actions">
-      <button type="button" id="addRow" class="secondary">+ Add row</button>
-      <span id="counts" class="counts"></span>
-      <span class="spacer"></span>
-      <a class="button secondary" id="download">Download Excel</a>
-      <label class="button secondary" for="upload">Upload Excel</label>
-      <input type="file" id="upload" accept=".xlsx" hidden />
-      <button type="button" id="revert" class="secondary" disabled>Undo changes</button>
-      <button type="button" id="save" disabled>Save</button>
-    </div>
-    <p id="status" role="status"></p>
-  </div>
+        <div class="table-wrap md-table-wrap">
+          <table class="cost-table md-table" id="table"></table>
+        </div>
+        <p class="legend">
+          <span class="key input"></span> editable cell
+          <span class="key calc"></span> row number
+          <span class="key mark-example"></span> example value
+          <span class="key mark-changed"></span> changed, not saved
+          <span class="key mark-bad"></span> error
+        </p>
+
+        <div class="md-actions">
+          <button type="button" id="addRow" class="btn btn-outline">+ Add row</button>
+          <span id="counts" class="counts"></span>
+          <span class="spacer"></span>
+          <a class="btn btn-outline" id="download">Download Excel</a>
+          <label class="btn btn-outline" for="upload">Upload Excel</label>
+          <input type="file" id="upload" accept=".xlsx" hidden />
+          <button type="button" id="revert" class="btn btn-outline" disabled>Undo changes</button>
+          <button type="button" id="save" class="btn btn-primary" disabled>Save</button>
+        </div>
+        <p id="status" class="status" role="status"></p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container"><p class="footnote">© Design to Cost</p></div>
+  </footer>
 
   <script src="/static/master-data.js"></script>
 </body>

@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Part Cost Estimator</title>
-  <link rel="icon" href="data:," />
+  <title>Design to Cost — Part Cost Estimator</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
   <link rel="stylesheet" href="/static/style.css" />
   <script type="importmap">
     {
@@ -17,221 +18,315 @@
 </head>
 <body>
   <header>
-    <h1>Part Cost Estimator</h1>
-    <nav><a href="/" aria-current="page">Estimator</a><a href="/master-data">Master data</a></nav>
-    <span class="stage">Stage A · Geometry &amp; net weight · Stage B · Gross weight &amp; RM cost · Stage C · Cavities &amp; tools</span>
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img src="/theme/logo.png" alt="Design to Cost logo" />
+        <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/" class="active" aria-current="page">Estimate</a></li>
+          <li><a href="/master-data">Master data</a></li>
+          <li><a href="/help">Help</a></li>
+        </ul>
+      </nav>
+    </div>
   </header>
 
   <main>
-    <section class="panel">
-      <form id="form">
-        <label>
-          3D model (STEP: .step / .stp, units mm)
-          <input type="file" id="file" accept=".step,.stp" required />
-        </label>
+    <section>
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Part Cost Estimator</p>
+          <h2>Estimate a part from its 3D model</h2>
+          <p>Upload a STEP file to get geometry, weight, RM cost, cavities, tools and a mould BOM.</p>
+        </div>
 
-        <label>
-          Part type
-          <select id="partType" required>
-            <option value="plastic">Plastic injection moulding</option>
-            <option value="die_casting">Pressure die casting</option>
-            <option value="foundry">Foundry / sand / gravity casting</option>
-            <option value="sheet_metal">Sheet metal</option>
-          </select>
-        </label>
-
-        <label>
-          Material preset (optional)
-          <select id="material"></select>
-        </label>
-
-        <label>
-          Material density (g/cm³)
-          <input type="number" id="density" step="0.001" min="0.001" required />
-        </label>
-
-        <button type="submit" id="submit">Analyse part</button>
-        <p id="status" role="status"></p>
-      </form>
-
-      <div id="results" hidden>
-        <h2>Results</h2>
-        <table>
-          <tbody>
-            <tr><th>Volume</th><td id="r-volume"></td></tr>
-            <tr><th>Net part weight</th><td id="r-weight"></td></tr>
-            <tr><th>Bounding box L × W × H</th><td id="r-bbox"></td></tr>
-            <tr><th>Projected area</th><td id="r-proj"></td></tr>
-            <tr><th>Surface area</th><td id="r-surface"></td></tr>
-            <tr><th>Solid bodies</th><td id="r-solids"></td></tr>
-          </tbody>
-        </table>
-        <h3>Projected area by viewing axis</h3>
-        <table class="small">
-          <thead><tr><th>Axis</th><th>Box size (mm)</th><th>Projected area (cm²)</th></tr></thead>
-          <tbody id="r-axes"></tbody>
-        </table>
-        <p class="note">
-          Projected area is the shadow of the part seen along an axis, with through-holes removed.
-          The highlighted axis (largest shadow) is taken as the mould / die opening direction.
-        </p>
-      </div>
-
-      <div id="stageB" class="stage-block" hidden>
-        <h2>Stage B · Gross weight &amp; RM cost</h2>
-        <form id="formB" class="grid2">
-          <label class="t-plastic">Runner weight (% of net)
-            <input type="number" name="runner_pct" step="0.1" min="0" /></label>
-          <label class="t-die_casting t-foundry">Casting yield (%)
-            <input type="number" name="yield_pct" step="0.1" min="0.1" max="100" /></label>
-          <label class="t-plastic t-die_casting t-foundry">
-            <span data-label="process_loss_pct"></span>
-            <input type="number" name="process_loss_pct" step="0.1" min="0" /></label>
-
-          <label class="t-sheet_metal">Thickness (mm)
-            <input type="number" name="thickness_mm" step="0.01" min="0.01" /></label>
-          <label class="t-sheet_metal">Blank length (mm)
-            <input type="number" name="blank_length_mm" step="0.1" min="0.1" /></label>
-          <label class="t-sheet_metal">Blank width (mm)
-            <input type="number" name="blank_width_mm" step="0.1" min="0.1" /></label>
-          <label class="t-sheet_metal">Sheet length (mm)
-            <input type="number" name="sheet_length_mm" step="1" min="1" /></label>
-          <label class="t-sheet_metal">Sheet width (mm)
-            <input type="number" name="sheet_width_mm" step="1" min="1" /></label>
-          <label class="t-sheet_metal">Gap between blanks (mm)
-            <input type="number" name="gap_mm" step="0.5" min="0" /></label>
-          <label class="t-sheet_metal">Sheet edge trim (mm)
-            <input type="number" name="edge_mm" step="0.5" min="0" /></label>
-
-          <label>Currency
-            <input type="text" name="currency" maxlength="5" /></label>
-          <label>Material rate per kg
-            <input type="number" name="material_rate_per_kg" step="0.01" min="0" placeholder="e.g. 180" /></label>
-          <label class="span2"><span data-label="scrap_rate_per_kg"></span>
-            <input type="number" name="scrap_rate_per_kg" step="0.01" min="0" value="0" /></label>
-        </form>
-        <p class="note t-sheet_metal" id="sheetHint"></p>
-        <p id="statusB" role="status"></p>
-
-        <table id="resultsB">
-          <tbody>
-            <tr><th>Net weight</th><td id="b-net"></td></tr>
-            <tr><th>Gross weight</th><td id="b-gross"></td></tr>
-            <tr><th data-label="returns"></th><td id="b-returns"></td></tr>
-            <tr class="t-plastic t-die_casting t-foundry"><th>Process / melt loss</th><td id="b-loss"></td></tr>
-            <tr><th>Material used per part</th><td id="b-input"></td></tr>
-            <tr><th>Material yield</th><td id="b-yield"></td></tr>
-            <tr class="t-sheet_metal"><th>Blanks per sheet</th><td id="b-nest"></td></tr>
-            <tr class="t-sheet_metal"><th>Sheet weight</th><td id="b-sheet"></td></tr>
-            <tr><th>RM cost (gross)</th><td id="b-rm"></td></tr>
-            <tr><th>Scrap credit</th><td id="b-credit"></td></tr>
-            <tr class="total"><th>Net RM cost per part</th><td id="b-net-rm"></td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div id="stageC" class="stage-block" hidden>
-        <h2>Stage C · Cavities &amp; number of tools</h2>
-        <p class="note" id="footprintNote"></p>
-        <form id="formC" class="grid2">
-          <label>Annual volume (parts / year)
-            <input type="number" name="annual_volume" step="1" min="1" /></label>
-          <label>Programme life (years)
-            <input type="number" name="programme_years" step="1" min="1" /></label>
-          <label>Working days / year
-            <input type="number" name="working_days" step="1" min="1" max="366" /></label>
-          <label>Shifts / day
-            <input type="number" name="shifts_per_day" step="1" min="1" max="4" /></label>
-          <label>Hours / shift
-            <input type="number" name="hours_per_shift" step="0.5" min="0.5" /></label>
-          <label>OEE (%)
-            <input type="number" name="oee_pct" step="1" min="1" max="100" /></label>
-          <label><span data-c="cycle"></span>
-            <input type="number" name="cycle_time_s" step="0.1" min="0.1" /></label>
-          <label><span data-c="max"></span>
-            <input type="number" name="max_cavities" step="1" min="1" /></label>
-          <label><span><span data-c="plate"></span> length (mm)</span>
-            <input type="number" name="plate_length_mm" step="10" min="1" /></label>
-          <label><span><span data-c="plate"></span> width (mm)</span>
-            <input type="number" name="plate_width_mm" step="10" min="1" /></label>
-          <label>Cavity &amp; edge spacing (mm)
-            <input type="number" name="spacing_mm" step="1" min="0" /></label>
-          <label><span data-c="life"></span>
-            <input type="number" name="tool_life_shots" step="1000" min="1" /></label>
-          <label class="t-sheet_metal">Operations (dies per set)
-            <input type="number" name="operations" step="1" min="1" /></label>
-        </form>
-        <p class="note" id="cycleNote"></p>
-        <p id="statusC" class="status-error" role="status"></p>
-
-        <table id="resultsC">
-          <tbody>
-            <tr><th>Planned hours / year</th><td id="c-planned"></td></tr>
-            <tr><th>Productive hours / year (× OEE, once)</th><td id="c-hours"></td></tr>
-            <tr><th>Output needed</th><td id="c-pph"></td></tr>
-            <tr><th><span data-c="cavity-cap"></span> needed</th><td id="c-needed"></td></tr>
-            <tr><th>Fit on <span data-c="plate-lc"></span></th><td id="c-fit"></td></tr>
-            <tr class="total"><th><span data-c="cavity-cap"></span> per tool</th><td id="c-cav"></td></tr>
-            <tr><th>Output per tool</th><td id="c-out"></td></tr>
-            <tr class="total"><th><span data-c="tool-cap"></span> running in parallel</th><td id="c-tools"></td></tr>
-            <tr><th><span data-c="shot-cap"></span> / year</th><td id="c-shots"></td></tr>
-            <tr><th><span data-c="shot-cap"></span> over programme</th><td id="c-prog"></td></tr>
-            <tr class="total"><th><span data-c="tool-cap"></span> over programme (incl. replacements)</th><td id="c-sets"></td></tr>
-            <tr class="t-sheet_metal"><th>Total dies</th><td id="c-dies"></td></tr>
-            <tr><th>Machine hours / year</th><td id="c-mh"></td></tr>
-            <tr><th>Machine utilisation</th><td id="c-util"></td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div id="stageM" class="stage-block" hidden>
-        <h2>Mould / die size &amp; BOM <span class="tag">preview</span></h2>
-        <p class="note">
-          Cavities + part size → insert size → standard mould base → BOM, all from the
-          <a href="/master-data?set=mould">mould &amp; die database</a>.
-        </p>
-        <form id="formM" class="grid2">
-          <label>Cavities per tool
-            <input type="number" name="cavities" step="1" min="1" /></label>
-          <label class="check"><input type="checkbox" name="hot_runner" /> Hot runner</label>
-          <label>Slides per cavity
-            <input type="number" name="slides_per_cavity" step="1" min="0" value="0" /></label>
-          <label>Lifters per cavity
-            <input type="number" name="lifters_per_cavity" step="1" min="0" value="0" /></label>
-          <label>Small inserts per cavity
-            <input type="number" name="inserts_per_cavity" step="1" min="0" value="0" /></label>
-        </form>
-        <p id="statusM" class="status-error" role="status"></p>
-        <div id="resultsM" hidden>
-          <p class="warn" id="m-examples"></p>
-          <table>
-            <tbody>
-              <tr><th>Cavity layout</th><td id="m-layout"></td></tr>
-              <tr><th>Insert per cavity (L × W × H per half)</th><td id="m-insert"></td></tr>
-              <tr><th>Insert pocket</th><td id="m-pocket"></td></tr>
-              <tr class="total"><th>Mould base</th><td id="m-base"></td></tr>
-              <tr><th>Base plates A / B · stack height</th><td id="m-plates"></td></tr>
-              <tr><th>Base weight</th><td id="m-weight"></td></tr>
-            </tbody>
-          </table>
-          <h3>BOM</h3>
-          <div class="scroll-x">
-            <table class="small bom">
-              <thead><tr><th>Element</th><th>Qty</th><th>Material</th><th>Hours</th><th>Cost</th></tr></thead>
-              <tbody id="m-bom"></tbody>
-              <tfoot id="m-total"></tfoot>
-            </table>
+        <div class="top-grid">
+          <div class="card">
+            <h3>Part &amp; material</h3>
+            <form id="form">
+              <label>
+                3D model (STEP: .step / .stp, units mm)
+                <input type="file" id="file" accept=".step,.stp" required />
+              </label>
+              <label>
+                Part type
+                <select id="partType" required>
+                  <option value="plastic">Plastic injection moulding</option>
+                  <option value="die_casting">Pressure die casting</option>
+                  <option value="foundry">Foundry / sand / gravity casting</option>
+                  <option value="sheet_metal">Sheet metal</option>
+                </select>
+              </label>
+              <label>
+                Material preset (optional)
+                <select id="material"></select>
+              </label>
+              <label>
+                Material density (g/cm³)
+                <input type="number" id="density" step="0.001" min="0.001" required />
+              </label>
+              <button type="submit" id="submit" class="btn btn-primary">Analyse part</button>
+              <p id="status" class="status" role="status"></p>
+            </form>
           </div>
-          <p class="note" id="m-split"></p>
-          <p class="note" id="m-warnings"></p>
+
+          <div class="card viewer-card">
+            <div id="viewer">
+              <p class="placeholder">Upload a STEP file to see it here.<br />Drag to rotate · scroll to zoom · right-drag to pan</p>
+            </div>
+          </div>
         </div>
       </div>
     </section>
 
-    <section class="viewer">
-      <div id="viewer"><p class="placeholder">Upload a STEP file to see it here.<br />Drag to rotate · scroll to zoom · right-drag to pan</p></div>
+    <!-- Stage A -->
+    <section id="results" class="bg-grey" hidden>
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Stage A</p>
+          <h2>Geometry &amp; net weight</h2>
+          <p id="fileInfo"></p>
+        </div>
+        <div class="stage-grid">
+          <div class="table-wrap">
+            <table class="cost-table">
+              <thead><tr><th>Result</th><th class="num">Value</th></tr></thead>
+              <tbody>
+                <tr><td>Volume</td><td class="calc num" id="r-volume"></td></tr>
+                <tr class="total"><td>Net part weight</td><td class="calc num" id="r-weight"></td></tr>
+                <tr><td>Bounding box L × W × H</td><td class="calc num" id="r-bbox"></td></tr>
+                <tr><td>Projected area</td><td class="calc num" id="r-proj"></td></tr>
+                <tr><td>Surface area</td><td class="calc num" id="r-surface"></td></tr>
+                <tr><td>Solid bodies</td><td class="calc num" id="r-solids"></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <div class="table-wrap">
+              <table class="cost-table">
+                <thead><tr><th>Viewing axis</th><th class="num">Box size (mm)</th><th class="num">Projected area (cm²)</th></tr></thead>
+                <tbody id="r-axes"></tbody>
+              </table>
+            </div>
+            <p class="note">
+              Projected area is the shadow of the part seen along an axis, with through-holes removed.
+              The bold axis (largest shadow) is taken as the mould / die opening direction.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Stage B -->
+    <section id="stageB" hidden>
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Stage B</p>
+          <h2>Gross weight &amp; RM cost</h2>
+          <p>Runner, yield and loss turn net weight into material used per part and its cost.</p>
+        </div>
+        <div class="stage-grid">
+          <div class="card">
+            <h3>Process inputs</h3>
+            <form id="formB" class="grid2">
+              <label data-types="plastic">Runner weight (% of net)
+                <input type="number" name="runner_pct" step="0.1" min="0" /></label>
+              <label data-types="die_casting foundry">Casting yield (%)
+                <input type="number" name="yield_pct" step="0.1" min="0.1" max="100" /></label>
+              <label data-types="plastic die_casting foundry">
+                <span data-label="process_loss_pct"></span>
+                <input type="number" name="process_loss_pct" step="0.1" min="0" /></label>
+
+              <label data-types="sheet_metal">Thickness (mm)
+                <input type="number" name="thickness_mm" step="0.01" min="0.01" /></label>
+              <label data-types="sheet_metal">Blank length (mm)
+                <input type="number" name="blank_length_mm" step="0.1" min="0.1" /></label>
+              <label data-types="sheet_metal">Blank width (mm)
+                <input type="number" name="blank_width_mm" step="0.1" min="0.1" /></label>
+              <label data-types="sheet_metal">Sheet length (mm)
+                <input type="number" name="sheet_length_mm" step="1" min="1" /></label>
+              <label data-types="sheet_metal">Sheet width (mm)
+                <input type="number" name="sheet_width_mm" step="1" min="1" /></label>
+              <label data-types="sheet_metal">Gap between blanks (mm)
+                <input type="number" name="gap_mm" step="0.5" min="0" /></label>
+              <label data-types="sheet_metal">Sheet edge trim (mm)
+                <input type="number" name="edge_mm" step="0.5" min="0" /></label>
+
+              <label>Currency
+                <input type="text" name="currency" maxlength="5" /></label>
+              <label>Material rate per kg
+                <input type="number" name="material_rate_per_kg" step="0.01" min="0" placeholder="e.g. 180" /></label>
+              <label class="span2"><span data-label="scrap_rate_per_kg"></span>
+                <input type="number" name="scrap_rate_per_kg" step="0.01" min="0" value="0" /></label>
+            </form>
+            <p class="note" data-types="sheet_metal" id="sheetHint"></p>
+          </div>
+          <div>
+            <p id="statusB" class="status error" role="status"></p>
+            <div class="table-wrap" id="resultsB">
+              <table class="cost-table">
+                <thead><tr><th>Result</th><th class="num">Value</th></tr></thead>
+                <tbody>
+                  <tr><td>Net weight</td><td class="calc num" id="b-net"></td></tr>
+                  <tr><td>Gross weight</td><td class="calc num" id="b-gross"></td></tr>
+                  <tr><td data-label="returns"></td><td class="calc num" id="b-returns"></td></tr>
+                  <tr data-types="plastic die_casting foundry"><td>Process / melt loss</td><td class="calc num" id="b-loss"></td></tr>
+                  <tr><td>Material used per part</td><td class="calc num" id="b-input"></td></tr>
+                  <tr><td>Material yield</td><td class="calc num" id="b-yield"></td></tr>
+                  <tr data-types="sheet_metal"><td>Blanks per sheet</td><td class="calc num" id="b-nest"></td></tr>
+                  <tr data-types="sheet_metal"><td>Sheet weight</td><td class="calc num" id="b-sheet"></td></tr>
+                  <tr><td>RM cost (gross)</td><td class="calc num" id="b-rm"></td></tr>
+                  <tr><td>Scrap credit</td><td class="calc num" id="b-credit"></td></tr>
+                  <tr class="total"><td>Net RM cost per part</td><td class="calc num" id="b-net-rm"></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Stage C -->
+    <section id="stageC" class="bg-grey" hidden>
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Stage C</p>
+          <h2>Cavities &amp; number of tools</h2>
+          <p id="footprintNote"></p>
+        </div>
+        <div class="stage-grid">
+          <div class="card">
+            <h3>Volume &amp; process</h3>
+            <form id="formC" class="grid2">
+              <label>Annual volume (parts / year)
+                <input type="number" name="annual_volume" step="1" min="1" /></label>
+              <label>Programme life (years)
+                <input type="number" name="programme_years" step="1" min="1" /></label>
+              <label>Working days / year
+                <input type="number" name="working_days" step="1" min="1" max="366" /></label>
+              <label>Shifts / day
+                <input type="number" name="shifts_per_day" step="1" min="1" max="4" /></label>
+              <label>Hours / shift
+                <input type="number" name="hours_per_shift" step="0.5" min="0.5" /></label>
+              <label>OEE (%)
+                <input type="number" name="oee_pct" step="1" min="1" max="100" /></label>
+              <label><span data-c="cycle"></span>
+                <input type="number" name="cycle_time_s" step="0.1" min="0.1" /></label>
+              <label><span data-c="max"></span>
+                <input type="number" name="max_cavities" step="1" min="1" /></label>
+              <label><span><span data-c="plate"></span> length (mm)</span>
+                <input type="number" name="plate_length_mm" step="10" min="1" /></label>
+              <label><span><span data-c="plate"></span> width (mm)</span>
+                <input type="number" name="plate_width_mm" step="10" min="1" /></label>
+              <label>Cavity &amp; edge spacing (mm)
+                <input type="number" name="spacing_mm" step="1" min="0" /></label>
+              <label><span data-c="life"></span>
+                <input type="number" name="tool_life_shots" step="1000" min="1" /></label>
+              <label data-types="sheet_metal">Operations (dies per set)
+                <input type="number" name="operations" step="1" min="1" /></label>
+            </form>
+            <p class="note" id="cycleNote"></p>
+          </div>
+          <div>
+            <p id="statusC" class="status error" role="status"></p>
+            <div class="table-wrap" id="resultsC">
+              <table class="cost-table">
+                <thead><tr><th>Result</th><th class="num">Value</th></tr></thead>
+                <tbody>
+                  <tr><td>Planned hours / year</td><td class="calc num" id="c-planned"></td></tr>
+                  <tr><td>Productive hours / year (× OEE, once)</td><td class="calc num" id="c-hours"></td></tr>
+                  <tr><td>Output needed</td><td class="calc num" id="c-pph"></td></tr>
+                  <tr><td><span data-c="cavity-cap"></span> needed</td><td class="calc num" id="c-needed"></td></tr>
+                  <tr><td>Fit on <span data-c="plate-lc"></span></td><td class="calc num" id="c-fit"></td></tr>
+                  <tr class="total"><td><span data-c="cavity-cap"></span> per tool</td><td class="calc num" id="c-cav"></td></tr>
+                  <tr><td>Output per tool</td><td class="calc num" id="c-out"></td></tr>
+                  <tr class="total"><td><span data-c="tool-cap"></span> running in parallel</td><td class="calc num" id="c-tools"></td></tr>
+                  <tr><td><span data-c="shot-cap"></span> / year</td><td class="calc num" id="c-shots"></td></tr>
+                  <tr><td><span data-c="shot-cap"></span> over programme</td><td class="calc num" id="c-prog"></td></tr>
+                  <tr class="total"><td><span data-c="tool-cap"></span> over programme (incl. replacements)</td><td class="calc num" id="c-sets"></td></tr>
+                  <tr data-types="sheet_metal"><td>Total dies</td><td class="calc num" id="c-dies"></td></tr>
+                  <tr><td>Machine hours / year</td><td class="calc num" id="c-mh"></td></tr>
+                  <tr><td>Machine utilisation</td><td class="calc num" id="c-util"></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Mould / die size & BOM -->
+    <section id="stageM" hidden>
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Mould / die <span class="tag">preview</span></p>
+          <h2>Mould size &amp; BOM</h2>
+          <p>
+            Cavities + part size → insert size → standard mould base → BOM, all from the
+            <a class="link" href="/master-data?set=mould">mould &amp; die database</a>.
+          </p>
+        </div>
+        <div class="stage-grid">
+          <div class="card">
+            <h3>Tool features</h3>
+            <form id="formM" class="grid2">
+              <label>Cavities per tool
+                <input type="number" name="cavities" step="1" min="1" /></label>
+              <label class="check"><input type="checkbox" name="hot_runner" /> Hot runner</label>
+              <label>Slides per cavity
+                <input type="number" name="slides_per_cavity" step="1" min="0" value="0" /></label>
+              <label>Lifters per cavity
+                <input type="number" name="lifters_per_cavity" step="1" min="0" value="0" /></label>
+              <label>Small inserts per cavity
+                <input type="number" name="inserts_per_cavity" step="1" min="0" value="0" /></label>
+            </form>
+          </div>
+          <div>
+            <p id="statusM" class="status error" role="status"></p>
+            <div id="resultsM" hidden>
+              <p class="warn" id="m-examples"></p>
+              <div class="table-wrap">
+                <table class="cost-table">
+                  <thead><tr><th>Mould size</th><th class="num">Value</th></tr></thead>
+                  <tbody>
+                    <tr><td>Cavity layout</td><td class="calc num" id="m-layout"></td></tr>
+                    <tr><td>Insert per cavity (L × W × H per half)</td><td class="calc num" id="m-insert"></td></tr>
+                    <tr><td>Insert pocket</td><td class="calc num" id="m-pocket"></td></tr>
+                    <tr class="total"><td>Mould base</td><td class="calc num" id="m-base"></td></tr>
+                    <tr><td>Base plates A / B · stack height</td><td class="calc num" id="m-plates"></td></tr>
+                    <tr><td>Base weight</td><td class="calc num" id="m-weight"></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="note" id="m-warnings"></p>
+            </div>
+          </div>
+        </div>
+
+        <div id="bomBlock" hidden>
+          <h3 class="block-title">Mould BOM</h3>
+          <div class="table-wrap">
+            <table class="cost-table">
+              <thead>
+                <tr><th>Element</th><th>Category</th><th class="num">Qty</th><th>Material</th>
+                  <th class="num">Material cost</th><th class="num">Bought-out</th><th class="num">Hours</th>
+                  <th class="num">Process cost</th><th class="num">Line total</th></tr>
+              </thead>
+              <tbody id="m-bom"></tbody>
+              <tfoot id="m-total"></tfoot>
+            </table>
+          </div>
+          <p class="note">• = still an EXAMPLE placeholder value in the mould &amp; die database.</p>
+        </div>
+      </div>
     </section>
   </main>
+
+  <footer>
+    <div class="container"><p class="footnote">© Design to Cost</p></div>
+  </footer>
 
   <script type="module" src="/static/app.js"></script>
 </body>

@@ -166,7 +166,7 @@ def validate(raw: dict) -> dict:
 
 # ---------- writing ----------
 
-HEADER_FILL = PatternFill("solid", fgColor="102A43")
+HEADER_FILL = PatternFill("solid", fgColor="0E1A2C")  # Design to Cost table-head-dark
 
 
 def write(data: dict, p: Path | None = None) -> None:
@@ -176,6 +176,8 @@ def write(data: dict, p: Path | None = None) -> None:
     p = p or path()
     wb = Workbook()
     wb.remove(wb.active)
+    wb.properties.title = "Design to Cost — Part Cost Estimator master data"
+    wb.properties.creator = "Design to Cost"
     for sheet, columns in SHEETS.items():
         ws = wb.create_sheet(sheet)
         ws.append(columns)
