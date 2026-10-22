@@ -177,6 +177,16 @@ TABLES = {
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
     ]},
+    "stage_rules": {"title": "Stage tool rules", "unique": ("op", "name"), "columns": [
+        col("op", "Operation (all = every stage)"),
+        col("step", "Order", "number"),
+        col("name", "Name"),
+        col("formula", "Formula", "formula"),
+        col("unit", "Unit"),
+        col("label", "Meaning"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
     "hs_codes": {"title": "HS codes", "unique": ("scope", "part_type"), "columns": [
         col("scope", "Of", "scope_of", ("tool", "part")),
         col("part_type", "Part type", "part_type", PART_TYPES),
@@ -232,6 +242,8 @@ def _check(clean: dict) -> None:
             raise MouldDbError(f"Strip rules ({r['name']}): {exc}") from None
         except ArithmeticError:
             senv[r["name"]] = 1.0
+    from . import tool_design
+    tool_design.validate(clean)
     from . import simulation
     for pt in PART_TYPES:
         env = simulation.sample_env(pt)

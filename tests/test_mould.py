@@ -52,7 +52,7 @@ def test_insert_and_base_follow_cavities_and_part_size():
 
 def test_no_base_large_enough():
     with pytest.raises(ValueError, match="Add a larger size"):
-        estimate(MouldInput(cavities=8, **COVER))
+        estimate(MouldInput(cavities=256, **COVER))
 
 
 def priced(**kw):
@@ -88,14 +88,14 @@ def test_edits_change_the_result():
     for r in data["sizing_rules"]:
         if r["part_type"] == "plastic" and r["parameter"] == "insert_wall_mm":
             r["value"], r["is_example"] = 40, False
-    big = dict([b for b in data["mould_bases"] if b["part_type"] == "plastic"][-1], size_code="7080", length_mm=800, width_mm=700,
-               max_insert_length_mm=640, max_insert_width_mm=540)
+    big = dict([b for b in data["mould_bases"] if b["part_type"] == "plastic"][-1], size_code="9999", length_mm=5000, width_mm=5000,
+               max_insert_length_mm=4000, max_insert_width_mm=4000)
     data["mould_bases"].append(big)
     assert client.put("/api/mould-db", json=data).status_code == 200
 
-    r = estimate(MouldInput(cavities=8, **COVER))  # now fits in the new base
+    r = estimate(MouldInput(cavities=256, **COVER))  # now fits in the new base
     assert r["layout"]["each_l"] == 200
-    assert r["base"]["size_code"] == "7080"
+    assert r["base"]["size_code"] == "9999"
 
 
 @pytest.mark.parametrize("change, message", [
@@ -146,7 +146,7 @@ def test_excel_round_trip():
 def test_api_estimate():
     r = client.post("/api/mould/estimate", json={**COVER, "cavities": 2})
     assert r.status_code == 200 and r.json()["base"]["size_code"] == "3040"
-    assert client.post("/api/mould/estimate", json={**COVER, "cavities": 8}).status_code == 400
+    assert client.post("/api/mould/estimate", json={**COVER, "cavities": 256}).status_code == 400
     r = client.post("/api/tool-cost", json={**COVER, "cavities": 2, "material": "ABS"})
     assert r.status_code == 200 and r.json()["base"]["size_code"] == "3040" and r.json()["value"] > 0
-    assert client.post("/api/tool-cost", json={**COVER, "cavities": 8}).status_code == 400
+    assert client.post("/api/tool-cost", json={**COVER, "cavities": 256}).status_code == 400

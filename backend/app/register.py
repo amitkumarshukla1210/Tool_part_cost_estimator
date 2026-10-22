@@ -1284,6 +1284,21 @@ def _sheet_context(part_id: int):
     return d, rev, shape, blank, res
 
 
+def part_shape(part_id: int):
+    """(part detail, revision, 3D shape) of the part's current revision, for the design tools."""
+    from .geometry import load_step
+    d = part_detail(part_id, with_rm=False)
+    rev = d["revisions"][0] if d["revisions"] else None
+    if d["is_assembly"] or not rev or not rev["file_id"]:
+        raise ToolNotApplicable("This part has no 3D file of its own. Upload a revision first.")
+    with db.engine().connect() as conn:
+        row = conn.execute(select(db.files).where(db.files.c.id == rev["file_id"])).mappings().first()
+    path = file_store.path_of(dict(row))
+    if not path.exists():
+        raise ToolNotApplicable(f"The 3D file is missing from the storage folder ({row['stored_path']}).")
+    return d, rev, load_step(str(path))
+
+
 def sheet_tools_result(part_id: int) -> dict:
     """Sheet-metal tools I for the part's current revision (roadmap stage 9)."""
     return _sheet_context(part_id)[4]

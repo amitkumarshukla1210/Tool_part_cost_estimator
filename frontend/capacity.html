@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design to Cost — Part Cost Estimator · Capacity &amp; tools</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/register.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img src="/theme/logo.png" alt="Design to Cost logo" />
+        <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/dashboard">Dashboard</a></li>
+          <li><a href="/parts">Parts</a></li>
+          <li><a href="/import">Import</a></li>
+          <li><a href="/bom-extract">Harness &amp; PCB</a></li>
+          <li><a href="/">Estimate</a></li>
+          <li><a href="/rates">Rates</a></li>
+          <li><a href="/master-data">Master data</a></li>
+          <li><a href="/capacity" class="active" aria-current="page">Capacity &amp; tools</a></li>
+          <li><a href="/help">Help</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="bg-grey page-head">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Validation</p>
+          <h2>Capacity 0 to 3000 t and free software</h2>
+          <p>Checks that machines, mould bases / die holders, rates and tool designs exist for every process and material up to
+            3000 t, and shows the free software the design tools use. Every machine, base and rate added for the larger range is an
+            <b>EXAMPLE</b> value scaled from the existing rows: replace them on <a class="link" href="/master-data/examples">Replace example values</a>.</p>
+        </div>
+      </div>
+    </section>
+    <section>
+      <div class="container">
+        <form class="card toolbar" id="runForm">
+          <label>Tonnage step (t) <input type="number" id="step" min="50" max="1000" step="50" value="250" /></label>
+          <button type="submit" class="btn btn-primary">Run validation</button>
+          <span class="status" id="status"></span>
+        </form>
+        <div class="tiles" id="tiles"></div>
+        <h3 class="block-title">Largest machine per process</h3>
+        <div id="limits"></div>
+        <h3 class="block-title">Machines, mould bases and rates by tonnage</h3>
+        <div id="coverage"></div>
+        <h3 class="block-title">Mould and die designs: every material at every tonnage</h3>
+        <div id="designs"></div>
+        <h3 class="block-title">Sheet-metal stage dies: every material at every press size</h3>
+        <div id="sheet"></div>
+        <h3 class="block-title">Free software</h3>
+        <div id="software"></div>
+      </div>
+    </section>
+  </main>
+  <script src="/static/common.js"></script>
+  <script src="/static/capacity.js"></script>
+</body>
+</html>

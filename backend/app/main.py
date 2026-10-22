@@ -867,6 +867,70 @@ def parts_sheet_layout_file(part_id: int, kind: str):
     return Response(content, media_type=media, headers={"Content-Disposition": f'attachment; filename="{kind.split(".")[0]}_part_{part_id}.{kind.split(".")[1]}"'})
 
 
+@app.get("/api/capacity/validation")
+def capacity_validation(step_t: float = 250.0):
+    """Machines, mould bases / die holders, rates and tool designs checked from 0 to 3000 t (roadmap stage 20)."""
+    from . import capacity_db
+    if not 50 <= step_t <= 1000:
+        raise HTTPException(400, "step_t must be between 50 and 1000 tonnes.")
+    return capacity_db.validate(step_t)
+
+
+@app.get("/api/capacity/limits")
+def capacity_limits():
+    from . import capacity_db
+    return {"max_t": capacity_db.MAX_T, "limits": capacity_db.process_limits()}
+
+
+@app.get("/api/free-software")
+def free_software():
+    """Free software the design tools use, and what is installed on this PC."""
+    from . import software
+    return software.status()
+
+
+def _pack(part_id: int, video: str, force: bool = False) -> dict:
+    from . import design_pack
+    try:
+        return design_pack.build(part_id, video, force)
+    except register.ToolNotApplicable as exc:
+        raise HTTPException(400, str(exc)) from None
+    except (register.RegisterError, tool_cost.ToolCostError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/design-pack")
+def parts_design_pack(part_id: int, video: str = "short", rebuild: bool = False):
+    """Build (or reuse) the design pack: corrected 3D design, tool design, drawings, simulation video, reports."""
+    from . import design_pack
+    out = _pack(part_id, video, rebuild)
+    return {"summary": out["summary"], "seconds": out["seconds"],
+            "files": [{"name": n, "bytes": len(c), "media_type": design_pack.media_of(n)} for n, c in out["files"].items()],
+            "kinds": {k: next((n for n in out["files"] if n.endswith(v)), None) for k, v in design_pack.KINDS.items()}}
+
+
+@app.get("/api/parts/{part_id}/design-pack.zip")
+def parts_design_pack_zip(part_id: int, video: str = "short"):
+    from . import design_pack
+    out = _pack(part_id, video)
+    return Response(design_pack.zip_bytes(out), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="design_pack_{out["summary"]["part_code"]}.zip"'})
+
+
+@app.get("/api/parts/{part_id}/design-pack/{name}")
+def parts_design_pack_file(part_id: int, name: str, video: str = "short"):
+    """One file of the pack by its name or by kind (xlsx, pdf, pptx, 3d, drawing, corrected-step, tool-step, video …)."""
+    from . import design_pack
+    out = _pack(part_id, video)
+    if name in design_pack.KINDS:
+        name = next((n for n in out["files"] if n.endswith(design_pack.KINDS[name])), name)
+    if name not in out["files"]:
+        raise HTTPException(404, f"The pack has no file '{name}' for this part.")
+    inline = name.endswith(".html")
+    return Response(out["files"][name], media_type=design_pack.media_of(name),
+                    headers={"Content-Disposition": f'{"inline" if inline else "attachment"}; filename="{name}"'})
+
+
 def _comparison(part_id: int, countries: Optional[str], mode: str, use_fta: bool) -> dict:
     from . import landed
     if mode not in ("sea", "air"):
@@ -1193,6 +1257,11 @@ def users_update(uid: int, data: dict):
 @app.get("/login")
 def login_page():
     return FileResponse(FRONTEND_DIR / "login.html")
+
+
+@app.get("/capacity")
+def capacity_page():
+    return FileResponse(FRONTEND_DIR / "capacity.html")
 
 
 @app.get("/users")

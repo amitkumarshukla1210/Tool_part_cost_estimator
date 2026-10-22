@@ -90,16 +90,16 @@ def test_tool_cost_follows_the_formulas_in_master_data():
 def test_trial_machine_is_the_smallest_that_takes_the_clamp_force():
     r = run()
     force = 95.78 * 2 * 400 * 1.2 / 1000                           # area × cavities × pressure × safety ÷ 1000
-    assert r["trial"]["force_t"] == pytest.approx(force) and r["trial"]["machine"]["machine_id"] == "IMM-150"
-    assert run(cavities=4)["trial"]["machine"]["machine_id"] == "IMM-250"   # 184 t
-    trial = 3 * 4 * (rate_engine.mhr("IMM-150", "IN", MONTH)["value"]
+    assert r["trial"]["force_t"] == pytest.approx(force) and r["trial"]["machine"]["machine_id"] == "IMM-120"
+    assert run(cavities=4)["trial"]["machine"]["machine_id"] == "IMM-200"   # 184 t
+    trial = 3 * 4 * (rate_engine.mhr("IMM-120", "IN", MONTH)["value"]
                      + rate_engine.labour_rate("toolmaker", "IN", MONTH)["value"])
     material = 3 * 200 * 2 * 48.66 / 1000 * rates.lookup("material", "ABS", "IN", MONTH)["value"]
     assert step(r, "trial_cost") == pytest.approx(trial + material, rel=1e-9)
 
 
 def test_no_machine_big_enough_is_reported_not_hidden():
-    r = run(projected_area_cm2=900, part_length_mm=100, part_width_mm=90)
+    r = run(projected_area_cm2=9000, part_length_mm=100, part_width_mm=90)   # 4320 t: above the 3000 t ladder
     assert not r["priced"] and r["trial"]["machine"] is None
     assert any("Injection moulding" in m and "takes" in m for m in r["missing"])
 

@@ -405,6 +405,7 @@ function renderPart() {
     ${toolBlock(p)}
     ${pieceBlock(p)}
     ${sheetBlock(p)}
+    ${designPackBlock(p)}
     ${compareBlock(p)}
     ${insertsBlock(p)}
     ${mouldedIntoBlock(p)}
@@ -882,3 +883,47 @@ $("panelBody").addEventListener("change", (e) => {
 });
 
 init();
+
+
+// Design pack (roadmap stage 20): corrected 3D design, tool design, drawings, simulation video and downloads
+function designPackBlock(p) {
+  const moulds = p.tool?.applicable && !p.tool.problem && /plastic|die_casting|injection|casting/.test(p.process || "");
+  if (p.is_assembly || !(moulds || p.sheet)) return "";
+  return `<h3 class="block-title">Design pack: corrected 3D, tool design, drawings, video</h3>
+    <div class="card" id="packCard">
+      <p class="note">${p.sheet ? "Every stage of the sheet-metal tool (die set in 3D, plan drawing, press from 0 to 3000 t), strip and blank, reports and video."
+        : "Draft correction on the 3D model from the simulation, simulation again on the corrected part, mould concept in 3D, corrected drawing, reports and video."}
+        Concept level: the engineer's CAD governs the final tool.</p>
+      <label>Simulation video <select id="packVideo"><option value="short">short (fast)</option><option value="full">full</option><option value="none">none</option></select></label>
+      <button type="button" class="btn btn-primary small" id="packRun">Build design pack</button> <span class="status" id="packStatus"></span>
+      <div id="packOut"></div></div>`;
+}
+
+const PACK_LABELS = { xlsx: "Excel report", pdf: "PDF report", pptx: "PowerPoint", "3d": "3D report (open in browser)", drawing: "Corrected drawing (PDF)",
+  "drawing-dxf": "Corrected drawing (DXF)", "corrected-step": "Corrected part (STEP)", "tool-step": "Tool design (STEP)", "tool-drawing": "Tool design drawing (PDF)",
+  video: "Simulation video (MP4)", "stage-drawings": "Stage tool drawings (PDF)", "part-drawing": "Part drawing (PDF)", "part-drawing-dxf": "Part drawing (DXF)",
+  "blank-dxf": "Blank (DXF)", "strip-dxf": "Strip (DXF)", "tool-pack": "Tool pack (PDF)" };
+
+$("panelBody").addEventListener("click", async (e) => {
+  if (e.target.id !== "packRun") return;
+  const video = $("packVideo").value;
+  e.target.disabled = true;
+  status($("packStatus"), "Building: correcting the 3D model, designing the tool, drawing, rendering. This can take a minute…");
+  try {
+    const r = await api(`/api/parts/${part.id}/design-pack?video=${video}`);
+    status($("packStatus"), `Built in ${r.seconds} s`);
+    const s = r.summary, base = `/api/parts/${part.id}/design-pack`;
+    const facts = s.kind === "mould"
+      ? `Draft-deficient wall ${fmt(s.draft_before_cm2, 1)} → ${fmt(s.draft_after_cm2, 2)} cm² (${s.faces_drafted} faces drafted${s.faces_failed ? `, ${s.faces_failed} not` : ""}) · machine ${esc(s.machine || "none")} · mould base ${esc(s.mould_base)}`
+      : `${esc(s.mode.replace("_", " "))} · ${s.stages} stage(s) · ${fmt(s.total_force_t, 1)} t · presses ${esc([...new Set(s.presses)].join(", ") || "none")}`;
+    const warn = [...(s.warnings || []), ...(s.corrections_after || [])];
+    $("packOut").innerHTML = `<p>${facts}</p>
+      ${warn.length ? `<h4>Still open for R&amp;D / the tool designer</h4><ul>${warn.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>` : ""}
+      <ul class="links">${Object.entries(r.kinds).filter(([, n]) => n).map(([k, n]) =>
+        `<li><a class="link" href="${base}/${encodeURIComponent(n)}?video=${video}" ${k === "3d" ? 'target="_blank"' : ""}>${esc(PACK_LABELS[k] || k)}</a></li>`).join("")}
+        <li><a class="link" href="${base}.zip?video=${video}"><b>Everything (ZIP)</b></a></li></ul>`;
+  } catch (err) {
+    status($("packStatus"), err.message, "error");
+  }
+  e.target.disabled = false;
+});

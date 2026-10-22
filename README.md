@@ -200,6 +200,49 @@ Stored costs never change by themselves: recalculate them (part panel or Dashboa
 
 ---
 
+## Capacity 0 to 3000 t, 3D correction, tool design and downloads (roadmap stage 20)
+
+**Capacity & tools** (page header) validates that every process and material is covered from 0 to 3000 t:
+
+| Check | What it proves |
+|---|---|
+| Machines, mould bases and rates | for every 250 t step (change the step on the page) a machine, a standard mould base / die holder that fits its tie bars, and an approved machine price in all 9 countries exist |
+| Mould and die designs | every plastic and die-casting material, at 10 clamp forces from 50 to 3000 t, runs the real mould sizing and tool-cost engine, gets a try-out machine and fits between its tie bars |
+| Sheet-metal stage dies | every sheet material at 10 press sizes gets a stage-wise tool design and a press whose tonnage **and** bolster take the die set |
+
+Machines, bases and rates above the old limits (800 t die casting, 450 t injection, 400 t press) were added by
+`python -m backend.app.capacity_db` (safe to run again). They are **EXAMPLE values** scaled from the existing machines:
+replace them on *Replace example values*. EPS (80 t) and stretch blow moulding (60 t) end at their physical range; foundry
+patterns have no clamp tonnage.
+
+**Design pack** (block on the part panel for plastic, die-casting and sheet-metal parts):
+
+| Output | Plastic / die casting | Sheet metal |
+|---|---|---|
+| 3D design correction | draft added on the 3D model where the simulation found too little (OpenCascade), simulation run again on the corrected part; corrected **STEP** | formability notes (bend radius, hole size, draw ratio, springback); the model is not changed |
+| Tool design | mould concept in 3D: plates, pillars, core and cavity inserts cut from the corrected part along the proposed parting plane; **STEP** + drawing | **every stage** of the sequence (blank, pierce, draw 1…n, bend, trim) or one progressive die: die set in 3D (shoes, die, stripper, punch plate, punches, pillars, workpiece), plan drawing, components with steel weight and cost, press |
+| Drawings | corrected part (PDF + DXF), tool drawing | part drawing, blank DXF, strip DXF, stage drawings, tool pack |
+| Downloads | Excel, PDF, PowerPoint, 3D report (offline HTML: rotate, zoom, open / explode, hide parts), ZIP of everything | same |
+| Video | MP4: wall-thickness map, filling, cooling, tool opening and ejection | MP4: every stage die closing |
+
+Sheet-metal stage sizes come from **Master data → Mould & die database → Stage tool rules** (clearance from the material's
+shear strength, die block, stripper, punch plate, shoe thickness, margin, die set size, pillars, shut height, draw radii, V
+opening). The number of draws follows the material's limiting draw ratio (Sheet materials) and the later-draw ratio
+(Parameters → `later_draw_ratio`). All values are EXAMPLE rules to replace with your die-shop practice.
+
+**Honest limits.** The tool design is a **concept**: forming surfaces of draw and bend stages are blocks sized to the
+workpiece; core / cavity split follows a proposed parting plane; thick sections, thin walls and undercuts are listed for
+R&D, not changed. The simulation is analytical (wall thickness, draft, cooling time), not Moldflow-level. The existing
+cycle-time estimate uses the 95th-percentile ray-cast wall, which overstates the cycle of deep shells: check it before relying on it.
+
+**Free software** (listed with install commands on the Capacity & tools page): CadQuery / OpenCascade (3D), Shapely,
+NumPy, Matplotlib, ezdxf, ReportLab, openpyxl, python-pptx, three.js (bundled) and FFmpeg through imageio-ffmpeg
+(`pip install -r requirements.txt`). Optional: trimesh and Gmsh (`pip install -r requirements-optional.txt`, Gmsh needs
+`libglu1-mesa`) to mesh the corrected part for FEA, then CalculiX / FreeCAD FEM / ParaView for structural analysis, FreeCAD
+SheetMetal for complex unfolding, OpenFOAM-based research solvers for flow. These optional tools are not run by the app.
+
+---
+
 ## Master data
 
 Open **Master data** in the page header. It has two data sets, each with a table editor, **Save**, **Undo**,

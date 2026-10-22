@@ -32,7 +32,7 @@ def test_forces_by_hand_and_sequence():
     slug = 4 * 28.274 * 2 * 7.85 / 1000
     assert by["blank"]["stage_weight_g"] == pytest.approx(f["weight_g"] + slug, rel=1e-3)
     assert by["pierce"]["stage_weight_g"] == pytest.approx(f["weight_g"])
-    assert r["mode"] == "progressive" and r["press"]["all stations"]["machine_id"] == "PRESS-100"
+    assert r["mode"] == "progressive" and r["press"]["all stations"]["machine_id"] == "PRESS-63"
     assert r["design_force_t"] == pytest.approx(r["total_force_t"] * 1.25)
 
 
