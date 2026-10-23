@@ -230,16 +230,30 @@ shear strength, die block, stripper, punch plate, shoe thickness, margin, die se
 opening). The number of draws follows the material's limiting draw ratio (Sheet materials) and the later-draw ratio
 (Parameters → `later_draw_ratio`). All values are EXAMPLE rules to replace with your die-shop practice.
 
-**Honest limits.** The tool design is a **concept**: forming surfaces of draw and bend stages are blocks sized to the
-workpiece; core / cavity split follows a proposed parting plane; thick sections, thin walls and undercuts are listed for
-R&D, not changed. The simulation is analytical (wall thickness, draft, cooling time), not Moldflow-level. The existing
-cycle-time estimate uses the 95th-percentile ray-cast wall, which overstates the cycle of deep shells: check it before relying on it.
+**What is real and what is not.**
+- **Core and cavity** are split by the part's own envelopes along the opening direction (a cup's core comes down from the open
+  side) and by the parting plane outside the part. Voids left between the envelopes are reported as undercuts needing slides,
+  lifters or shut-offs; the concept's slide / lifter proposals are shown as marker blocks.
+- **Draw and bend forming surfaces** of the last forming stage are cut from the part itself (die = below its lower envelope,
+  punch core = above its upper envelope, part turned so the features point into the die). Earlier draw stages are the
+  cylindrical cups of the draw-ratio calculation. This is for parts without undercuts; wipe bends, restrike and cam tooling
+  still need the engineer's CAD. The bend stage uses the springback overbend (rule `bend_punch_angle_deg`).
+- **3D correction, moulds:** draft on walls. **Sheet metal:** sharp bends get an inside radius (at least the material's minimum
+  × thickness, outside = inside + thickness) and undersized punched holes are opened to the minimum. The stage design is made
+  on the corrected model. Thick sections, thin walls, undercuts, hole-to-edge distance and draw ratio are listed for R&D, not changed.
+- **Cycle time** now measures wall thickness with cone rays and ignores wall ends (a rim used to read the wall length), and
+  percentiles are area-weighted: the sample cover is 17.8 s instead of about 1000 s, with no false sink risk.
+- **Structural check (FEA):** Gmsh meshes (second-order tetrahedra) and CalculiX solves the B side insert under cavity pressure,
+  or the die block under the stage force; deflection and von Mises against Parameters `fea_*` (EXAMPLE steel data), checked
+  against the hand calculation u = p·L/E in the tests. Results are also written as `fea_result.vtk` for ParaView. It is a
+  design check, not a full tool FEA.
+- **Not run by the app:** FreeCAD (opens the STEP files; SheetMetal workbench for complex unfolding), ParaView (opens the VTK
+  file), OpenFOAM. The simulation is analytical, not Moldflow-level.
 
-**Free software** (listed with install commands on the Capacity & tools page): CadQuery / OpenCascade (3D), Shapely,
-NumPy, Matplotlib, ezdxf, ReportLab, openpyxl, python-pptx, three.js (bundled) and FFmpeg through imageio-ffmpeg
-(`pip install -r requirements.txt`). Optional: trimesh and Gmsh (`pip install -r requirements-optional.txt`, Gmsh needs
-`libglu1-mesa`) to mesh the corrected part for FEA, then CalculiX / FreeCAD FEM / ParaView for structural analysis, FreeCAD
-SheetMetal for complex unfolding, OpenFOAM-based research solvers for flow. These optional tools are not run by the app.
+**Free software** (with install commands on the Capacity & tools page): CadQuery / OpenCascade, Shapely, NumPy, Matplotlib,
+ezdxf, ReportLab, openpyxl, python-pptx, three.js (bundled), FFmpeg through imageio-ffmpeg (`pip install -r requirements.txt`);
+Gmsh and trimesh (`pip install -r requirements-optional.txt`; Gmsh needs `apt install libglu1-mesa`) and CalculiX
+(`apt install calculix-ccx`) for the structural check.
 
 ---
 

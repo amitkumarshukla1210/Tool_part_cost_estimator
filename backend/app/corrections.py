@@ -35,6 +35,13 @@ def from_z(shape: cq.Shape, axis: str) -> cq.Shape:
     return shape if rot is None else shape.rotate(cq.Vector(0, 0, 0), cq.Vector(*rot[0]), -rot[1])
 
 
+def to_z_point(p, axis: str) -> tuple:
+    """A point of the original model moved the way to_z moves the shape (opening axis onto +Z)."""
+    v = to_z(cq.Vertex.makeVertex(*p), axis)
+    c = v.Center()
+    return (c.x, c.y, c.z)
+
+
 def draft_map(shape: cq.Shape, min_draft_deg: float) -> dict:
     """Face area (cm²) whose wall is closer to the opening direction (Z) than `min_draft_deg` (like the simulation's map)."""
     from .geometry import tessellate
@@ -150,3 +157,106 @@ def apply_draft(shape: cq.Shape, axis: str, min_draft_deg: float, margin_deg: fl
             "faces_drafted": done, "faces_failed": failed, "before": before, "after": after,
             "volume_change_pct": 100 * (current.Volume() - z.Volume()) / max(z.Volume(), 1e-9),
             "improved": after["low_draft_cm2"] < before["low_draft_cm2"] - 1e-9 or before["low_draft_cm2"] == 0}
+
+
+# ---------------------------------------------------------------- sheet metal
+
+def _edge_faces(shape: cq.Shape) -> list[tuple[cq.Edge, list[cq.Face]]]:
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
+    m = TopTools_IndexedDataMapOfShapeListOfShape()
+    TopExp.MapShapesAndAncestors_s(shape.wrapped, TopAbs_EDGE, TopAbs_FACE, m)
+    out = []
+    for i in range(1, m.Extent() + 1):
+        faces = [cq.Face(f) for f in m.FindFromIndex(i)]
+        out.append((cq.Edge(m.FindKey(i)), faces))
+    return out
+
+
+def _inward(face: cq.Face, mid: cq.Vector, tangent: cq.Vector) -> cq.Vector:
+    """Unit vector in the face, perpendicular to the edge, from the edge midpoint into the face."""
+    d = face.Center() - mid
+    d = d - tangent * d.dot(tangent)
+    return d.normalized() if d.Length > 1e-9 else d
+
+
+def bend_edges(shape: cq.Shape, t: float) -> dict:
+    """Sharp bends of a sheet part: pairs of straight edges between two large planar faces. 'inner' are the concave edges
+    (inside of the bend), 'outer' the convex ones. Wall ends (cut edges, a face only t wide) are not bends."""
+    inner, outer = [], []
+    for e, faces in _edge_faces(shape):
+        if len(faces) != 2 or e.geomType() != "LINE" or e.Length() < 2 * t:
+            continue
+        f1, f2 = faces
+        if f1.geomType() != "PLANE" or f2.geomType() != "PLANE":
+            continue
+        if min(f1.Area() / max(max(x.Length() for x in f1.Edges()), 1e-9), f2.Area() / max(max(x.Length() for x in f2.Edges()), 1e-9)) < 1.5 * t:
+            continue                                         # one face is only a thickness wide: a cut edge
+        mid = e.Center()
+        tan = (e.endPoint() - e.startPoint()).normalized()
+        n1, n2 = f1.normalAt(mid), f2.normalAt(mid)
+        if abs(n1.dot(n2)) > 0.995:
+            continue                                         # coplanar or parallel
+        convex = n1.dot(_inward(f2, mid, tan)) < 0
+        (outer if convex else inner).append(e)
+    return {"inner": inner, "outer": outer}
+
+
+def correct_sheet(shape: cq.Shape, t: float, min_bend_r_factor: float, min_hole_factor: float, default_r_factor: float = 1.0) -> dict:
+    """Make a sheet-metal model manufacturable: give sharp bends an inside radius (at least min_bend_r_factor × t, outside
+    radius = inside + t) and open undersized punched holes to min_hole_factor × t. Returns the new shape and what changed."""
+    r_in = max(min_bend_r_factor, default_r_factor) * t
+    min_hole = min_hole_factor * t
+    cur, log = shape, []
+    be = bend_edges(shape, t)
+    for kind, edges, r in (("inner", be["inner"], r_in), ("outer", be["outer"], r_in + t)):
+        if not edges:
+            continue
+        try:
+            out = cur.fillet(r, edges) if False else cq.Workplane("XY").add(cur).newObject(edges).fillet(r).val()
+        except Exception:
+            out = None
+        if out is not None and out.isValid() and out.Volume() > 0.5 * cur.Volume():
+            log.append({"kind": f"bend radius ({kind})", "count": len(edges), "value_mm": round(r, 2)})
+            cur = out
+        else:
+            log.append({"kind": f"bend radius ({kind})", "count": 0, "value_mm": round(r, 2),
+                        "failed": "the kernel could not round these edges"})
+    # holes: through cylinders (concave, as long as the sheet is thick) whose diameter is under the minimum
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    opened = 0
+    for f in shape.Faces():
+        if f.geomType() != "CYLINDER":
+            continue
+        cyl = BRepAdaptor_Surface(f.wrapped).Cylinder()
+        ax, loc, r = cyl.Axis().Direction(), cyl.Axis().Location(), cyl.Radius()
+        axis = cq.Vector(ax.X(), ax.Y(), ax.Z())
+        if 2 * r + 1e-6 >= min_hole:
+            continue
+        verts, _ = f.tessellate(0.1)
+        along = [(v.x * axis.x + v.y * axis.y + v.z * axis.z) for v in verts]
+        height = max(along) - min(along)
+        if not 0.9 * t <= height <= 1.1 * t:
+            continue
+        p = sample_point(f)
+        n = f.normalAt(p)
+        radial = cq.Vector(loc.X() - p.x, loc.Y() - p.y, loc.Z() - p.z)
+        radial = radial - axis * radial.dot(axis)
+        if n.dot(radial) <= 0:
+            continue                                         # convex (an outside corner), not a hole
+        mid = (min(along) + max(along)) / 2
+        base = cq.Vector(loc.X(), loc.Y(), loc.Z())
+        base = base + axis * (mid - base.dot(axis))
+        cut = cq.Solid.makeCylinder(min_hole / 2, t * 3, base - axis * (t * 1.5), axis)
+        try:
+            out = cur.cut(cut)
+            if out.isValid() and out.Volume() < cur.Volume():
+                cur = out
+                opened += 1
+        except Exception:
+            pass
+    if opened:
+        log.append({"kind": "hole opened to the minimum", "count": opened, "value_mm": round(min_hole, 2)})
+    return {"shape": cur, "changes": log, "changed": any(x.get("count") for x in log), "r_in_mm": r_in, "min_hole_mm": min_hole,
+            "volume_change_pct": 100 * (cur.Volume() - shape.Volume()) / max(shape.Volume(), 1e-9)}

@@ -152,3 +152,79 @@ def test_sheet_metal_design_pack_has_every_stage_and_a_video():
 def test_design_pack_refuses_unsupported_parts():
     pid = add_part(project("E"), "plate_with_hole.step", "Mild steel CRCA / HR", "machined", "MA-1")
     assert client.get(f"/api/parts/{pid}/design-pack").status_code == 400
+
+
+# ---------- completion of the stage-20 limits ----------
+
+def test_wall_thickness_ignores_wall_ends_so_the_cover_cycle_is_realistic():
+    import numpy as np
+    from backend.app import simulation
+    s = geometry.load_step("samples/plastic_cover.step")
+    v, t = geometry.tessellate(s)
+    m = geometry.analyze(s, "plastic", 1.04)
+    facts = {"part_weight_g": 50, "wall_mm": 0, "part_l": 120, "part_w": 80, "part_h": 30, "projected_area_cm2": 95.8,
+             "volume_cm3": 46, "cavities": 1, "slides": 0, "lifters": 0, "undercut_area_cm2": 0, "inserts": 0}
+    r = simulation.run(v, t, "plastic", facts, m.projected_area_mm2)
+    assert r["wall_mm"] == pytest.approx(2.5, abs=0.05) and r["results"]["max_wall_mm"] == pytest.approx(2.5, abs=0.2)
+    assert r["results"]["cycle_s"] < 30                          # was about 1800 s: the rim measured the wall LENGTH
+    assert r["maps"]["sink_risk_cm2"] == 0                       # the rim is not a thick section
+
+
+def test_forming_surfaces_come_from_the_part_and_the_mould_split_has_no_overlap():
+    box = cq.Workplane("XY").box(60, 40, 30, centered=(True, True, False)).faces(">Z").shell(-2).val()
+    cup = (cq.Workplane("XY").circle(30).extrude(20).faces(">Z").shell(-2)
+           .union(cq.Workplane("XY").circle(45).circle(28).extrude(2).translate((0, 0, 18))).val())
+    placed = tool_design.place_formed(cup, 0.0)
+    assert tool_design.flange_level(placed) == pytest.approx(0.0) and placed.BoundingBox().zmin < -17     # cup points down
+    fp = tool_design.forming_parts(placed, 0.0, 2.0, 200, 150, 80)
+    assert fp["die_cut"].Volume() > 0 and fp["core"].Volume() > 1000                                       # punch core fills the cup
+    tool = {"base": {"length_mm": 400, "width_mm": 400, "a_plate_mm": 80, "b_plate_mm": 80, "clamp_plates_mm": 25, "support_plate_mm": 40,
+                     "spacer_block_mm": 80, "ejector_plates_mm": 45, "size_code": "T"},
+            "layout": {"rows": 1, "cols": 1, "empty": 0, "each_l": 80, "each_w": 60, "pocket_l": 80, "pocket_w": 60}}
+    m = tool_design.mould_3d(box, "z", 30.0, tool)
+    a = next(c["shape"] for c in m["components"] if c["name"] == "A side insert")
+    b = next(c["shape"] for c in m["components"] if c["name"] == "B side insert")
+    assert a.Volume() > 0 and b.Volume() > 0
+    # inserts are shown in their open positions; compare in the closed position (A back down by the opening gap)
+    a_closed = a.translate(cq.Vector(0, 0, -m["open_gap_mm"]))
+    assert a_closed.intersect(b).Volume() < 1.0
+
+
+def test_sheet_model_is_corrected_bends_get_a_radius_and_small_holes_are_opened():
+    s = geometry.load_step("samples/sheet_metal_bracket.step")
+    r = corrections.correct_sheet(s, 2.0, 1.0, 1.0)
+    assert r["changed"] and r["shape"].isValid()
+    assert {c["kind"] for c in r["changes"]} == {"bend radius (inner)", "bend radius (outer)"}
+    assert sum(1 for f in r["shape"].Faces() if f.geomType() == "CYLINDER") == 2
+    assert not corrections.correct_sheet(r["shape"], 2.0, 1.0, 1.0)["changed"]       # already manufacturable
+    plate = cq.Workplane("XY").box(80, 60, 2).faces(">Z").workplane().rarray(30, 20, 2, 2).hole(1).val()
+    h = corrections.correct_sheet(plate, 2.0, 1.0, 1.0)
+    assert h["changes"] == [{"kind": "hole opened to the minimum", "count": 4, "value_mm": 2.0}]
+    assert h["shape"].Volume() < plate.Volume()
+
+
+def test_springback_overbend_is_a_stage_rule():
+    vals, _ = tool_design.rule_values("bend", {"t": 2, "shear_mpa": 300, "force_t": 5, "work_l": 80, "work_w": 50, "bend_radius": 2,
+                                               "bend_angle_deg": 90, "springback_deg": 3})
+    assert vals["bend_punch_angle_deg"] == 87
+
+
+def test_fea_matches_the_hand_calculation():
+    from backend.app import fea
+    if not (fea.tools()["gmsh"] and fea.tools()["ccx"]):
+        pytest.skip("Gmsh / CalculiX not installed")
+    blk = cq.Workplane("XY").box(50, 50, 40, centered=(True, True, False)).val()
+    r = fea.solve(blk, 100.0, "top", {})
+    assert r["max_deflection_mm"] == pytest.approx(100 * 40 / 210000, rel=0.1)       # u = p·L / E for a fixed-end block
+    assert r["ok"] and r["vtk"].startswith(b"# vtk")
+    weak = fea.solve(blk, 1500.0, "top", {})
+    assert not weak["ok"]
+
+
+def test_design_pack_reports_the_fea_and_the_sheet_correction():
+    pid = add_part(project("F"), "sheet_metal_bracket.step", "Mild steel CRCA / HR", "sheet_metal_multistage", "SM-2")
+    s = client.get(f"/api/parts/{pid}/design-pack?video=none").json()["summary"]
+    assert s["corrections"] and s["springback_overbend_deg"] is not None
+    from backend.app import fea
+    if fea.tools()["gmsh"] and fea.tools()["ccx"]:
+        assert s["fea"]["available"] and s["fea"]["ok"]

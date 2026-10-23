@@ -28,14 +28,14 @@ TOOLS = [
     ("pptx", "python-pptx", "PowerPoint downloads", "MIT", "pptx", None, "pip install python-pptx", True, "Downloads"),
     ("threejs", "three.js", "3D viewer page (bundled in frontend/vendor/three)", "MIT", None, None, "bundled", True, "3D report"),
     ("trimesh", "trimesh", "Mesh repair and checks before meshing for FEA", "MIT", "trimesh", None, "pip install trimesh", False, "Simulation"),
-    ("gmsh", "Gmsh", "Tetrahedral meshing of the corrected part for FEA", "GPL-2+", "gmsh", "gmsh", "pip install gmsh", False, "Simulation"),
-    ("calculix", "CalculiX (ccx)", "Structural FEA of tool plates and parts (needs a model set up by an engineer)", "GPL-2+", None, "ccx",
+    ("gmsh", "Gmsh", "Run by the app: meshes inserts and die blocks for the structural check", "GPL-2+", "gmsh", "gmsh", "pip install gmsh", False, "Simulation"),
+    ("calculix", "CalculiX (ccx)", "Run by the app: solves the insert / die block check (deflection, von Mises); results also as VTK", "GPL-2+", None, "ccx",
      "apt install calculix-ccx  |  conda install -c conda-forge calculix", False, "Simulation"),
-    ("freecad", "FreeCAD", "Sheet-metal unfolding (SheetMetal workbench), detailed tool design, FEM workbench", "LGPL-2+", None, "freecadcmd",
+    ("freecad", "FreeCAD", "Not run by the app: opens the STEP files; SheetMetal workbench unfolds complex parts, FEM workbench for deeper analysis", "LGPL-2+", None, "freecadcmd",
      "apt install freecad  |  https://www.freecad.org", False, "3D design"),
     ("openfoam", "OpenFOAM / openInjMoldSim", "3D mould-filling research solver (not production grade)", "GPL-3", None, "simpleFoam",
      "https://www.openfoam.com", False, "Simulation"),
-    ("paraview", "ParaView", "Viewing FEA / CFD result files", "BSD-3", None, "paraview", "apt install paraview", False, "Simulation"),
+    ("paraview", "ParaView", "Not run by the app: opens the fea_result.vtk file (deflection, von Mises)", "BSD-3", None, "paraview", "apt install paraview", False, "Simulation"),
     ("libreoffice", "LibreOffice", "Converts the PowerPoint / Excel downloads to PDF if you want", "MPL-2", None, "soffice",
      "apt install libreoffice", False, "Downloads"),
     ("tesseract", "Tesseract OCR", "Scanned-PDF BOM extraction (harness and PCB)", "Apache-2.0", None, "tesseract", "apt install tesseract-ocr", False, "Harness"),
@@ -104,7 +104,7 @@ def mesh_check(shape) -> dict:
         import cadquery as cq
         cq.exporters.export(cq.Workplane("XY").add(shape), str(path))
         try:
-            gmsh.initialize()
+            gmsh.initialize(interruptible=False)
             gmsh.option.setNumber("General.Terminal", 0)
             gmsh.open(str(path))
             bb = shape.BoundingBox()

@@ -52,6 +52,7 @@ SEED_RULES = [
     ("draw", "blank_holder_force_t", "0.3 * force_t", "t", "Blank holder force"),
     ("bend", "v_opening_mm", "max(8 * t, 6 * t + 2 * bend_radius)", "mm", "V-die opening"),
     ("bend", "bend_punch_radius_mm", "bend_radius", "mm", "Bend punch nose radius"),
+    ("bend", "bend_punch_angle_deg", "max(30, bend_angle_deg - springback_deg)", "°", "Bend punch / die angle: overbent by the springback allowance"),
     ("trim", "trim_clearance_mm", "clearance_mm", "mm", "Trim steel clearance per side"),
     ("pierce", "punch_relief_mm", "0.5", "mm", "Slug relief below the die button"),
 ]
@@ -93,6 +94,7 @@ def seed(month: str | None = None) -> dict:
 
 def validate(clean: dict) -> None:
     env = {k: 1.0 for k in STAGE_VARS}
+    env |= {k: 1.0 for k in ("springback_deg", "draw_ratio", "progressive_ok")} | {r["name"]: 1.0 for r in clean.get("sheet_rules", [])}
     env |= {k: float(v) for k, v in master_data.parameters("sheet_metal").items() if isinstance(v, (int, float))}
     for i, r in enumerate(sorted(clean.get("stage_rules", []), key=lambda r: (r["op"] != "all", r["step"])), start=2):
         if not r["name"].isidentifier():
@@ -202,6 +204,7 @@ def sheet_design(fp: dict, sl: dict, res: dict, geometry: dict, country: str = "
             "work_h": b["height"], "bend_radius": feat["bend_radius"], "draw_dia": feat["draw_dia"], "draw_depth": feat["draw_depth"],
             "hole_count": feat["hole_count"], "bends": feat["bends"], "stage_count": len(stages),
             "part_l": b["length"], "part_w": b["width"], "part_h": b["height"]}
+    base |= {k: float(v) for k, v in res.get("values", {}).items() if isinstance(v, (int, float))}
     sv = sl["best"]["values"] if progressive else {}
     if progressive:
         base |= {"stations": sv["stations"], "pitch_mm": sv["pitch_mm"], "strip_width_mm": sv["strip_width_mm"],
@@ -248,6 +251,11 @@ def sheet_design(fp: dict, sl: dict, res: dict, geometry: dict, country: str = "
         })
         if not press["fits"]:
             warnings.append(f"Stage {s['n']} {s['name']}: {press['reason']}.")
+    forming = [o for o in out_stages if o["code"] in ("draw", "bend")]
+    if forming:
+        forming[-1]["real_form"] = True
+        for o in out_stages:
+            o["after_forming"] = o["n"] > forming[-1]["n"] and o["code"] == "trim"
     if progressive:
         for o in out_stages[1:]:
             o["shared_die_set"] = True
@@ -265,6 +273,74 @@ def sheet_design(fp: dict, sl: dict, res: dict, geometry: dict, country: str = "
             "is_example": any(s["is_example"] for s in out_stages) or res["is_example"],
             "note": "Concept tool design: sizes follow the Stage tool rules; draw and bend forming surfaces are concept blocks. "
                     "Steel cost only (machining, heat treatment, design and try-out come with the sheet-metal tool cost stage)."}
+
+
+
+# ------------------------------------------------------------ tool surfaces from the part (sweeps along the press / opening direction)
+
+def sweep(shape: cq.Shape, dz: float) -> cq.Shape | None:
+    """The volume swept by `shape` along Z by dz: the region above (dz > 0) or below (dz < 0) every material point.
+    Vertical faces sweep to nothing and are skipped; every other face is swept with its orientation fixed and fused."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism
+    from OCP.gp import gp_Vec
+    out = []
+    for f in shape.Faces():
+        n = f.normalAt(corrections.sample_point(f))
+        if abs(n.z) < 0.02 and f.geomType() in ("PLANE", "CYLINDER", "CONE"):
+            continue
+        w = f.wrapped.Reversed() if n.z * dz < 0 else f.wrapped
+        p = cq.Shape.cast(BRepPrimAPI_MakePrism(w, gp_Vec(0, 0, dz)).Shape())
+        if p.Volume() < -1e-9:
+            p = cq.Shape.cast(p.wrapped.Reversed())
+        if p.Volume() > 1e-6:
+            out.append(p)
+    if not out:
+        return None
+    return out[0].fuse(*out[1:]) if len(out) > 1 else out[0]
+
+
+def flange_level(shape: cq.Shape) -> float:
+    """Z of the underside of the sheet where it is still flat: the highest downward-facing planar face (a flange or a
+    flat leg). Falls back to the lowest point of the part."""
+    bb = shape.BoundingBox()
+    levels = [f.Center().z for f in shape.Faces() if f.geomType() == "PLANE" and f.normalAt().z < -0.999]
+    return max(levels) if levels else bb.zmin
+
+
+def place_formed(shape: cq.Shape, z_top: float) -> cq.Shape:
+    """The formed part centred in XY, turned (if needed) so that its formed features point DOWN into the die, with the
+    flat sheet level at z_top."""
+    best = None
+    for turned in (False, True):
+        cand = shape.rotate(cq.Vector(0, 0, 0), cq.Vector(1, 0, 0), 180) if turned else shape
+        level = flange_level(cand)
+        depth = level - cand.BoundingBox().zmin
+        if best is None or depth > best[0] + 1e-6:
+            best = (depth, cand, level)
+    _, cand, level = best
+    bb = cand.BoundingBox()
+    return cand.translate(cq.Vector(-(bb.xmin + bb.xmax) / 2, -(bb.ymin + bb.ymax) / 2, z_top - level))
+
+
+def forming_parts(part: cq.Shape, z_top: float, t: float, box_l: float, box_w: float, height: float) -> dict:
+    """Surfaces of a forming die and punch taken from the placed part (sheet level at z_top, no undercuts):
+        die_cut   volume removed from the die block (everything above the part's lower envelope)
+        core      the punch body: material above the part's upper envelope, from the part up to z_top + t
+        pocket    clearance for the part where it stands taller than the punch plate level (cut from stripper and plate)"""
+    bb = part.BoundingBox()
+    big = (bb.zlen + height) * 2 + 20
+    up, dn = sweep(part, big), sweep(part, -big)
+    if up is None or dn is None:
+        raise ValueError("the part has no surface facing the press direction")
+    zlo = min(bb.zmin, z_top - t)
+    sil = up.fuse(dn)
+    core = _box(box_l, box_w, (z_top + t) - zlo, z=zlo).val().intersect(sil).cut(dn)
+    pocket = None
+    if bb.zmax > z_top + t + 0.1:
+        above = part.intersect(_box(bb.xlen + 20, bb.ylen + 20, bb.zmax - (z_top + t) + 5, x=(bb.xmin + bb.xmax) / 2,
+                                    y=(bb.ymin + bb.ymax) / 2, z=z_top + t).val())
+        pocket = sweep(above, big) if above.Volume() > 1e-6 else None
+    return {"die_cut": up, "core": core, "pocket": pocket}
 
 
 # ------------------------------------------------------------ 3D solids
@@ -298,14 +374,17 @@ def _features(design: dict, stage: dict, fp: dict, final_shape, z_die: float, z_
     clr = v["clearance_mm"]
     outline, ox, oy = _centred(fp["outline"])
     holes = [[[x - ox, y - oy] for x, y in h] for h in fp["holes"]]
-    f = {"die": [], "strip": [], "punch": [], "work": None}
+    f = {"die": [], "strip": [], "punch": [], "plate_cut": [], "work": None}
     sh = lambda wp: wp.translate((dx, 0, 0))
     code = stage["code"]
+    if code == "trim" and stage.get("after_forming") and final_shape is not None:
+        f["work"] = sh(place_formed(final_shape, z_top))
     if code in ("blank", "trim"):
         f["die"].append(sh(_prism(_offset(outline, clr), dieb, z_die)))
         f["strip"].append(sh(_prism(_offset(outline, clr * 0.5), strp, z_top + t + gap)))
         f["punch"].append(sh(_prism(outline, strp + t + 5 + gap, z_top - 5)))
-        f["work"] = sh(_prism(outline, t, z_top - (t if code == "blank" else 0)))
+        if f["work"] is None:
+            f["work"] = sh(_prism(outline, t, z_top - (t if code == "blank" else 0)))
     elif code == "pierce":
         work = _prism(outline, t, z_top)
         for h in holes:
@@ -314,7 +393,22 @@ def _features(design: dict, stage: dict, fp: dict, final_shape, z_die: float, z_
             f["punch"].append(sh(_prism(h, strp + t + 5 + gap, z_top - 5)))
             work = work.cut(_prism(h, t, z_top))
         f["work"] = sh(work)
-    elif code == "draw":
+    elif code in ("draw", "bend") and stage.get("real_form") and final_shape is not None:
+        try:
+            placed = place_formed(final_shape, z_top)
+            fp_ = forming_parts(placed, z_top, t, v["die_set_l_mm"] - 2 * v["margin_mm"] * 0.4, v["die_set_w_mm"] - 2 * v["margin_mm"] * 0.4,
+                                strp + v["punch_plate_t_mm"])
+            f["die"].append(sh(fp_["die_cut"]))
+            if fp_["core"].Volume() > 1e-6:
+                f["punch"].append(sh(fp_["core"].translate(cq.Vector(0, 0, gap))))
+            if fp_["pocket"] is not None:
+                f["plate_cut"].append(sh(fp_["pocket"].translate(cq.Vector(0, 0, gap))))
+            f["work"] = sh(placed)
+            f["real"] = True
+            return f
+        except Exception as exc:  # concept blocks instead
+            f["note"] = f"forming surface from the part failed ({str(exc)[:60]}): concept blocks shown"
+    if code == "draw":
         d_out = stage["workpiece"]["cup_dia_mm"] or max(fp["length_mm"], fp["width_mm"])
         h_cup = stage["workpiece"]["cup_height_mm"] or 10.0
         bore = d_out + 2 * (v.get("draw_clearance_mm", t) - t)
@@ -326,9 +420,12 @@ def _features(design: dict, stage: dict, fp: dict, final_shape, z_die: float, z_
     elif code == "bend":
         vo = v.get("v_opening_mm", 8 * t)
         L = max(fp["length_mm"], fp["width_mm"])
-        f["die"].append(sh(cq.Workplane("XZ").polyline([(-vo / 2, z_top), (vo / 2, z_top), (0, z_top - vo / 2)]).close().extrude(L / 2, both=True)))
+        half = math.radians(v.get("bend_punch_angle_deg", 90.0)) / 2
+        depth = (vo / 2) / math.tan(half)
+        pd = (vo / 3) / math.tan(half)
+        f["die"].append(sh(cq.Workplane("XZ").polyline([(-vo / 2, z_top), (vo / 2, z_top), (0, z_top - depth)]).close().extrude(L / 2, both=True)))
         f["punch"].append(sh(cq.Workplane("XZ").polyline([(-vo / 3, z_top + t + strp + gap), (vo / 3, z_top + t + strp + gap),
-                                                          (0, z_top + t - vo / 3 + gap)]).close().extrude(L / 2, both=True)))
+                                                          (0, z_top + t - pd + gap)]).close().extrude(L / 2, both=True)))
         if final_shape is not None:
             bb = final_shape.BoundingBox()
             f["work"] = sh(cq.Workplane("XY").add(final_shape).translate((-(bb.xmin + bb.xmax) / 2, -(bb.ymin + bb.ymax) / 2, z_top - bb.zmin)))
@@ -347,8 +444,12 @@ def _assemble(design: dict, stages: list[dict], offsets: list[float], fp: dict, 
     die = _box(inner_l, inner_w, dieb, z=z_die)
     stripper = _box(inner_l, inner_w, strp, z=z_top + t + gap)
     punches, works = [], []
+    plate = _box(inner_l, inner_w, pun, z=z_top + t + strp + gap)
     for st, dx in zip(stages, offsets):
         f = _features(design, st, fp, final_shape, z_die, z_top, dx, gap)
+        for c in f["plate_cut"]:
+            plate = plate.cut(c)
+            stripper = stripper.cut(c)
         for c in f["die"]:
             die = die.cut(c)
         for c in f["strip"]:
@@ -360,7 +461,7 @@ def _assemble(design: dict, stages: list[dict], offsets: list[float], fp: dict, 
     parts = [("Lower shoe", "lower", _box(sl_, sw_, shoe), (0.55, 0.57, 0.60)),
              ("Die block", "lower", die, (0.20, 0.35, 0.75)),
              ("Stripper plate", "upper", stripper, (0.85, 0.55, 0.15)),
-             ("Punch plate", "upper", _box(inner_l, inner_w, pun, z=z_pp), (0.55, 0.57, 0.60)),
+             ("Punch plate", "upper", plate, (0.55, 0.57, 0.60)),
              ("Backing plate", "upper", _box(inner_l * 0.8, inner_w * 0.8, back, z=z_pp + pun), (0.35, 0.37, 0.40)),
              ("Upper shoe", "upper", _box(sl_, sw_, shoe, z=z_pp + pun + back), (0.55, 0.57, 0.60))]
     for i, (st, p) in enumerate(punches, start=1):
@@ -371,7 +472,15 @@ def _assemble(design: dict, stages: list[dict], offsets: list[float], fp: dict, 
                       .translate((sx * (sl_ / 2 - mg * 0.5), sy * (sw_ / 2 - mg * 0.5), shoe)), (0.75, 0.75, 0.78)))
     for st, w in works:
         parts.append((f"Workpiece after {st['name'].lower()}", "work", w, (0.95, 0.80, 0.25)))
-    return [{"name": n, "group": g, "shape": (w.val() if hasattr(w, "val") else w), "color": c} for n, g, w, c in parts]
+    out = []
+    for n, g, w, c in parts:
+        shp = w.val() if hasattr(w, "val") else w
+        try:
+            if shp.Volume() > 1e-6:
+                out.append({"name": n, "group": g, "shape": shp, "color": c})
+        except Exception:
+            pass                                   # an empty result of a boolean: nothing to show
+    return out
 
 
 def stage_solids(design: dict, stage: dict, fp: dict, final_shape, open_state: bool = True) -> list[dict]:
@@ -392,7 +501,7 @@ def progressive_solids(design: dict, fp: dict, final_shape, open_state: bool = T
 MAX_FACES_FOR_BOOLEAN = 4000
 
 
-def mould_3d(shape: cq.Shape, axis: str, parting_z: float, tool: dict, open_gap: float = 60.0) -> dict:
+def mould_3d(shape: cq.Shape, axis: str, parting_z: float, tool: dict, open_gap: float = 60.0, regions: list | None = None) -> dict:
     """Concept 3D of a mould / die: plates, pillars, core and cavity inserts cut from the part along the parting plane.
 
     `shape` is the (corrected) part, `tool` the tool_cost.run result (cavity layout and mould base). Returns components."""
@@ -451,20 +560,39 @@ def mould_3d(shape: cq.Shape, axis: str, parting_z: float, tool: dict, open_gap:
     try:
         if not exact or placed is None:
             raise ValueError("part has too many faces for the boolean cut")
-        low = lower_block.cut(placed)
-        up = upper_block.cut(placed)
-        low_solids = sorted(low.val().Solids(), key=lambda s: -s.Volume())
-        up_solids = sorted(up.val().Solids(), key=lambda s: -s.Volume())
-        add("Core insert (B side)", "lower", cq.Workplane("XY").add(low_solids[0]), (0.85, 0.30, 0.25))
-        for k, s in enumerate(low_solids[1:], start=1):
-            add(f"Core pin / island {k}", "upper", cq.Workplane("XY").add(s).translate((0, 0, gap)), (0.85, 0.30, 0.25))
-        add("Cavity insert (A side)", "upper", cq.Workplane("XY").add(up_solids[0]).translate((0, 0, gap)), (0.25, 0.65, 0.35))
-        for k, s in enumerate(up_solids[1:], start=1):
-            add(f"Cavity island {k}", "upper", cq.Workplane("XY").add(s).translate((0, 0, gap)), (0.25, 0.65, 0.35))
+        # Split by the part's own envelopes along the opening direction (valid where there is no undercut):
+        #   A side = everything above the part's UPPER envelope inside its footprint (cores of open shells come from here)
+        #            and above the parting plane outside it
+        #   B side = everything below the LOWER envelope inside the footprint and below the parting plane outside it
+        # Anything left between the envelopes is a window or an undercut: it stays empty and needs a slide or lifter.
+        big = (bb.zlen + h_up + h_dn) * 2 + 20
+        up, dn = sweep(placed, big), sweep(placed, -big)
+        if up is None or dn is None:
+            raise ValueError("no surface faces the opening direction")
+        sil = up.fuse(dn)
+        full = _box(pocket_l, pocket_w, h_up + h_dn, z=-h_dn).val()
+        a_side = upper_block.val().cut(sil).fuse(full.intersect(sil).cut(dn))
+        b_side = lower_block.val().cut(sil).fuse(full.intersect(sil).cut(up))
+        for tag, solid, group, color, lift in (("A side insert", a_side, "upper", (0.25, 0.65, 0.35), gap),
+                                               ("B side insert", b_side, "lower", (0.85, 0.30, 0.25), 0.0)):
+            parts = sorted(solid.Solids(), key=lambda x: -x.Volume())
+            for k, sd in enumerate(parts):
+                if sd.Volume() < 1.0:
+                    continue
+                add(tag if k == 0 else f"{tag}: island {k}", group, cq.Workplane("XY").add(sd).translate((0, 0, lift)), color)
+        gaps = full.intersect(sil).cut(a_side).cut(b_side).cut(placed)
+        if gaps.Volume() > 1.0:
+            note = f"Voids between the part's envelopes ({gaps.Volume() / 1000:.1f} cm³) are undercuts or windows: they need slides, lifters or shut-offs."
     except Exception as exc:
         note = f"Insert shapes not cut from the part ({str(exc)[:80]}): plain blocks shown."
-        add("Core insert (B side)", "lower", lower_block, (0.85, 0.30, 0.25))
-        add("Cavity insert (A side)", "upper", upper_block.translate((0, 0, gap)), (0.25, 0.65, 0.35))
+        add("B side insert", "lower", lower_block, (0.85, 0.30, 0.25))
+        add("A side insert", "upper", upper_block.translate((0, 0, gap)), (0.25, 0.65, 0.35))
+    for k, r in enumerate(regions or [], start=1):
+        # proposal markers: a slide / lifter block at each undercut region of the concept, on the first cavity
+        c = corrections.to_z_point(r["centre_mm"], axis)
+        side = max(r["area_mm2"] ** 0.5, 6.0)
+        mk = _box(side, side, side, x=c[0] - cx + pos[0][0], y=c[1] - cy + pos[0][1], z=c[2] - parting_z - side / 2).val()
+        add(f"{r['kind'].capitalize()} {k} (proposal)", "lower", mk, (0.55, 0.25, 0.75))
     if placed is not None:
         add("Part (corrected)", "part", placed.translate(cq.Vector(0, 0, gap / 2)) if hasattr(placed, "translate") else placed, (0.95, 0.80, 0.25))
     return {"components": comps, "cavities_shown": cavs, "cavities_total": n, "base": base["size_code"],

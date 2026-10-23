@@ -19,7 +19,7 @@ from collections import OrderedDict
 
 import numpy as np
 
-from . import (capacity_db, corrections, geometry, master_data, mould_db, outputs3d, rates, register, register_setup,
+from . import (capacity_db, corrections, fea, geometry, master_data, mould_db, outputs3d, rates, register, register_setup,
                report_render, simulation, software, tool_design)
 from .register import ToolNotApplicable
 
@@ -46,7 +46,7 @@ def _frames_tri(tri, colors, n, azim0, azim1, caption_fn, bounds, elev=22):
 # ------------------------------------------------------------ plastic and die casting
 
 def _mould_pack(part_id: int, video: str) -> dict:
-    d, rev, part_type, verts, tris, _, facts = register._concept_inputs(part_id)
+    d, rev, part_type, verts, tris, concept_res, facts = register._concept_inputs(part_id)
     _, _, shape = register.part_shape(part_id)
     density, _ = register._density(d["material"])
     g = rev["geometry"]
@@ -63,9 +63,13 @@ def _mould_pack(part_id: int, video: str) -> dict:
                       "part_weight_g": m2.net_weight_g}
     after = simulation.run(v2, t2, part_type, facts2, m2.projected_area_mm2)
     tool = register._tool_compute(part_id)
-    m3d = tool_design.mould_3d(fixed, axis, corr["parting_z_mm"], tool)
+    m3d = tool_design.mould_3d(fixed, axis, corr["parting_z_mm"], tool, regions=concept_res.get("regions"))
     r0, r1 = before["results"], after["results"]
     mach = after["machine"]
+    b_insert = next((c["shape"] for c in m3d["components"] if c["name"] == "B side insert"), None)
+    bar = r1.get("cavity_bar") or master_data.parameters(part_type).get("cavity_pressure_bar", 400)
+    fea_res = (fea.solve(b_insert, bar / 10.0, "cavity", master_data.parameters(part_type)) if b_insert is not None
+               else {"available": False, "note": "No B side insert to check."})
 
     # ---- pictures
     pics_before, pics_after = simulation.pictures(before), simulation.pictures(after)
@@ -109,7 +113,8 @@ def _mould_pack(part_id: int, video: str) -> dict:
             ("Cycle time before / after (s)", f"{r0['cycle_s']:.1f} / {r1['cycle_s']:.1f}"),
             ("Clamp force before / after (t)", f"{r0['clamp_t']:.0f} / {r1['clamp_t']:.0f}"), ("Machine", machine_text),
             ("Mould base", m3d["base"]), ("Cavities", m3d["cavities_total"]),
-            ("Tool cost per tool", f"{tool['currency']} {tool['value']:,.0f}"), ("Tool cost (INR)", f"{tool['value_inr']:,.0f}")]
+            ("Tool cost per tool", f"{tool['currency']} {tool['value']:,.0f}"), ("Tool cost (INR)", f"{tool['value_inr']:,.0f}"),
+            ("Insert FEA (Gmsh + CalculiX)", _fea_line(fea_res))]
     steps = [[s["label"] or s["name"], s["formula"], f"{s['value']:.3f}", s["unit"]] for s in after["steps"]]
     sections = [
         {"title": "Simulation: problems found on the part as received", "text": before["corrections"] or ["No corrections required."],
@@ -133,17 +138,39 @@ def _mould_pack(part_id: int, video: str) -> dict:
     ]
     report = {"title": f"{d['part_code']} - {d['name']}", "subtitle": f"Design pack · rev {rev['rev']} · {d['material']} · {d['process']}",
               "example": bool(tool.get("example", {}).get("any")), "kpis": kpis, "sections": sections}
+    sections.append(_fea_section(fea_res, f"cavity pressure {bar:g} bar on the B side insert, fixed on its back"))
+    if fea_res.get("vtk"):
+        files[f"{code}_fea_result.vtk"] = fea_res.pop("vtk")
     # ---- video
     if video != "none":
         files[f"{code}_simulation.mp4"] = outputs3d.video_mp4(_mould_video(before, after, tool_meshes, m3d, video), fps=10)
-    mesh_note = software.mesh_check(fixed)
+    mesh_note = fea_res
     summary = {"kind": "mould", "part_id": part_id, "part_code": d["part_code"], "rev": rev["rev"], "axis": axis,
                "draft_before_cm2": corr["before"]["low_draft_cm2"], "draft_after_cm2": corr["after"]["low_draft_cm2"],
                "faces_drafted": len(corr["faces_drafted"]), "faces_failed": len(corr["faces_failed"]),
                "machine": mach.get("machine_id"), "machine_t": mach.get("tonnage_t"), "clamp_t": r1["clamp_t"],
                "mould_base": m3d["base"], "cavities": m3d["cavities_total"], "tool_cost_inr": tool["value_inr"],
-               "fea_mesh": mesh_note, "corrections_before": before["corrections"], "corrections_after": after["corrections"]}
+               "fea": {k: v for k, v in mesh_note.items() if k != "vtk"}, "corrections_before": before["corrections"], "corrections_after": after["corrections"]}
     return {"report": report, "files": files, "summary": summary}
+
+
+def _fea_line(r: dict) -> str:
+    if not r.get("available") or "max_deflection_mm" not in r:
+        return r.get("note", "not run")
+    return (f"{'OK' if r['ok'] else 'CHECK'}: deflection {r['max_deflection_mm']:.4f} mm (limit {r['deflection_limit_mm']:g}), "
+            f"von Mises {r['max_von_mises_mpa']:.0f} MPa (limit {r['stress_limit_mpa']:.0f})")
+
+
+def _fea_section(r: dict, what: str) -> dict:
+    if not r.get("available") or "max_deflection_mm" not in r:
+        return {"title": "Structural check (FEA)", "text": [r.get("note", "not run")]}
+    return {"title": "Structural check (FEA)", "text": [
+        f"Gmsh + CalculiX, linear elastic: {what}.", r["note"],
+        ("Within the limits." if r["ok"] else "Over a limit: thicken the plate / insert or support it.")],
+        "table": {"headers": ["Result", "Value", "Limit"], "rows": [
+            ["Max deflection (mm)", round(r["max_deflection_mm"], 4), r["deflection_limit_mm"]],
+            ["Max von Mises (MPa)", round(r["max_von_mises_mpa"], 1), round(r["stress_limit_mpa"], 1)],
+            ["Pressure (MPa)", round(r["pressure_mpa"], 2), ""], ["Elements / nodes", f"{r['elements']} / {r['nodes']}", ""]]}}
 
 
 def _compound(shapes):
@@ -190,7 +217,7 @@ def _mould_video(before: dict, after: dict, tool_meshes: list, m3d: dict, mode: 
         t = k / max(n - 1, 1)
         moved = []
         for m in tool_meshes:
-            lift = m["group"] == "upper" and m["name"].lower().startswith(("a plate", "cavity", "top", "locating", "sprue", "core pin"))
+            lift = False
             mv = dict(m)
             if m["group"] == "upper" or lift:
                 mv["v"] = m["v"] + np.array([0, 0, m3d["open_gap_mm"] * 0.6 * t])
@@ -206,12 +233,31 @@ def _mould_video(before: dict, after: dict, tool_meshes: list, m3d: dict, mode: 
 
 def _sheet_pack(part_id: int, video: str) -> dict:
     from . import sheet_layout
+    from . import sheet_tools
     d, rev, shape, blank, res = register._sheet_context(part_id)
     t = res["features"]["t"]
-    fp = sheet_layout.flat_pattern(shape, rev["geometry"], blank, t)
+    res0, shape0 = res, shape
+    mat = next(r for r in mould_db.tables()["sheet_materials"] if r["material"] == d["material"])
+    corr = corrections.correct_sheet(shape, t, mat["min_bend_r_factor"], mat["min_hole_factor"],
+                                     master_data.parameters("sheet_metal").get("default_bend_radius_factor", 1.0))
+    geometry_used = rev["geometry"]
+    if corr["changed"]:
+        density, _ = register._density(d["material"])
+        shape = corr["shape"]
+        geometry_used = geometry.analyze(shape, "sheet_metal", density).to_dict() | {
+            "wall_mm": t, "bend_count": rev["geometry"].get("bend_count") or 0}
+        typed = dict(res["typed"])
+        if any("bend" in c["kind"] and c.get("count") for c in corr["changes"]):
+            typed["bend_radius_mm"] = corr["r_in_mm"]
+        volume, _ = register._annual_volume(d)
+        feat = sheet_tools.features(shape, geometry_used, blank, typed, density, volume, d["programme_life_years"])
+        by_process = {"sheet_metal_progressive": "progressive", "sheet_metal_multistage": "multi_stage"}.get(d["process"], "")
+        res = sheet_tools.run(feat, d["material"], typed, by_process) | {"part_id": part_id, "rev": rev["rev"], "typed": typed,
+                                                                         "process": d["process"]}
+    fp = sheet_layout.flat_pattern(shape, geometry_used, blank, t)
     sl = sheet_layout.strip_layout(fp, t, len(res["operations"]))
     country = (d["tool_country"] or d["country"] or register_setup.settings()["default_country"]).upper()
-    design = tool_design.sheet_design(fp, sl, res, rev["geometry"], country, d["costing_month"] or rates.current_month())
+    design = tool_design.sheet_design(fp, sl, res, geometry_used, country, d["costing_month"] or rates.current_month())
     code = _safe(d["part_code"])
     files, scenes, stage_pages, rows, comp_rows, stage_pics = {}, [], [], [], [], []
     progressive = design["mode"] == "progressive"
@@ -247,14 +293,25 @@ def _sheet_pack(part_id: int, video: str) -> dict:
                      s["values"]["shut_height_mm"], press.get("name") or "none fits", press.get("tonnage_t") or "", s["weight_kg"], s["steel_cost"]])
         for c in s["components"]:
             comp_rows.append([s["n"], s["name"], c["name"], c["steel"], c["length_mm"], c["width_mm"], c["thickness_mm"], c["qty"], c["weight_kg"], c["steel_cost"]])
+    big = max(design["stages"], key=lambda x: x["force_t"])
+    big_sol = (tool_design.progressive_solids(design, fp, shape) if progressive else tool_design.stage_solids(design, big, fp, shape))
+    die_block = next((x["shape"] for x in big_sol if x["name"] == "Die block"), None)
+    fea_res = {"available": False, "note": "No die block to check."}
+    if die_block is not None:
+        bbd = die_block.BoundingBox()
+        force_n = (design["total_force_t"] if progressive else big["design_force_t"]) * 9806.65
+        fea_res = fea.solve(die_block, force_n / (bbd.xlen * bbd.ylen), "top", master_data.parameters("sheet_metal"))
     files[f"{code}_stage_tool_drawings.pdf"] = outputs3d.drawing_pdf(stage_pages)
     files[f"{code}_blank.dxf"] = sheet_layout.blank_dxf(fp, d["part_code"])
     files[f"{code}_strip.dxf"] = sheet_layout.strip_dxf(fp, sl, d["part_code"])
     files[f"{code}_tool_pack.pdf"] = sheet_layout.pack_pdf(fp, sl, res, d, rev["rev"])
     views = outputs3d.three_views(shape)
-    files[f"{code}_part_drawing.pdf"] = outputs3d.drawing_pdf([{"views": views, "title": f"{d['part_code']} - {d['name']}",
-        "subtitle": f"Rev {rev['rev']} · {d['material']} · {t:g} mm", "notes": [f"Blank {fp['length_mm']:.1f} × {fp['width_mm']:.1f} mm ({fp['method']})"] + [p["message"] for p in res["problems"][:2]]}])
-    files[f"{code}_part_drawing.dxf"] = outputs3d.drawing_dxf(views, f"{d['part_code']}")
+    notes = ([f"Corrected: " + "; ".join(f"{c['kind']} x{c['count']} to {c['value_mm']} mm" for c in corr["changes"] if c.get("count"))] if corr["changed"]
+             else ["No change needed to the model."]) + [f"Blank {fp['length_mm']:.1f} × {fp['width_mm']:.1f} mm ({fp['method']})"] + [p["message"] for p in res["problems"][:2]]
+    files[f"{code}_corrected_drawing.pdf"] = outputs3d.drawing_pdf([{"views": views, "title": f"{d['part_code']} - {d['name']}: corrected part",
+        "subtitle": f"Rev {rev['rev']} · {d['material']} · {t:g} mm", "notes": notes}])
+    files[f"{code}_corrected_drawing.dxf"] = outputs3d.drawing_dxf(views, f"{d['part_code']} corrected")
+    files[f"{code}_corrected_part.step"] = outputs3d.step_bytes([{"name": "corrected_part", "shape": shape, "color": (0.95, 0.8, 0.25)}])
     files[f"{code}_3d_report.html"] = outputs3d.viewer_html(f"{d['part_code']} - sheet-metal tool design", scenes,
         [f"{design['mode'].replace('_', ' ')} · {len(design['stages'])} stage(s)", f"Tool weight {design['tool_weight_kg']} kg", "Concept die sets: forming surfaces are for the engineer's CAD."])
     pics = [("Part as received", outputs3d.render_png(outputs3d.component_meshes([{"name": "part", "group": "part", "shape": shape, "color": (0.95, 0.8, 0.25)}]), "Part"))]
@@ -264,8 +321,15 @@ def _sheet_pack(part_id: int, video: str) -> dict:
             ("Tool weight (kg)", design["tool_weight_kg"]), ("Tool steel cost", f"{design['currency']} {design['steel_cost']:,}"),
             ("Blank (mm)", f"{fp['length_mm']:.1f} x {fp['width_mm']:.1f}"), ("Strip utilisation (%)", round(sl["best"]["values"]["utilisation_pct"], 1))]
     sections = [
-        {"title": "Formability and corrections required", "text": [p["message"] for p in res["problems"]] + design["warnings"] or ["No formability problems found."],
+        {"title": "Formability of the part as received", "text": [p["message"] for p in res0["problems"]] or ["No formability problems found."],
          "images": pics},
+        {"title": "3D design correction", "text": (
+            [f"{c['kind']}: {c['count']} changed to {c['value_mm']} mm" + (f" (from {c['from_mm']} mm)" if c.get("from_mm") else "")
+             for c in corr["changes"] if c.get("count")] + [f"{c['kind']}: {c['failed']}" for c in corr["changes"] if c.get("failed")]
+            + [f"Volume change {corr['volume_change_pct']:+.2f} %. Problems left after the correction: {len(res['problems'])}."]
+            + [p["message"] for p in res["problems"]] + design["warnings"]) if corr["changed"] else
+            ["The model needed no change: bend radii and holes are at or above the minimum." ] + [p["message"] for p in res["problems"]] + design["warnings"],
+         "images": [("Corrected part", outputs3d.render_png(outputs3d.component_meshes([{"name": "part", "group": "part", "shape": shape, "color": (0.95, 0.8, 0.25)}]), "Corrected part"))]},
         {"title": "Stage-wise tool design", "text": [design["note"]],
          "table": {"headers": ["#", "Stage", "Force (t)", "Design force (t)", "Die set (mm)", "Shut height", "Press", "Press (t)", "Weight (kg)", "Steel cost"], "rows": rows},
          "images": stage_pics[:6]},
@@ -276,6 +340,10 @@ def _sheet_pack(part_id: int, video: str) -> dict:
         {"title": "Stage tool rules used", "table": {"headers": ["Stage", "Rule", "Formula", "Value", "Unit"],
          "rows": [[s["n"], x["name"], x["formula"], round(x["value"], 3), x["unit"]] for s in design["stages"][:1 if design["mode"] == "progressive" else 99] for x in s["steps"]]}},
     ]
+    sections.append(_fea_section(fea_res, f"stage {big['n']} {big['name']} die block, {big['design_force_t']:g} t spread over its top face, fixed on its back"))
+    kpis.append(("Die block FEA (Gmsh + CalculiX)", _fea_line(fea_res)))
+    if fea_res.get("vtk"):
+        files[f"{code}_fea_result.vtk"] = fea_res.pop("vtk")
     report = {"title": f"{d['part_code']} - {d['name']}", "subtitle": f"Design pack · rev {rev['rev']} · {d['material']} · sheet metal {design['mode'].replace('_', ' ')}",
               "example": design["is_example"], "kpis": kpis, "sections": sections}
     if video != "none":
@@ -283,7 +351,8 @@ def _sheet_pack(part_id: int, video: str) -> dict:
     summary = {"kind": "sheet_metal", "part_id": part_id, "part_code": d["part_code"], "rev": rev["rev"], "mode": design["mode"],
                "stages": len(design["stages"]), "total_force_t": design["total_force_t"], "warnings": design["warnings"],
                "presses": [s["press"].get("machine_id") for s in design["stages"]], "tool_weight_kg": design["tool_weight_kg"],
-               "problems": [p["message"] for p in res["problems"]]}
+               "problems": [p["message"] for p in res["problems"]], "problems_before": [p["message"] for p in res0["problems"]],
+               "corrections": [c for c in corr["changes"] if c.get("count")], "fea": {k: v for k, v in fea_res.items() if k != "vtk"}, "springback_overbend_deg": res["values"].get("springback_deg")}
     return {"report": report, "files": files, "summary": summary}
 
 
@@ -348,7 +417,7 @@ def build(part_id: int, video: str = "short", force: bool = False) -> dict:
 KINDS = {"xlsx": "_design_report.xlsx", "pdf": "_design_report.pdf", "pptx": "_design_report.pptx", "3d": "_3d_report.html",
          "drawing": "_corrected_drawing.pdf", "drawing-dxf": "_corrected_drawing.dxf", "corrected-step": "_corrected_part.step",
          "tool-step": "_tool_design.step", "tool-drawing": "_tool_design_drawing.pdf", "video": "_simulation.mp4",
-         "stage-drawings": "_stage_tool_drawings.pdf", "part-drawing": "_part_drawing.pdf", "part-drawing-dxf": "_part_drawing.dxf",
+         "stage-drawings": "_stage_tool_drawings.pdf", 
          "blank-dxf": "_blank.dxf", "strip-dxf": "_strip.dxf", "tool-pack": "_tool_pack.pdf"}
 MEDIA = {"xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "pdf": "application/pdf",
          "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "html": "text/html",

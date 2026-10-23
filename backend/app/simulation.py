@@ -47,26 +47,54 @@ def _rules(part_type: str) -> list[dict]:
     return rows
 
 
-def thickness(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, offset: float) -> np.ndarray:
-    """Distance from each face centroid (idx) along its inward normal to the next face of the part (Möller–Trumbore)."""
+def _cast(tri: np.ndarray, o: np.ndarray, d: np.ndarray) -> np.ndarray:
+    """First hit distance of rays (origins o, unit directions d) on the triangles (Möller–Trumbore), inf if none."""
     p0, e1, e2 = tri[:, 0], tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0]
+    h = np.cross(d[:, None, :], e2[None])
+    a = (e1[None] * h).sum(-1)
+    ok = np.abs(a) > 1e-12
+    f = 1 / np.where(ok, a, 1)
+    sv = o[:, None, :] - p0[None]
+    u = f * (sv * h).sum(-1)
+    q = np.cross(sv, e1[None])
+    v = f * (d[:, None, :] * q).sum(-1)
+    t = f * (e2[None] * q).sum(-1)
+    good = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 1e-6)
+    return np.where(good, t, np.inf).min(axis=1)
+
+
+CONE_DEG = 45.0
+CONE_RAYS = 4
+THICKNESS_MAX_FACES = 1500        # faces measured per part (the rest are covered by sampling)
+
+
+def thickness(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, offset: float) -> np.ndarray:
+    """Local wall thickness at each face centroid (idx).
+
+    The ray along the inward normal alone measures the wall LENGTH on the end face of a wall (a rim, a rib top). So a ring of
+    rays at 45° around the inward normal is cast as well and each hit is projected on the normal (distance × cos 45°): on a
+    parallel wall every ray gives the thickness, and on a wall end the rays leave through the side of the wall, so the
+    minimum is again the thickness. Wall ends are skipped (NaN)."""
     out = np.full(len(idx), np.nan)
+    ang = np.radians(CONE_DEG)
+    ring = np.radians(np.arange(CONE_RAYS) * 360.0 / CONE_RAYS)
     for s in range(0, len(idx), 128):
         k = idx[s:s + 128]
-        o = tri[k].mean(axis=1) - n[k] * offset
-        d = -n[k]
-        h = np.cross(d[:, None, :], e2[None])
-        a = (e1[None] * h).sum(-1)
-        ok = np.abs(a) > 1e-12
-        f = 1 / np.where(ok, a, 1)
-        sv = o[:, None, :] - p0[None]
-        u = f * (sv * h).sum(-1)
-        q = np.cross(sv, e1[None])
-        v = f * (d[:, None, :] * q).sum(-1)
-        t = f * (e2[None] * q).sum(-1)
-        good = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 1e-6)
-        t = np.where(good, t, np.inf).min(axis=1)
-        out[s:s + 128] = np.where(np.isfinite(t), t + offset, np.nan)
+        nk = n[k]
+        o = tri[k].mean(axis=1) - nk * offset
+        helper = np.where(np.abs(nk[:, :1]) < 0.9, np.array([[1.0, 0, 0]]), np.array([[0, 1.0, 0]]))
+        u = np.cross(nk, helper)
+        u /= np.linalg.norm(u, axis=1, keepdims=True)
+        w = np.cross(nk, u)
+        straight = _cast(tri, o, -nk)
+        best = straight
+        for r in ring:
+            d = -nk * np.cos(ang) + np.sin(ang) * (np.cos(r) * u + np.sin(r) * w)
+            best = np.minimum(best, _cast(tri, o, d) * np.cos(ang))
+        # a face whose cone rays leave the part far sooner than the straight ray is the END of a wall (rim, rib top,
+        # plate edge): it says nothing about the thickness, so it is left out instead of reading the wall length
+        end_face = np.isfinite(straight) & (straight > 3.0 * best)
+        out[s:s + 128] = np.where(np.isfinite(best) & ~end_face, best + offset, np.nan)
     return out
 
 
@@ -93,16 +121,22 @@ def run(vertices, triangles, part_type: str, facts: dict, projected_area_mm2: di
     n = cross / np.where(twice > 0, twice, 1)[:, None]
     ax = concept.AXES.index(c["opening_axis"])
     draft = np.degrees(np.arcsin(np.clip(np.abs(n[:, ax]), 0, 1)))
-    step = max(1, math.ceil(len(tri) / p["undercut_max_faces"]))
+    step = max(1, math.ceil(len(tri) / min(p["undercut_max_faces"], THICKNESS_MAX_FACES)))
     idx = np.arange(0, len(tri), step)
     th = np.full(len(tri), np.nan)
     th[idx] = thickness(tri, n, idx, p["undercut_offset_mm"])
     meas = th[~np.isnan(th)]
-    wall = facts.get("wall_mm") or (float(np.median(meas)) if len(meas) else 0)
+    wmeas = area[idx][~np.isnan(th[idx])]
+
+    def pct(q):                       # area-weighted: a few small faces must not set the wall of the whole part
+        o = np.argsort(meas)
+        cum = np.cumsum(wmeas[o]) / wmeas.sum()
+        return float(meas[o][min(np.searchsorted(cum, q / 100), len(meas) - 1)])
+    wall = facts.get("wall_mm") or (pct(50) if len(meas) else 0)
     env = sample_env(part_type) | {k: 0.0 for k in SIM_VARS}
     env |= {k: float(x) for k, x in facts.items() if k in SIM_VARS}
-    env |= {"wall_mm": wall, "max_wall_mm": float(np.percentile(meas, 95)) if len(meas) else wall,
-            "min_wall_mm": float(np.percentile(meas, 5)) if len(meas) else wall,
+    env |= {"wall_mm": wall, "max_wall_mm": pct(95) if len(meas) else wall,
+            "min_wall_mm": pct(5) if len(meas) else wall,
             "flow_length_mm": facts["part_l"] + facts["part_h"],
             "shot_weight_g": facts["part_weight_g"] * facts["cavities"],
             "inserts_per_shot": facts.get("inserts", 0) * facts["cavities"],
