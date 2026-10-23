@@ -39,7 +39,7 @@ def bottle(r, h, neck_r, wall):
 
 PARTS = {
     "plastic_small": cover(80, 50, 20, 2),
-    "plastic_large": cover(1100, 600, 180, 3, boss=10, ribs=True),
+    "plastic_large": cover(900, 500, 150, 3, boss=10, ribs=True),
     "diecast_small": cover(70, 50, 25, 2.5, boss=4),
     "diecast_large": cover(650, 450, 120, 4, boss=9, ribs=True),
     "foundry_small": foundry_box(120, 80, 50, 10, 20),

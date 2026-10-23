@@ -106,8 +106,8 @@ def _prepare(part_id: int, mode: str | None = None) -> dict:
         base = m3d["base_mm"]
         env = {"cavities": float(m3d["cavities_total"]), "base_l_mm": base[0], "base_w_mm": base[1], "plate_a_mm": m3d["plate_a_mm"],
                "plate_b_mm": m3d["plate_b_mm"], "pillar_dia_mm": m3d["pillar_dia_mm"], "pillars": 4.0,
-               "part_h_mm": tool.get("part_h", 0) or 0, "screw_dia_mm": float(max(8, round(min(base) / 30))),
-               "dowel_dia_mm": float(max(8, round(min(base) / 30)))}
+               "part_h_mm": tool.get("part_h", 0) or 0, "screw_dia_mm": float(min(30, max(8, 2 * round(min(base) / 60)))),
+               "dowel_dia_mm": float(min(30, max(8, 2 * round(min(base) / 60))))}
         det = m3d.get("details") or {"counts": {}, "rules": {}}
         c3 = det["counts"]
         env |= {k: float(x) for k, x in (det.get("rules") or {}).items()}

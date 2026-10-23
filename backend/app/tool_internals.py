@@ -15,7 +15,7 @@ import numpy as np
 
 from . import formula, master_data, mould_db
 
-TAP_DRILL = {6: 5.0, 8: 6.8, 10: 8.5, 12: 10.2, 14: 12.0, 16: 14.0, 20: 17.5, 24: 21.0}   # ISO 261 coarse thread tap drills (mm)
+TAP_DRILL = {6: 5.0, 8: 6.8, 10: 8.5, 12: 10.2, 14: 12.0, 16: 14.0, 20: 17.5, 22: 19.5, 24: 21.0, 27: 24.0, 30: 26.5}   # ISO 261 coarse thread tap drills (mm)
 EXAMPLE = "EXAMPLE rule - replace with your toolroom practice"
 MOULD_ENV = ("base_l_mm", "base_w_mm", "plate_a_mm", "plate_b_mm", "clamp_mm", "support_mm", "spacer_mm", "ejector_mm", "pocket_l_mm", "pocket_w_mm",
              "cavities", "part_h_mm", "projected_area_cm2", "pillar_dia_mm", "bush_od_mm", "bom_ejector_pins", "bom_return_pins", "bom_cooling_connectors",
@@ -31,7 +31,7 @@ SEED = [
     ("mould", "cool_min_wall_mm", "max(4, 0.6 * cool_dia_mm)", "mm", "Smallest steel wall between a channel and a cavity, pin or insert edge"),
     ("mould", "cool_channels", "min(8, max(2, 2 * ceil(pocket_w_mm / (8 * cool_dia_mm))))", "pcs", "Cooling channels wanted in each insert"),
     ("mould", "connector_len_mm", "12", "mm", "Length of a cooling connector outside the plate"),
-    ("mould", "screw_dia_mm", "max(8, round(min(base_l_mm, base_w_mm) / 30))", "mm", "Socket head cap screw size"),
+    ("mould", "screw_dia_mm", "min(30, max(8, 2 * round(min(base_l_mm, base_w_mm) / 60)))", "mm", "Socket head cap screw size"),
     ("mould", "screws_a", "4 * max(1, ceil(base_l_mm / 250))", "pcs", "Screws holding the A plate to the top clamp plate"),
     ("mould", "screws_b", "4", "pcs", "Screws holding the B plate, support plate, spacer blocks and bottom clamp plate together"),
     ("mould", "dowel_dia_mm", "max(8, screw_dia_mm)", "mm", "Dowel pin diameter"),
@@ -57,6 +57,9 @@ def seed() -> int:
     db = mould_db.tables()
     migrated = False
     for r in db["detail_rules"]:
+        if r["name"] == "screw_dia_mm" and r["tool_group"] == "mould" and r["formula"] == "max(8, round(min(base_l_mm, base_w_mm) / 30))":
+            r["formula"] = "min(30, max(8, 2 * round(min(base_l_mm, base_w_mm) / 60)))"
+            migrated = True
         if r["name"] == "spring_od_mm" and r["formula"] == "max(20, round(0.4 * spring_rating_kgf))":
             r["formula"] = "max(20, round(16 + 0.04 * spring_rating_kgf))"
             migrated = True
@@ -206,13 +209,19 @@ def fasten(comps: list[dict], chain: list[str], positions: list[tuple], sd: floa
         z_head_bottom = face0 - head_h if down else face0 + head_h
         z_end = (lb.zmax - depth) if down else (lb.zmin + depth)
         head = cyl(head_d / 2, head_h, x, y, face0 - head_h if down else face0)
+        parts = [head]
         if down:
-            body = cyl(sd / 2, z_head_bottom - lb.zmax, x, y, lb.zmax)
-            thread = cyl(tap / 2, depth, x, y, z_end)
+            if z_head_bottom - lb.zmax > 0.01:
+                parts.append(cyl(sd / 2, z_head_bottom - lb.zmax, x, y, lb.zmax))
+            parts.append(cyl(tap / 2, depth, x, y, z_end))
         else:
-            body = cyl(sd / 2, lb.zmin - z_head_bottom, x, y, z_head_bottom)
-            thread = cyl(tap / 2, depth, x, y, lb.zmin)
-        screw = head.fuse(body).fuse(thread)
+            if lb.zmin - z_head_bottom > 0.01:
+                parts.append(cyl(sd / 2, lb.zmin - z_head_bottom, x, y, z_head_bottom))
+            parts.append(cyl(tap / 2, depth, x, y, lb.zmin))
+        try:
+            screw = parts[0].fuse(*parts[1:])
+        except Exception:
+            screw = cq.Compound.makeCompound(parts)
         add(comps, name, "lower" if (plates[0]["group"] == "lower") else "upper", screw, color, cls)
         placed += 1
     return placed
@@ -225,7 +234,7 @@ def dowels(comps: list[dict], upper: str, lower: str, positions: list[tuple], d:
         return 0
     ba, bb = a["shape"].BoundingBox(), b["shape"].BoundingBox()
     z_if = (ba.zmin + bb.zmax) / 2
-    half = 1.5 * d
+    half = min(1.5 * d, 0.9 * min(ba.zlen, bb.zlen))        # the pin stays inside the two plates it joins
     n = 0
     for (x, y) in positions:
         if not (ba.xmin < x < ba.xmax and ba.ymin < y < ba.ymax and bb.xmin < x < bb.xmax and bb.ymin < y < bb.ymax):
@@ -527,9 +536,15 @@ def slides_and_lifters(comps: list[dict], ctx: dict, v: dict) -> dict:
         dims = sorted((gb.xlen, gb.ylen, gb.zlen))
         if g.Volume() < v["min_void_mm3"] or dims[0] < v["min_void_thickness_mm"]:
             continue
+        if gb.xlen > 0.8 * ctx["pocket_l"] and gb.ylen > 0.8 * ctx["pocket_w"]:
+            # a void as wide as the whole cavity is a window of the envelope analysis, not a feature a slide or lifter could form
+            notes.append(f"A void of {g.Volume() / 1000:.0f} cm³ spans the whole cavity: the envelope analysis cannot separate it into slides or lifters, the toolmaker decides.")
+            todo.append(None)
+            continue
         todo.append((g, gb))
-    counts["unresolved"] = 0
-    ignored = len(gaps) - len(todo)
+    counts["unresolved"] = sum(1 for t in todo if t is None)
+    todo = [t for t in todo if t is not None]
+    ignored = len(gaps) - len(todo) - counts["unresolved"]
     if ignored:
         notes.append(f"{ignored} small void(s) between the envelopes are slivers (under {v['min_void_mm3']:g} mm³ or {v['min_void_thickness_mm']:g} mm thick): ignored.")
     n_s = n_l = 0
@@ -676,7 +691,7 @@ def die_details(comps: list[dict], ctx: dict, v: dict) -> dict:
     n_spring = int(v["springs"])
     out["springs"] = 0
     if strip is not None and n_spring:
-        pos = ring_positions(pb.xlen, pb.ylen, [od / 2 + 4, od * 1.5 + 8], n_spring * 3, pil_c + used, punch_rects, 0, (pb.xmin + pb.xmax) / 2, (pb.ymin + pb.ymax) / 2)
+        pos = ring_positions(pb.xlen, pb.ylen, [od / 2 + 4, od * 1.5 + 8], n_spring * 3, pil_c + [(x, y, od / 2 + 0.75 * sd + 6) for x, y, _ in used], punch_rects, 0, (pb.xmin + pb.xmax) / 2, (pb.ymin + pb.ymax) / 2)
         pos = _spread(pos, n_spring, od * 1.1)
         depth = min(depth, 0.7 * pb.zlen)
         z0 = pb.zmin
