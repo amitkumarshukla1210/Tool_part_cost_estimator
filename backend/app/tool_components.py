@@ -71,22 +71,46 @@ SEED_CLASSES = [
      "ISO 2768-m; flatness and parallelism 0.01", "Saw, mill, harden, grind faces, drill"),
     ("punch", "Punch", "made", "D2 (1.2379)", 3, 0.3, 5, "58-62 HRC", "saw,rough,wire,heat,grind,polish", 0.4,
      "ISO 2768-f; cutting edge sharp, profile per drawing", "Saw, rough mill, wire cut profile, vacuum harden, grind, polish cutting edges"),
+    ("slide", "Slide (forming steel)", "made", "P20 (1.2311)", 3, 0.3, 5, "30-36 HRC pre-hardened", "saw,rough,finish,grind,drill,edm,polish", 0.8,
+     "ISO 2768-f; forming surface per 3D model ±0.02; guided fit H7/g6", "Saw, rough mill, finish mill, EDM details, grind guide faces, polish forming surface"),
+    ("slide_hot", "Slide (forming steel, hot work)", "made", "H13 (1.2344)", 3, 0.3, 5, "44-48 HRC", "saw,rough,finish,heat,grind,drill,edm,polish", 0.8,
+     "ISO 2768-f; forming surface per 3D model ±0.02; guided fit H7/g6", "Saw, rough mill, vacuum harden and temper, finish mill, EDM, grind guide faces, polish, nitride"),
+    ("lifter", "Lifter (forming steel)", "made", "P20 (1.2311)", 3, 0.3, 5, "30-36 HRC pre-hardened", "saw,rough,finish,grind,drill,edm,polish", 0.8,
+     "ISO 2768-f; forming surface per 3D model ±0.02; guided fit H7/g6", "Saw, rough mill, finish mill, EDM details, grind guide faces, polish forming surface"),
+    ("lifter_hot", "Lifter (forming steel, hot work)", "made", "H13 (1.2344)", 3, 0.3, 5, "44-48 HRC", "saw,rough,finish,heat,grind,drill,edm,polish", 0.8,
+     "ISO 2768-f; forming surface per 3D model ±0.02; guided fit H7/g6", "Saw, rough mill, vacuum harden and temper, finish mill, EDM, grind, polish, nitride"),
+    ("manifold_plate", "Hot runner manifold plate", "made", _P, 3, 0.5, 5, "28-32 HRC pre-hardened", "saw,rough,grind,drill", 1.6,
+     "ISO 2768-m; pocket clearance as drawn; flatness and parallelism 0.02", "Saw, mill, grind faces, CNC manifold pocket and nozzle bores, deburr"),
+    ("pattern_half", "Foundry pattern half (cope, drag)", "made", "Aluminium 7075-T6", 3, 0.3, 5, "T6", "saw,rough,finish,drill,polish", 1.6,
+     "Pattern dimensions = casting x (1 + shrinkage) + machining allowance; draft as drawn; ISO 8062 CT8", "Saw, CNC mill the pattern surface, hand finish, paint and polish"),
+    ("gating_pattern", "Gating and riser pattern", "made", "Aluminium 7075-T6", 3, 0.3, 5, "T6", "saw,rough,finish,polish", 3.2,
+     "ISO 2768-m; sprue and riser tapered for withdrawal", "Saw, turn / mill, polish, fit on the match plate"),
+    ("match_plate", "Match plate", "made", "Aluminium 7075-T6", 3, 0.4, 5, "T6", "saw,rough,grind,drill", 3.2,
+     "ISO 2768-m; flatness 0.1; pattern seats and dowel bores H7", "Saw, mill both faces, drill and tap pattern fixing holes and flask pin holes"),
+    ("core_box", "Core box (half)", "made", "Aluminium 7075-T6", 3, 0.3, 5, "T6", "saw,rough,finish,drill,polish", 1.6,
+     "Core cavity = core x (1 + shrinkage); parting faces flat 0.1; vents as drawn", "Saw, CNC mill the core cavity, polish, drill vent and dowel holes"),
     ("guide_pillar", "Guide pillar", "standard", "", 0, 0, 0, "", "", None, "h6 / catalogue", "Catalogue part"),
     ("guide_bush", "Guide bush", "standard", "", 0, 0, 0, "", "", None, "H7 / catalogue", "Catalogue part"),
     ("locating_ring", "Locating ring", "standard", "", 0, 0, 0, "", "", None, "catalogue", "Catalogue part"),
     ("sprue_bush", "Sprue bush", "standard", "", 0, 0, 0, "", "", None, "catalogue", "Catalogue part"),
 ]
+EXTRA_STANDARD = [("ejector_pin", "Ejector pin"), ("return_pin", "Return pin"), ("screw", "Socket head cap screw"), ("dowel", "Dowel pin"),
+                  ("cooling_connector", "Cooling connector"), ("hr_manifold", "Hot runner manifold"), ("hr_nozzle", "Hot runner nozzle"),
+                  ("angle_pin", "Angle pin"), ("spring", "Stripper spring"), ("stripper_bolt", "Stripper bolt")]
 SEED_STANDARD = [
     # group, item, spec, quantity rule, unit cost INR, unit
-    ("mould", "Socket head cap screw", "M{screw_dia_mm:.0f} × length for the plate stack, 12.9", "4 * ceil(base_l_mm / 150) + 8", 28, "pcs"),
-    ("mould", "Dowel pin", "Ø{dowel_dia_mm:.0f} h6 hardened", "8", 18, "pcs"),
+    ("mould", "Socket head cap screw", "M{screw_dia_mm:.0f} × length for the plate stack, 12.9", "screws_total", 28, "pcs"),
+    ("mould", "Dowel pin", "Ø{dowel_dia_mm:.0f} h6 hardened", "dowels_total", 18, "pcs"),
     ("mould", "Eye bolt", "M{screw_dia_mm:.0f} lifting", "2", 150, "pcs"),
+    ("foundry", "Socket head cap screw", "M{screw_dia_mm:.0f} fixing the pattern to the match plate", "screws_total", 28, "pcs"),
+    ("foundry", "Dowel pin", "Ø{dowel_dia_mm:.0f} h6 hardened", "dowels_total", 18, "pcs"),
+    ("foundry", "Flask guide pin and bush set", "For the flask size in the drawing, matches the foundry's flasks", "2", 900, "sets"),
     ("sheet_metal", "Guide pillar", "Ø{pillar_dia_mm:.0f} h6, ground, press-fit in the lower shoe", "pillars", 650, "pcs"),
     ("sheet_metal", "Guide bush", "Ø{pillar_dia_mm:.0f} H7, self-lubricating, in the upper shoe", "pillars", 450, "pcs"),
-    ("sheet_metal", "Stripper spring", "Die spring, rated {spring_rating_kgf:.0f} kgf at working stroke", "springs", 95, "pcs"),
-    ("sheet_metal", "Socket head cap screw", "M{screw_dia_mm:.0f}, 12.9", "screws", 28, "pcs"),
-    ("sheet_metal", "Dowel pin", "Ø{dowel_dia_mm:.0f} h6 hardened", "dowels", 18, "pcs"),
-    ("sheet_metal", "Stripper bolt", "Shoulder bolt for the stripper plate", "4", 60, "pcs"),
+    ("sheet_metal", "Stripper spring", "Die spring Ø{spring_od_mm:.0f}, rated {spring_rating_kgf:.0f} kgf at working stroke", "springs_total", 95, "pcs"),
+    ("sheet_metal", "Socket head cap screw", "M{screw_dia_mm:.0f}, 12.9", "screws_total", 28, "pcs"),
+    ("sheet_metal", "Dowel pin", "Ø{dowel_dia_mm:.0f} h6 hardened", "dowels_total", 18, "pcs"),
+    ("sheet_metal", "Stripper bolt", "Shoulder bolt Ø{screw_dia_mm:.0f} for the stripper plate", "stripper_bolts_total", 60, "pcs"),
 ]
 SEED_STEPS = [
     ("mould", 1, "Check every machined part against its drawing and the inspection list; record the key dimensions.", "0.5"),
@@ -96,6 +120,11 @@ SEED_STEPS = [
     ("mould", 5, "Fit the support plate, spacer blocks and bottom clamp plate; fit the sprue bush and locating ring.", "1.5"),
     ("mould", 6, "Connect cooling and test for leaks; fit slides, lifters and hot runner where designed.", "3.0"),
     ("mould", 7, "Close the mould, check the parting line seal and shut-off faces, then send for try-out.", "2.0"),
+    ("foundry", 1, "Check every pattern, core box and the match plate against its drawing and the inspection list; record the key dimensions.", "0.5"),
+    ("foundry", 2, "Fix the cope and drag pattern halves to the match plate with screws and dowels; check they register with the flask pins.", "2.0"),
+    ("foundry", 3, "Fit the sprue, runner, ingate and riser patterns on the match plate; check the taper and fillets.", "1.5"),
+    ("foundry", 4, "Close the core box halves; check the core prints fit the pattern prints and the core vents are clear.", "1.0"),
+    ("foundry", 5, "Make a trial mould and casting; measure the casting against the part drawing and adjust the shrinkage / allowance if needed.", "3.0"),
     ("sheet_metal", 1, "Check every machined part against its drawing and the inspection list.", "0.5"),
     ("sheet_metal", 2, "Fit the guide pillars into the lower shoe and the bushes into the upper shoe.", "1.0"),
     ("sheet_metal", 3, "Fit the die block (and buttons) on the lower shoe; dowel and screw it.", "3 + die_set_l_mm / 150"),
@@ -104,7 +133,7 @@ SEED_STEPS = [
     ("sheet_metal", 6, "Close the die, check shut height and parallelism, then send for try-out.", "2.0"),
 ]
 SEED_STAGE_RULES = [
-    ("all", "spring_rating_kgf", "60", "kgf", "Rating of one stripper spring at working stroke"),
+    ("all", "spring_rating_kgf", "min(1500, max(60, strip_force_t * 1000 / 8))", "kgf", "Rating of one stripper spring at working stroke (aims at about 8 springs)"),
     ("all", "springs", "max(4, 2 * ceil(strip_force_t * 1000 / spring_rating_kgf / 2))", "pcs", "Stripper springs (an even number, at least 4)"),
     ("all", "screw_dia_mm", "max(8, round(die_block_t_mm / 4))", "mm", "Socket head screw size"),
     ("all", "screws", "4 * max(2, ceil(max(die_set_l_mm, die_set_w_mm) / 150))", "pcs", "Screws fixing the plates of the die set"),
@@ -131,6 +160,26 @@ def seed() -> dict:
                                             "grind_allow_mm": grind, "round_mm": rnd, "hardness": hard, "ops": ops,
                                             "finish_ra": ra or 0, "tolerance": tol, "route": route, "is_example": 1, "notes": CLASS_NOTE})
             out["classes"] += 1
+    for code, name in EXTRA_STANDARD:
+        if code not in {r["code"] for r in db["component_classes"]}:
+            db["component_classes"].append({"code": code, "name": name, "kind": "standard", "steel": "", "stock_allow_mm": 0, "grind_allow_mm": 0, "round_mm": 0,
+                                            "hardness": "", "ops": "", "finish_ra": 0, "tolerance": "catalogue", "route": "Catalogue part", "is_example": 1,
+                                            "notes": CLASS_NOTE})
+            out["classes"] += 1
+    for r in db["standard_parts"]:      # quantities now follow the 3D count (screws and dowels placed in the model)
+        if r["tool_group"] == "mould" and r["item"] == "Socket head cap screw" and r["quantity_rule"].startswith("4 * ceil"):
+            r["quantity_rule"] = "screws_total"
+        if r["tool_group"] == "mould" and r["item"] == "Dowel pin" and r["quantity_rule"] == "8":
+            r["quantity_rule"] = "dowels_total"
+        if r["tool_group"] == "sheet_metal" and r["item"] == "Socket head cap screw" and r["quantity_rule"] == "screws":
+            r["quantity_rule"] = "screws_total"
+        if r["tool_group"] == "sheet_metal" and r["item"] == "Dowel pin" and r["quantity_rule"] == "dowels":
+            r["quantity_rule"] = "dowels_total"
+        if r["tool_group"] == "sheet_metal" and r["item"] == "Stripper spring" and r["quantity_rule"] == "springs":
+            r["quantity_rule"] = "springs_total"
+        if r["tool_group"] == "sheet_metal" and r["item"] == "Stripper bolt" and r["quantity_rule"] == "4":
+            r["quantity_rule"] = "stripper_bolts_total"
+            out["standard_parts"] += 1
     have = {(r["tool_group"], r["item"]) for r in db["standard_parts"]}
     for g, item, spec, qty, cost, unit in SEED_STANDARD:
         if (g, item) not in have:
@@ -142,6 +191,11 @@ def seed() -> dict:
         if (g, step) not in have:
             db["assembly_steps"].append({"tool_group": g, "step": step, "text": text, "hours": hours, "is_example": 1, "notes": CLASS_NOTE})
             out["assembly_steps"] += 1
+    for r in db["stage_rules"]:
+        if r["name"] == "spring_rating_kgf" and r["formula"] == "60":
+            r["formula"] = "min(1500, max(60, strip_force_t * 1000 / 8))"
+            r["label"] = "Rating of one stripper spring at working stroke (aims at about 8 springs)"
+            out["stage_rules"] += 1
     have = {(r["op"], r["name"]) for r in db["stage_rules"]}
     top = max((r["step"] for r in db["stage_rules"]), default=0)
     for i, (op, name, f, unit, label) in enumerate(SEED_STAGE_RULES, start=1):
@@ -173,6 +227,9 @@ def _env_names() -> dict:
     env = {k: 1.0 for k in tool_design.STAGE_VARS + MOULD_VARS}
     env |= {k: 1.0 for k in ("springback_deg", "draw_ratio", "progressive_ok")}
     env |= {k: float(v) for k, v in master_data.parameters("sheet_metal").items() if isinstance(v, (int, float))}
+    env |= {"screws_total": 8.0, "dowels_total": 4.0, "springs_total": 4.0, "stripper_bolts_total": 4.0, "spring_od_mm": 24.0}
+    from . import foundry_design
+    env |= {k: 1.0 for k in foundry_design.FOUNDRY_ENV} | {r[1]: 1.0 for r in foundry_design.SEED_RULES}
     env |= {"dowel_dia_mm": 8.0, "spring_rating_kgf": 60.0, "screw_dia_mm": 10.0, "springs": 4.0, "screws": 8.0, "dowels": 4.0,
             "die_set_l_mm": 300.0, "die_set_w_mm": 200.0, "strip_force_t": 1.0, "die_block_t_mm": 40.0, "pillars": 4.0, "pillar_dia_mm": 25.0}
     return env
@@ -270,8 +327,10 @@ def features(shape: cq.Shape) -> dict:
     hole_rows = []
     for (d, depth, ax_i), where in sorted(holes.items()):
         extent = float(size[ax_i])
+        from .tool_internals import TAP_DRILL
+        thread = next((f"M{k}" for k, v in TAP_DRILL.items() if abs(v - d) < 0.06), "")
         hole_rows.append({"dia_mm": d, "depth_mm": depth, "axis": "xyz"[ax_i], "through": depth >= extent - 0.01, "count": len(where),
-                          "positions_mm": where})
+                          "positions_mm": where, "thread": thread})
     # openings and pockets seen from the top (+Z): inner wires of the top face, and pocket floors below the top
     top_faces = [f for f in shape.Faces() if f.geomType() == "PLANE" and f.normalAt().z > 0.999]
     zmax = bb.zmax
@@ -442,6 +501,17 @@ def bom_standard_lines(tool: dict) -> list[dict]:
         out.append({"item": l["element"], "spec": "per tool-cost BOM", "quantity": round(l["quantity"]), "unit": "pcs",
                     "unit_cost_inr": round(l["bought_out_cost"] / l["quantity"], 2) if l["quantity"] else 0,
                     "amount_inr": round(l["bought_out_cost"]), "source": "Tool cost BOM", "is_example": bool(l.get("is_example"))})
+    return out
+
+
+def apply_counts(lines: list[dict], counts: dict) -> list[dict]:
+    """Make bought-out quantities equal to what the 3D design placed (pins, connectors, slides …): {words in the item name: count}."""
+    out = []
+    for l in lines:
+        want = next((c for w, c in counts.items() if c is not None and w in l["item"].lower()), None)
+        if want is not None and want != l["quantity"]:
+            l = dict(l, quantity=int(want), amount_inr=round(int(want) * l["unit_cost_inr"]), spec=f"{l['spec']} · quantity as placed in the 3D design (was {l['quantity']})")
+        out.append(l)
     return out
 
 

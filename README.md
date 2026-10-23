@@ -165,7 +165,7 @@ with China's rates, for example. Results are shown in that country's currency an
 - The **tool cost sheet** (Excel: Summary, Cost build-up, BOM & processes, Steps, Inputs, Rates used, Example values; and PDF) is on
   the part and on the Estimate page.
 
-Sheet-metal dies come with stages 9 and 10, and foundry patterns later. Those parts say so instead of showing a cost.
+Sheet-metal dies come with stages 9 and 10; the tool cost of foundry patterns is not costed yet (their production design is: stage 22).
 
 **Example warning.** Every tool cost shown carries the red **"Uses example rates – not for negotiation"** warning while any
 rate **or** master-data row it uses (machine, BOM element, tool process, time parameter, mould base, sizing rule) is still an
@@ -293,10 +293,28 @@ A released design is never edited: *New revision* starts a draft from it. For a 
 A draft prints DRAFT on every document. Rates and rules that are still EXAMPLE values are flagged. The order documents have blank supplier,
 buyer and PO-number fields for you to fill in.
 
-**Limits.** This is a **concept-level** design generated from the part: plates, inserts, punches and die blocks with their pockets, openings,
-pillar and bush holes. Ejector pins, cooling channels, hot runner, slides, lifters, screws and dowels are in the BOM but **not modelled in 3D**
-(slides and lifters are marked as "to be designed"); draw and bend forming surfaces follow the part for parts without undercuts. The 3D file
-governs where it differs from a drawing. Have your toolmaker check the design before cutting steel. Foundry patterns are not covered yet.
+**Details in 3D (stage 22).** Besides plates, inserts, punches and die blocks the model contains, as separate numbered parts: ejector and return
+pins (sleeved holes through the plates), cooling channels with connectors, socket head screws (counterbore, clearance and tapped holes) and
+dowels, the hot runner (manifold plate, bar, nozzles, inlet bushing), slides with angle pins and lifters found from undercut voids between the
+part's upper and lower envelopes, and in sheet-metal dies the screws, dowels, stripper bolts, springs in pockets and flange wipers. Every size
+and count is a *Tool detail rules* row; the BOM quantities equal what is placed in the model. Where a draw or bend stage meets an undercut the
+forming block gets the void and a note. Check **Checks** for overlaps: a design is released with none.
+
+**Foundry.** Foundry parts get a pattern set: cope and drag pattern halves (draft added to the alloy's minimum, machining allowance, shrinkage),
+core boxes with core prints for side holes and bosses, the match plate, and sprue, runner, ingate and riser patterns sized from the casting
+modulus. Alloy data is in *Foundry materials*, gating sizes in *Tool detail rules* (foundry). The flask size is stated in the notes.
+
+**Toolmaker review.** Each design has a checklist (*Review checklist* master data): automatic items from the design facts (overlaps, FEA, pins and
+cooling placed, undercuts resolved, tie-bar fit, pattern and gating) and manual items for the toolmaker (OK, Issue, N/A or Waive, each with a
+name and a comment). A blocking item that is not signed stops the release; an automatic check that fails cannot be signed OK, only waived with a
+reason. The STEP checksum is printed on every drawing, so a drawing and a file can be matched. Supplier quotes typed into the "Quoted …" columns of
+the purchase pack are uploaded on the BOM tab; "Use quotes" turns them into approved steel rates and Standard parts prices.
+
+**Limits.** This is a **production design for your toolmaker to confirm**, not a replacement for your CAD. Rates, allowances, hardness, tolerances,
+standard-part prices and assembly hours are still EXAMPLE rows until you replace them (*Replace example values* lists them; every document shows
+the warning until then). Forming surfaces of draw and bend stages follow the part and carry undercut voids with a note; the detailed surface is
+made in your CAD. Hot-runner and slide geometry is generic (no supplier catalogue model). FEA is an indicative check of the biggest insert or die
+block: small holes are removed before meshing. The 3D file governs where it differs from a drawing.
 
 ---
 

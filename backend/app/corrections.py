@@ -59,12 +59,51 @@ def draft_map(shape: cq.Shape, min_draft_deg: float) -> dict:
 
 
 def sample_point(face: cq.Face) -> cq.Vector:
-    """A point that really lies on the face (its Center() lies inside the material for a convex cylinder)."""
+    """A point that really lies on the face, in the middle of it (its Center() lies inside the material for a convex cylinder, and the
+    tessellation vertices of a cylinder are all on its end rings)."""
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepClass import BRepClass_FaceClassifier
+    from OCP.BRepTools import BRepTools
+    from OCP.gp import gp_Pnt2d
+    from OCP.TopAbs import TopAbs_IN
+    try:
+        u0, u1, v0, v1 = BRepTools.UVBounds_s(face.wrapped)
+        surf = BRep_Tool.Surface_s(face.wrapped)
+        for fu, fv in ((0.5, 0.5), (0.4, 0.5), (0.6, 0.5), (0.5, 0.4), (0.5, 0.6), (0.3, 0.3), (0.7, 0.7)):
+            u, v = u0 + (u1 - u0) * fu, v0 + (v1 - v0) * fv
+            cls = BRepClass_FaceClassifier(face.wrapped, gp_Pnt2d(u, v), 1e-6)
+            if cls.State() == TopAbs_IN:
+                p = surf.Value(u, v)
+                return cq.Vector(p.X(), p.Y(), p.Z())
+    except Exception:
+        pass
     verts, _ = face.tessellate(0.2)
     pts = np.array([[v.x, v.y, v.z] for v in verts])
     mid = pts.mean(axis=0)
-    p = pts[int(np.argmin(((pts - mid) ** 2).sum(axis=1)))]
-    return cq.Vector(*p)
+    return cq.Vector(*pts[int(np.argmin(((pts - mid) ** 2).sum(axis=1)))])
+
+
+def to_z_point(p, axis: str) -> tuple:
+    """A point of the original model moved the way to_z moves the shape (opening axis onto +Z)."""
+    v = to_z(cq.Vertex.makeVertex(*p), axis)
+    c = v.Center()
+    return (c.x, c.y, c.z)
+
+
+def draft_map(shape: cq.Shape, min_draft_deg: float) -> dict:
+    """Face area (cm²) whose wall is closer to the opening direction (Z) than `min_draft_deg` (like the simulation's map)."""
+    from .geometry import tessellate
+    v, t = tessellate(shape)
+    tri = np.asarray(v, float)[np.asarray(t, int)]
+    cross = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+    twice = np.linalg.norm(cross, axis=1)
+    nz = np.abs(cross[:, 2]) / np.where(twice > 0, twice, 1)
+    draft = np.degrees(np.arcsin(np.clip(nz, 0, 1)))
+    area = twice / 2
+    wall = draft < 89.0                                      # horizontal faces (parting / floors) need no draft
+    low = wall & (draft < min_draft_deg)
+    return {"low_draft_cm2": float(area[low].sum()) / 100, "wall_cm2": float(area[wall].sum()) / 100,
+            "min_draft_deg": float(draft[wall].min()) if wall.any() else 90.0}
 
 
 def _escapes(shape: cq.Shape, p: cq.Vector, direction: int, length: float) -> bool:

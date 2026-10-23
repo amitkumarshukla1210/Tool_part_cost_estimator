@@ -20,6 +20,15 @@ def mould_design(code="PC-1", material="ABS", process="injection_moulding"):
     return pid, client.post(f"/api/parts/{pid}/tool-designs", json={}).json()
 
 
+def sign_all(design_id):
+    """The toolmaker signs every blocking review item (an automatic check that fails is waived with a reason)."""
+    base = f"/api/tool-designs/{design_id}"
+    for it in client.get(base).json()["review"]:
+        if it["blocking"] and it["status"] not in ("ok", "na", "waived"):
+            body = {"status": "ok", "comment": ""} if it["kind"] == "manual" else {"status": "waived", "comment": "accepted in test"}
+            assert client.post(f"{base}/review/{it['id']}", json=body).status_code == 200
+
+
 @pytest.fixture(scope="module")
 def _unused():
     return None
@@ -84,7 +93,9 @@ def test_mould_design_has_numbered_components_bom_and_no_overlap():
     ins = next(m for m in b["made"] if "B side insert" in m["name"])
     assert ins["info"]["steel"].startswith("P20") and ins["info"]["stock"]["size_mm"][0] >= ins["info"]["bbox_mm"][0] + 6
     apl = next(m for m in b["made"] if "A plate" in m["name"])
-    assert apl["info"]["features"]["hole_count"] == 4 and apl["info"]["features"]["holes"][0]["dia_mm"] == pytest.approx(36)     # guide bush bores
+    bush = [h for h in apl["info"]["features"]["holes"] if h["dia_mm"] == pytest.approx(36)]
+    assert len(bush) == 1 and len(bush[0]["positions_mm"]) == 4                                                                  # guide bush bores
+    assert apl["info"]["features"]["hole_count"] >= 4                                                                           # plus screws, dowels, sprue
     assert apl["info"]["features"]["openings"][0]["through"]                                                                   # insert pocket
     assert d["bill"]["totals"]["assembly_hours"] > 10
 
@@ -97,7 +108,9 @@ def test_die_casting_uses_hot_work_steel_and_other_groups_are_covered():
 
 def test_sheet_metal_design_per_stage_and_progressive():
     pid = add_part(project("S"), "sheet_metal_bracket.step", "Mild steel CRCA / HR", "sheet_metal_multistage", "SM-1")
-    d = client.post(f"/api/parts/{pid}/tool-designs", json={}).json()
+    r0 = client.post(f"/api/parts/{pid}/tool-designs", json={})
+    assert r0.status_code == 200, r0.text
+    d = r0.json()
     assert d["kind"] == "sheet_metal" and d["summary"]["checks"]["errors"] == 0
     nos = {c["part_no"] for c in d["components"] if c["kind"] == "made"}
     assert any("-S1-" in n for n in nos) and any("-S2-" in n for n in nos)
@@ -182,6 +195,8 @@ def test_identical_parts_follow_an_edit():
 def test_release_blocks_edits_and_new_revision_starts_from_it():
     pid, d = mould_design("PC-5")
     base = f"/api/tool-designs/{d['id']}"
+    assert client.post(f"{base}/release", json={}).status_code == 400            # the toolmaker's review is not signed yet
+    sign_all(d["id"])
     rel = client.post(f"{base}/release", json={})
     assert rel.status_code == 200 and rel.json()["status"] == "released"
     comp = d["components"][0]
@@ -189,6 +204,7 @@ def test_release_blocks_edits_and_new_revision_starts_from_it():
     assert client.post(f"{base}/components/{comp['id']}/upload", files={"file": ("x.step", step)}, data={"note": "x"}).status_code == 400
     rev = client.post(f"{base}/new-revision", json={}).json()
     assert rev["status"] == "draft" and rev["rev_label"] == "B" and rev["version"] == 2 and len(rev["components"]) == len(d["components"])
+    sign_all(rev["id"])
     assert client.post(f"/api/tool-designs/{rev['id']}/release", json={}).json()["status"] == "released"
     assert client.get(base).json()["status"] == "superseded"
 
@@ -197,7 +213,7 @@ def test_purchase_pack_workbook_pos_and_supplier_zip():
     pid, d = mould_design("PC-6")
     base = f"/api/tool-designs/{d['id']}"
     wb = load_workbook(io.BytesIO(client.get(f"{base}/files/xlsx").content))
-    assert wb.sheetnames == ["Cover", "BOM", "PO-1 Raw material", "PO-2 Machining", "Machining detail", "PO-3 Bought-out", "Assembly", "Inspection", "Features", "Cost summary"]
+    assert wb.sheetnames == ["Cover", "BOM", "PO-1 Raw material", "PO-2 Machining", "Machining detail", "PO-3 Bought-out", "Assembly", "Inspection", "Features", "Quote comparison", "Cost summary"]
     ws = wb["PO-1 Raw material"]
     rows = [r for r in ws.iter_rows(values_only=True) if r[1] and str(r[1]).startswith("PC-6-M-")]
     assert len(rows) == 9 and all(r[3] and r[4] and r[9] for r in rows)
@@ -208,12 +224,13 @@ def test_purchase_pack_workbook_pos_and_supplier_zip():
     names = z.namelist()
     assert sum(n.startswith("step/") for n in names) == 9 and sum(n.startswith("drawings/") for n in names) == 9 and sum(n.startswith("dxf/") for n in names) == 9
     assert any(n.startswith("po/") and n.endswith(".xlsx") for n in names) and "README.txt" in names
+    sign_all(d["id"])
     client.post(f"{base}/release", json={})
     wb2 = load_workbook(io.BytesIO(client.get(f"{base}/files/xlsx").content))
     assert "DRAFT" not in str(wb2["Cover"]["A1"].value)
 
 
-def test_foundry_parts_are_refused_with_a_reason():
-    pid = add_part(project("F"), "plate_with_hole.step", "Grey cast iron FG260", "foundry", "FD-1")
+def test_parts_without_a_tool_are_refused_with_a_reason():
+    pid = add_part(project("F"), "plate_with_hole.step", "Mild steel CRCA / HR", "machined", "MC-1")
     r = client.post(f"/api/parts/{pid}/tool-designs", json={})
     assert r.status_code == 400

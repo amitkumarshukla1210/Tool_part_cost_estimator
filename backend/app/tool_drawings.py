@@ -48,7 +48,8 @@ def feature_items(info: dict) -> dict:
     for h in f["holes"]:
         for pos in h["positions_mm"]:
             n += 1
-            holes.append({"id": f"H{n}", "dia": h["dia_mm"], "depth": h["depth_mm"], "through": h["through"], "axis": h["axis"], "pos": pos})
+            holes.append({"id": f"H{n}", "dia": h["dia_mm"], "depth": h["depth_mm"], "through": h["through"], "axis": h["axis"], "pos": pos,
+                          "thread": h.get("thread", "")})
     openings = [dict(o, id=f"O{i}") for i, o in enumerate(f["openings"], start=1)]
     pockets = [dict(p, id=f"P{i}") for i, p in enumerate(f["pockets"], start=1)]
     return {"holes": holes, "openings": openings, "pockets": pockets}
@@ -56,7 +57,7 @@ def feature_items(info: dict) -> dict:
 
 def _group_holes(holes: list[dict]) -> list[dict]:
     """Rows of the hole table: one row per hole (position from the datum)."""
-    return [{"id": h["id"], "dia": h["dia"], "depth": h["depth"], "through": h["through"], "axis": h["axis"],
+    return [{"id": h["id"], "dia": h["dia"], "depth": h["depth"], "through": h["through"], "axis": h["axis"], "thread": h.get("thread", ""),
              "x": h["pos"][0], "y": h["pos"][1], "z": h["pos"][2]} for h in holes]
 
 
@@ -159,11 +160,11 @@ def component_pdf(comp: dict, info: dict, shape: cq.Shape, head: dict) -> bytes:
     y = PAGE_H - 18
     hole_rows = _group_holes(feats["holes"])
     if hole_rows:
-        rows = [["ID", "Ø", "Depth", "Thru", "Ax", "X", "Y", "Z"]] + [[r["id"], f"{r['dia']:g}", f"{r['depth']:g}", "yes" if r["through"] else "no", r["axis"],
-                f"{r['x']:.2f}", f"{r['y']:.2f}", f"{r['z']:.2f}"] for r in hole_rows[:24]]
+        rows = [["ID", "Ø", "Depth", "Thru", "Ax", "X", "Y", "Z", "Note"]] + [[r["id"], f"{r['dia']:g}", f"{r['depth']:g}", "yes" if r["through"] else "no", r["axis"],
+                f"{r['x']:.2f}", f"{r['y']:.2f}", f"{r['z']:.2f}", f"{r['thread']} tap" if r["thread"] and not r["through"] else ""] for r in hole_rows[:24]]
         if len(hole_rows) > 24:
-            rows.append([f"+{len(hole_rows) - 24} more in the DXF / Excel", "", "", "", "", "", "", ""])
-        y = table(rows, [11, 13, 15, 11, 9, 22, 22, 22], y, "HOLES  (position from datum O, mm)")
+            rows.append([f"+{len(hole_rows) - 24} more in the DXF / Excel", "", "", "", "", "", "", "", ""])
+        y = table(rows, [10, 12, 13, 10, 8, 19, 19, 19, 14], y, "HOLES  (position from datum O, mm)")
     if feats["openings"]:
         rows = [["ID", "X", "Y", "Length", "Width", "Thru", "Contour"]] + [[o["id"], f"{o['x_mm']:.2f}", f"{o['y_mm']:.2f}", f"{o['length_mm']:.2f}",
                 f"{o['width_mm']:.2f}", "yes" if o.get("through") else "no", f"{o['perimeter_mm']:.1f}"] for o in feats["openings"][:14]]
@@ -178,7 +179,7 @@ def component_pdf(comp: dict, info: dict, shape: cq.Shape, head: dict) -> bytes:
         y = table(rows, [20, 25, 20], y, "RADII  (largest first)")
     # notes
     st = info["stock"]
-    notes = [f"1. All dimensions in mm. Datum O = minimum corner of the part. Third-angle projection.",
+    notes = [f"1. All dimensions in mm. Datum O = minimum corner of the part. Third-angle projection. Dimensions are those of the 3D file whose checksum is in the title block.",
              f"2. General tolerances: {info['tolerance']}.",
              f"3. Material: {info['steel']}. Hardness: {info['hardness'] or 'as supplied'}. Surface finish Ra {info['finish_ra'] or 3.2} µm unless stated.",
              f"4. Raw stock {st['size_mm'][0]:g} × {st['size_mm'][1]:g} × {st['size_mm'][2]:g} mm, {st['weight_kg']:g} kg (finished {st['finished_weight_kg']:g} kg).",
@@ -198,7 +199,8 @@ def component_pdf(comp: dict, info: dict, shape: cq.Shape, head: dict) -> bytes:
           ["Project / part", f"{head['project']} / {head['part_code']} {head['part_name']}", "Design", f"{head['status']} {head['revision_label']}"],
           ["Material", f"{info['steel']}", "Scale", f"{n}:{d:g}"],
           ["Size (finished)", f"{L:g} × {W:g} × {H:g} mm", "Date", head["date"]],
-          ["Weight", f"{st['finished_weight_kg']:g} kg", "Sheet", "1 / 1"]]
+          ["Weight", f"{st['finished_weight_kg']:g} kg", "Sheet", "1 / 1"],
+          ["STEP checksum", f"sha256 {comp.get('sha', '')[:24]}", "Match", "file = drawing"]]
     t = Table(tb, colWidths=[24 * mm, 78 * mm, 22 * mm, 36 * mm], rowHeights=6.2 * mm)
     t.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 8), ("GRID", (0, 0), (-1, -1), 0.4, theme["ink"]),
                            ("BACKGROUND", (0, 0), (0, -1), theme["alt"]), ("BACKGROUND", (2, 0), (2, -1), theme["alt"]),
@@ -251,9 +253,9 @@ def component_dxf(comp: dict, info: dict, shape: cq.Shape, head: dict) -> bytes:
     for h in feats["holes"]:
         view = _hole_view(h["axis"])
         u, v = _uv(view, (h["pos"][0] + org[0], h["pos"][1] + org[1], h["pos"][2] + org[2]))
-        mark(view, u, v, f"{h['id']} Ø{h['dia']:g}x{h['depth']:g}{' thru' if h['through'] else ''}", h["dia"] / 2)
+        mark(view, u, v, f"{h['id']} Ø{h['dia']:g}x{h['depth']:g}{' thru' if h['through'] else ''}{' ' + h['thread'] + ' tap' if h.get('thread') and not h['through'] else ''}", h["dia"] / 2)
     y = -30.0
-    notes = [f"{comp['part_no']} rev {comp['rev']}  {comp['name']}  qty {comp.get('qty', 1)}",
+    notes = [f"{comp['part_no']} rev {comp['rev']}  {comp['name']}  qty {comp.get('qty', 1)}  STEP sha256 {comp.get('sha', '')[:24]}",
              f"{info['steel']}  {info['hardness']}  stock {info['stock']['size_mm']} mm  {info['stock']['weight_kg']} kg",
              f"Tolerances: {info['tolerance']}", f"Route: {info['route']}", f"Tool: {head['tool']}  design {head['status']} {head['revision_label']}"]
     for t in notes:

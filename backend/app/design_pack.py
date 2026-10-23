@@ -45,6 +45,16 @@ def _frames_tri(tri, colors, n, azim0, azim1, caption_fn, bounds, elev=22):
 
 # ------------------------------------------------------------ plastic and die casting
 
+def _mould_kwargs(tool: dict, rev: dict, part_h: float = 0.0, area_cm2: float = 0.0) -> dict:
+    qty = {l["element"]: l["quantity"] for l in tool.get("lines", []) if l.get("category") == "bought_out"}
+    g = rev["geometry"]
+    ax = g.get("pull_direction", "z")
+    pick = lambda *words: int(next((q for k, q in qty.items() if all(w in k.lower() for w in words)), 0))
+    return {"part_h": part_h or g["bbox_axes_mm"].get(ax, 0), "part_area_cm2": area_cm2 or g["projected_area_mm2"].get(ax, 0) / 100,
+            "bom": {"ejector_pins": pick("ejector"), "return_pins": pick("return pin") or 4, "cooling_connectors": pick("cooling"),
+                    "hot_runner": pick("hot runner nozzle") > 0, "slides": pick("slide mechanism"), "lifters": pick("lifter")}}
+
+
 def mould_prepare(part_id: int, production: bool = False) -> dict:
     """Simulation, 3D correction, tool cost and mould 3D of a moulded part. Plastic and die casting go through the simulation and the
     draft correction; EPS and blow parts use the model as it is, opened along its stored pull direction at its middle."""
@@ -56,7 +66,7 @@ def mould_prepare(part_id: int, production: bool = False) -> dict:
         z = corrections.to_z(shape, axis).BoundingBox()
         tool = register._tool_compute(part_id)
         parting = (z.zmin + z.zmax) / 2
-        m3d = tool_design.mould_3d(shape, axis, parting, tool, regions=None, production=production)
+        m3d = tool_design.mould_3d(shape, axis, parting, tool, regions=None, production=production, **_mould_kwargs(tool, rev))
         return {"d": d, "rev": rev, "part_type": part_type, "shape": shape, "fixed": shape, "axis": axis, "corr": None, "tool": tool,
                 "m3d": m3d, "before": None, "after": None, "concept_res": {}, "facts": {}, "min_draft": None}
     d, rev, part_type, verts, tris, concept_res, facts = register._concept_inputs(part_id)
@@ -76,7 +86,8 @@ def mould_prepare(part_id: int, production: bool = False) -> dict:
                       "part_weight_g": m2.net_weight_g}
     after = simulation.run(v2, t2, part_type, facts2, m2.projected_area_mm2)
     tool = register._tool_compute(part_id)
-    m3d = tool_design.mould_3d(fixed, axis, corr["parting_z_mm"], tool, regions=concept_res.get("regions"), production=production)
+    m3d = tool_design.mould_3d(fixed, axis, corr["parting_z_mm"], tool, regions=concept_res.get("regions"), production=production,
+                               **_mould_kwargs(tool, rev, m2.bbox_axes_mm[axis], m2.projected_area_mm2[axis] / 100))
     return {"d": d, "rev": rev, "part_type": part_type, "shape": shape, "fixed": fixed, "axis": axis, "corr": corr, "tool": tool, "m3d": m3d,
             "before": before, "after": after, "concept_res": concept_res, "facts": facts, "min_draft": min_draft, "m2": m2, "v2": v2, "t2": t2,
             "verts": verts, "tris": tris, "density": density}
@@ -432,7 +443,7 @@ def build(part_id: int, video: str = "short", force: bool = False) -> dict:
         out = _sheet_pack(part_id, video)
     else:
         raise ToolNotApplicable("The design pack covers plastic moulds, die-casting dies and sheet-metal tools. "
-                                "EPS, blow and foundry parts come with their own tool-design stage.")
+                                "EPS, blow and foundry parts: use the 3D tool design page (production tool design) of the part.")
     code = _safe(d["part_code"])
     rep = out["report"]
     out["files"][f"{code}_design_report.xlsx"] = report_render.to_xlsx(rep)

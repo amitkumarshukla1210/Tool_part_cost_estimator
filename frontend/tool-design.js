@@ -308,7 +308,27 @@ function bomTab() {
     ${b.made.map((m, i) => `<tr class="clickable" data-id="${m.ids[0]}"><td>${i + 1}</td><td>${esc(m.part_no)}</td><td>${esc(m.name)}</td><td class="num">${m.qty}</td><td>${esc(m.info.steel)}</td><td class="num">${fmt(m.info.stock.weight_kg, 1)}</td></tr>`).join("")}</tbody></table>
     <h4>Bought-out parts</h4><table class="cost-table"><thead><tr><th>Item</th><th>Specification</th><th class="num">Qty</th><th class="num">INR</th></tr></thead><tbody>
     ${b.standard.map((l) => `<tr><td>${esc(l.item)}</td><td>${esc(l.spec)}</td><td class="num">${l.quantity}</td><td class="num">${fmt(l.amount_inr)}</td></tr>`).join("")}</tbody></table>
-    <h4>Assembly in your factory (${fmt(t.assembly_hours, 1)} h)</h4><ol>${b.assembly.map((a) => `<li>${esc(a.text)} <span class="note">${a.hours} h</span></li>`).join("")}</ol>`;
+    <h4>Assembly in your factory (${fmt(t.assembly_hours, 1)} h)</h4><ol>${b.assembly.map((a) => `<li>${esc(a.text)} <span class="note">${a.hours} h</span></li>`).join("")}</ol>
+    <h4>Supplier quotes</h4>
+    <p class="note">Send the purchase pack (Excel) to the supplier. They type their prices in the yellow-header “Quoted …” columns. Upload the file back here: the quotes sit
+      next to the estimate (sheet “Quote comparison”) and can become your approved steel rates and bought-out prices.</p>
+    <input type="file" id="qFile" accept=".xlsx" /><input id="qSupplier" placeholder="Supplier name" />
+    <button class="btn btn-outline small" id="qGo" type="button">Read quotes</button>
+    <button class="btn btn-primary small" id="qApply" type="button" ${design.quotes?.length ? "" : "disabled"}>Use quotes as approved rates and prices</button> <span class="status" id="qStatus"></span>
+    ${design.quotes?.length ? `<table class="cost-table"><thead><tr><th>Supplier</th><th>Kind</th><th>Part / item</th><th class="num">Quoted</th></tr></thead><tbody>
+      ${design.quotes.map((q) => `<tr><td>${esc(q.supplier)}</td><td>${esc(q.kind)}</td><td>${esc(q.key)}</td><td class="num">${fmt(q.value, 2)} ${esc(q.currency)}</td></tr>`).join("")}</tbody></table>` : ""}`;
+  $("qGo")?.addEventListener("click", async () => {
+    const f = $("qFile").files[0], sup = $("qSupplier").value.trim();
+    if (!f || !sup) return status($("qStatus"), "Choose the workbook and enter the supplier name.", "error");
+    const fd = new FormData(); fd.append("file", f); fd.append("supplier", sup);
+    try { const r = await api(`/api/tool-designs/${design.id}/quotes`, { method: "POST", body: fd }); status($("qStatus"), `${r.quotes} quoted price(s) read${r.skipped.length ? `, ${r.skipped.length} skipped` : ""}.`); await loadDesign(design.id, selected); document.querySelector('[data-tab="bom"]').click(); }
+    catch (err) { status($("qStatus"), err.message, "error"); }
+  });
+  $("qApply")?.addEventListener("click", async () => {
+    if (!confirm("Make the quoted steel rates approved rates of the tool country and the quoted bought-out prices the Standard parts prices?")) return;
+    try { const r = await api(`/api/tool-designs/${design.id}/quotes/apply`, { method: "POST" }); status($("qStatus"), `Applied: ${r.steel_rates.length} steel rate(s), ${r.standard_parts.length} standard part price(s)${r.machining_ratio ? `; machining quoted at ${fmt(r.machining_ratio * 100, 0)} % of the estimate` : ""}.`); }
+    catch (err) { status($("qStatus"), err.message, "error"); }
+  });
   document.querySelectorAll("#tab-bom tr[data-id]").forEach((tr) => tr.addEventListener("click", () => { select(Number(tr.dataset.id)); }));
 }
 
@@ -317,6 +337,24 @@ function checksTab() {
   $("tab-checks").innerHTML = `<p>${ch.errors ? `<b class="issue-error">${ch.errors} error(s)</b>` : "No errors"} · ${ch.warnings || 0} warning(s) <span class="note">checked ${esc(ch.at || "")} · ${ch.components_checked || 0} parts</span></p>
     <ul>${(ch.issues || []).map((i) => `<li class="issue-${i.level}">${esc(i.text)}</li>`).join("") || "<li>Valid solids, no overlapping parts.</li>"}</ul>
     <p class="note">The check looks for invalid solids and for parts that overlap. Standard parts are included. Run it again after every correction (done automatically on upload).</p>`;
+}
+
+function reviewTab() {
+  const items = design.review || [], draft = design.status === "draft", f = design.summary.fea;
+  const open = items.filter((r) => r.blocking && !["ok", "na", "waived"].includes(r.status)).length;
+  $("tab-review").innerHTML = `<p><b>${open ? `${open} blocking item(s) not signed off` : "All blocking items are signed off"}</b> <span class="note">Release needs every blocking row ok, not applicable or waived with a reason.</span></p>
+    ${f && f.max_deflection_mm != null ? `<p class="note">Structural check (Gmsh + CalculiX): deflection ${fmt(f.max_deflection_mm, 4)} mm (limit ${fmt(f.deflection_limit_mm, 3)}), von Mises ${fmt(f.max_von_mises_mpa, 0)} MPa (limit ${fmt(f.stress_limit_mpa, 0)}) · <a class="link" href="/api/tool-designs/${design.id}/fea.vtk">result for ParaView</a></p>` : f ? `<p class="note">${esc(f.note || "")}</p>` : ""}
+    <table class="cost-table"><thead><tr><th>Check</th><th>Status</th><th>Decision</th></tr></thead><tbody>
+    ${items.map((r) => `<tr><td>${esc(r.text)}${r.blocking ? "" : ' <span class="note">(not blocking)</span>'}<br/><span class="note">${r.kind === "auto" ? "automatic" : "toolmaker"}${r.detail ? ` · ${esc(r.detail)}` : ""}${r.by ? ` · ${esc(r.by)} ${esc((r.at || "").slice(0, 10))}` : ""}${r.comment ? ` · “${esc(r.comment)}”` : ""}</span></td>
+      <td><span class="badge ${r.status === "ok" ? "released" : r.status === "issue" || r.status === "open" ? "draft" : "superseded"}">${esc(r.status)}</span></td>
+      <td>${draft ? `<input class="rv-note" data-id="${r.id}" placeholder="comment" style="width:100%" />
+        <button type="button" class="btn btn-outline small rv" data-id="${r.id}" data-s="ok">OK</button><button type="button" class="btn btn-outline small rv" data-id="${r.id}" data-s="issue">Issue</button>
+        <button type="button" class="btn btn-outline small rv" data-id="${r.id}" data-s="na">N/A</button><button type="button" class="btn btn-outline small rv" data-id="${r.id}" data-s="waived">Waive</button>` : ""}</td></tr>`).join("")}</tbody></table>`;
+  document.querySelectorAll(".rv").forEach((b) => b.addEventListener("click", async () => {
+    const id = Number(b.dataset.id), comment = document.querySelector(`.rv-note[data-id="${id}"]`).value;
+    try { await api(`/api/tool-designs/${design.id}/review/${id}`, { method: "POST", body: JSON.stringify({ status: b.dataset.s, comment }) }); await loadDesign(design.id, selected); document.querySelector('[data-tab="review"]').click(); }
+    catch (err) { status($("status"), err.message, "error"); }
+  }));
 }
 
 function render() {
@@ -334,7 +372,7 @@ function render() {
   $("banner").innerHTML = (d.status === "draft" ? `<div class="warn">DRAFT: not released. Correct and check it, then release it before you issue purchase orders.</div>`
     : d.status === "released" ? `<div class="info">Released as drawing revision ${esc(d.rev_label)} by ${esc(d.released_by)} on ${esc((d.released_at || "").slice(0, 10))}. To change a part, start a new revision.</div>`
     : `<div class="info">Superseded by a newer release.</div>`) + (s.example ? `<div class="warn">Uses example rates – not for negotiation</div>` : "") + (s.notes ? `<div class="info">${esc(s.notes)}</div>` : "");
-  partsTab(); bomTab(); checksTab(); renderMeasure();
+  partsTab(); bomTab(); reviewTab(); checksTab(); renderMeasure();
 }
 
 // ---------------------------------------------------------------- loading and actions

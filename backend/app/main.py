@@ -1011,6 +1011,31 @@ def tool_design_new_revision(design_id: int, data: dict | None = None):
     return _td(lambda st: st.new_revision(design_id, str((data or {}).get("note") or "")))
 
 
+@app.post("/api/tool-designs/{design_id}/review/{item_id}")
+def tool_design_review(design_id: int, item_id: int, data: dict):
+    """Toolmaker's decision on a review item: status ok / issue / na / waived with a comment."""
+    return _td(lambda st: st.review_decide(design_id, item_id, str(data.get("status") or ""), str(data.get("comment") or "")))
+
+
+@app.post("/api/tool-designs/{design_id}/quotes")
+async def tool_design_quotes(design_id: int, file: UploadFile = File(...), supplier: str = Form("")):
+    """Quoted prices typed into the purchase-pack workbook by a supplier."""
+    content = await file.read()
+    return _td(lambda st: st.quotes_import(design_id, content, supplier))
+
+
+@app.post("/api/tool-designs/{design_id}/quotes/apply")
+def tool_design_quotes_apply(design_id: int):
+    """Quoted steel rates become approved rates; quoted bought-out prices become Standard parts unit costs."""
+    return _td(lambda st: st.quotes_apply(design_id))
+
+
+@app.get("/api/tool-designs/{design_id}/fea.vtk")
+def tool_design_fea(design_id: int):
+    content, name = _td(lambda st: st.fea_file(design_id))
+    return Response(content, media_type="application/octet-stream", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
 @app.get("/api/tool-designs/{design_id}/files/{kind}")
 def tool_design_file(design_id: int, kind: str):
     """kind: xlsx, po-material, po-machining, po-bought-out, assembly-pdf, assembly-step."""

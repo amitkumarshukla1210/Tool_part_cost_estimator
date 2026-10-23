@@ -77,6 +77,7 @@ def _mesh(shape: cq.Shape, size: float, workdir: Path):
         gmsh.option.setNumber("Mesh.MeshSizeMax", size)
         gmsh.option.setNumber("Mesh.MeshSizeMin", size / 3)
         gmsh.option.setNumber("Mesh.ElementOrder", 2)
+        gmsh.option.setNumber("Mesh.SecondOrderLinear", 1)       # mid-side nodes stay straight: no inverted elements on curved faces
         gmsh.model.mesh.generate(3)
         gmsh.model.mesh.setOrder(2)
         ntags, ncoords, _ = gmsh.model.mesh.getNodes()
@@ -94,6 +95,40 @@ def _mesh(shape: cq.Shape, size: float, workdir: Path):
         _GMSH_LOCK.release()
 
 
+def defeature(shape: cq.Shape, size: float) -> tuple[cq.Shape, int]:
+    """Remove small round holes and bosses (pin, screw, dowel and cooling holes) that a mesh of element size `size` cannot represent: they
+    make the mesher fail and do not change the deflection of the block. Returns the shape and the number of faces removed."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Defeaturing
+    from OCP.TopTools import TopTools_ListOfShape
+    limit = min(size * 0.35, 12.0)
+    drop = [f for f in shape.Faces() if f.geomType() == "CYLINDER" and f.radius() <= limit] if hasattr(cq.Face, "radius") else []
+    if not drop:
+        drop = []
+        for f in shape.Faces():
+            if f.geomType() == "CYLINDER":
+                bb = f.BoundingBox()
+                if min(bb.xlen, bb.ylen, bb.zlen) <= 2 * limit and max(bb.xlen, bb.ylen, bb.zlen) > 0:
+                    drop.append(f)
+    if not drop:
+        return shape, 0
+    try:
+        df = BRepAlgoAPI_Defeaturing()
+        df.SetShape(shape.wrapped)
+        for f in drop:
+            df.AddFaceToRemove(f.wrapped)
+        df.SetRunParallel(False)
+        df.Build()
+        if df.IsDone():
+            out = cq.Shape.cast(df.Shape())
+            if out.ShapeType() != "Solid" and out.Solids():
+                out = out.Solids()[0]
+            if out.ShapeType() == "Solid" and out.isValid() and 0.8 * shape.Volume() < out.Volume() < 1.2 * shape.Volume():
+                return out, len(drop)
+    except Exception:
+        pass
+    return shape, 0
+
+
 def _is_box_face(face: cq.Face, bb) -> bool:
     """A plane lying on a side of the part's own bounding box."""
     if face.geomType() != "PLANE":
@@ -106,7 +141,7 @@ def _is_box_face(face: cq.Face, bb) -> bool:
     return False
 
 
-def solve(shape: cq.Shape, pressure_mpa: float, load: str = "cavity", params: dict | None = None, element_size: float | None = None) -> dict:
+def solve(shape: cq.Shape, pressure_mpa: float, load: str = "cavity", params: dict | None = None, element_size: float | None = None, _try: int = 0) -> dict:
     """Mesh and solve. load = 'cavity' (pressure on every non-box face) or 'top' (pressure on the top face)."""
     have = tools()
     if not have["gmsh"] or not have["ccx"]:
@@ -117,9 +152,19 @@ def solve(shape: cq.Shape, pressure_mpa: float, load: str = "cavity", params: di
     E, nu = p.get("fea_e_mpa", 210000.0), p.get("fea_poisson", 0.3)
     bb = shape.BoundingBox()
     size = element_size or max(bb.xlen, bb.ylen, bb.zlen) / 10
+    shape, n_removed = defeature(shape, size)
     with tempfile.TemporaryDirectory() as d:
         wd = Path(d)
-        coords, tets, surfaces = _mesh(shape, size, wd)
+        err = None
+        for k in (1.0, 0.7, 1.4):          # a surface the mesher rejects at one element size often meshes at another
+            try:
+                coords, tets, surfaces = _mesh(shape, size * k, wd)
+                size, err = size * k, None
+                break
+            except Exception as exc:
+                err = str(exc)
+        if err:
+            return {"available": False, "note": f"FEA skipped: the mesher could not mesh this shape ({err[:90]}). Check the model in your FEA tool."}
         # which surface entities take the pressure
         faces = shape.Faces()
         pressured = set()
@@ -158,6 +203,11 @@ def solve(shape: cq.Shape, pressure_mpa: float, load: str = "cavity", params: di
             return {"available": True, "ok": False, "note": f"CalculiX produced no result ({(run.stdout + run.stderr)[-160:].strip()}).",
                     "loaded_faces": len(dload), "fixed_nodes": len(fixed)}
         disp, vm = _read_frd(frd)
+        if not disp and _try < 2:           # distorted second-order elements: remesh finer, then coarser
+            return solve(shape, pressure_mpa, load, params, size * (0.6 if _try == 0 else 2.2), _try + 1)
+        if not disp:
+            return {"available": False, "note": f"FEA skipped: CalculiX gave no displacements ({(run.stdout + run.stderr)[-120:].strip()}). Check the model in your FEA tool.",
+                    "loaded_faces": len(dload), "fixed_nodes": len(fixed)}
         umax = max(math.sqrt(x * x + y * y + z * z) for x, y, z in disp.values())
         vmax = max(vm.values()) if vm else 0.0
         vtk = _vtk(coords, tets, disp, vm)

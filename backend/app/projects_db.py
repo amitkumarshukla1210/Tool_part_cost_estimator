@@ -234,6 +234,38 @@ tool_designs = Table(
     Index("ix_tool_designs_part", "part_id"),
 )
 
+tool_reviews = Table(
+    "tool_reviews", meta,
+    Column("id", Integer, primary_key=True),
+    Column("design_id", ForeignKey("tool_designs.id", ondelete="CASCADE"), nullable=False),
+    Column("step", Integer, nullable=False),
+    Column("text", String(300), nullable=False),
+    Column("kind", String(10), default="manual"),        # auto, manual
+    Column("blocking", Integer, default=1),
+    Column("status", String(10), default="open"),        # ok, issue, open, na, waived
+    Column("detail", String(300), default=""),           # what the automatic check found
+    Column("comment", String(500), default=""),
+    Column("by", String(100), default=""),
+    Column("at", DateTime),
+    Index("ix_tool_reviews_design", "design_id"),
+)
+
+tool_quotes = Table(
+    "tool_quotes", meta,
+    Column("id", Integer, primary_key=True),
+    Column("design_id", ForeignKey("tool_designs.id", ondelete="CASCADE"), nullable=False),
+    Column("kind", String(12), nullable=False),          # material, machining, bought_out
+    Column("key", String(120), nullable=False),          # part number (material, machining) or item name (bought_out)
+    Column("steel", String(80), default=""),
+    Column("value", Float, nullable=False),              # material: rate per kg; machining: price each; bought_out: unit price (INR)
+    Column("currency", String(10), default=""),
+    Column("supplier", String(120), default=""),
+    Column("note", String(300), default=""),
+    Column("created_by", String(100), default=""),
+    Column("created_at", DateTime, default=now),
+    Index("ix_tool_quotes_design", "design_id"),
+)
+
 tool_components = Table(
     "tool_components", meta,
     Column("id", Integer, primary_key=True),

@@ -204,7 +204,7 @@ TABLES = {
         col("notes", "Notes"),
     ]},
     "standard_parts": {"title": "Standard parts", "unique": ("tool_group", "item"), "columns": [
-        col("tool_group", "Tool group", "tool_group", ("mould", "sheet_metal")),
+        col("tool_group", "Tool group", "tool_group", ("mould", "sheet_metal", "foundry")),
         col("item", "Item"),
         col("spec", "Specification ({name} fills in a value)"),
         col("quantity_rule", "Quantity (rule)", "formula"),
@@ -214,10 +214,40 @@ TABLES = {
         col("notes", "Notes"),
     ]},
     "assembly_steps": {"title": "Assembly steps", "unique": ("tool_group", "step"), "columns": [
-        col("tool_group", "Tool group", "tool_group", ("mould", "sheet_metal")),
+        col("tool_group", "Tool group", "tool_group", ("mould", "sheet_metal", "foundry")),
         col("step", "Order", "number"),
         col("text", "Step"),
         col("hours", "Fitting hours (rule)", "formula"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "detail_rules": {"title": "Tool detail rules", "unique": ("tool_group", "name"), "columns": [
+        col("tool_group", "Tool group", "tool_group", ("mould", "sheet_metal", "foundry")),
+        col("step", "Order", "number"),
+        col("name", "Name"),
+        col("formula", "Formula", "formula"),
+        col("unit", "Unit"),
+        col("label", "Meaning"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "review_items": {"title": "Review checklist", "unique": ("tool_group", "step"), "columns": [
+        col("tool_group", "Tool group", "tool_group", ("mould", "sheet_metal", "foundry")),
+        col("step", "Order", "number"),
+        col("text", "Check"),
+        col("auto_check", "Automatic check (rule, 1 = passed; empty = the toolmaker signs it)", "formula", required=False),
+        col("fail_message", "Shown when the check fails"),
+        col("blocking", "Blocks the release", "bool"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "foundry_materials": {"title": "Foundry materials", "unique": ("material",), "columns": [
+        col("material", "Material (Materials sheet, foundry)"),
+        col("shrinkage_pct", "Pattern shrinkage (%)", "number"),
+        col("machining_allowance_mm", "Machining allowance (mm per side)", "number"),
+        col("min_draft_deg", "Minimum draft on the pattern (°)", "number"),
+        col("min_cored_dia_mm", "Smallest cored hole (mm)", "number"),
+        col("riser_modulus_factor", "Riser modulus ÷ casting modulus", "number"),
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
     ]},
@@ -276,9 +306,11 @@ def _check(clean: dict) -> None:
             raise MouldDbError(f"Strip rules ({r['name']}): {exc}") from None
         except ArithmeticError:
             senv[r["name"]] = 1.0
-    from . import tool_components, tool_design
+    from . import tool_components, tool_design, tool_internals, tool_review
     tool_design.validate(clean)
     tool_components.validate(clean)
+    tool_internals.validate(clean)
+    tool_review.validate(clean)
     from . import simulation
     for pt in PART_TYPES:
         env = simulation.sample_env(pt)

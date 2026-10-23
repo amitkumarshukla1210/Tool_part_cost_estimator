@@ -26,8 +26,8 @@ import cadquery as cq
 import numpy as np
 from sqlalchemy import func, select, update
 
-from . import (corrections, design_pack, file_store, geometry, master_data, mould_db, outputs3d, rates, register, register_setup,
-               tool_components, tool_design)
+from . import (corrections, design_pack, fea, file_store, foundry_design, geometry, master_data, mould_db, outputs3d, rates, register, register_setup,
+               tool_components, tool_design, tool_review)
 from . import projects_db as db
 from .register import RegisterError, ToolNotApplicable
 
@@ -78,8 +78,9 @@ def _tool_group(part_type: str) -> str:
         return "sheet_metal"
     if part_type in ("plastic", "die_casting", "eps", "blow"):
         return "mould"
-    raise ToolNotApplicable("Production tool drawings cover moulds, dies (plastic, die casting, EPS, blow) and sheet-metal tools. "
-                            "Foundry patterns come with their own tool-design stage.")
+    if part_type == "foundry":
+        return "foundry"
+    raise ToolNotApplicable("Production tool drawings cover moulds, dies (plastic, die casting, EPS, blow), sheet-metal tools and foundry patterns.")
 
 
 def _signature(shape: cq.Shape, cls: str) -> tuple:
@@ -94,7 +95,7 @@ def _prepare(part_id: int) -> dict:
         raise ToolNotApplicable("Set the part's process first.")
     group = _tool_group(proc["part_type"])
     code = _safe(d["part_code"])
-    comps, std, steps, summary, stage_of = [], [], [], {}, {}
+    comps, std, steps, summary, stage_of, fea_vtk = [], [], [], {}, {}, None
     if group == "mould":
         P = design_pack.mould_prepare(part_id, production=True)
         m3d, tool = P["m3d"], P["tool"]
@@ -104,7 +105,14 @@ def _prepare(part_id: int) -> dict:
                "plate_b_mm": m3d["plate_b_mm"], "pillar_dia_mm": m3d["pillar_dia_mm"], "pillars": 4.0,
                "part_h_mm": tool.get("part_h", 0) or 0, "screw_dia_mm": float(max(8, round(min(base) / 30))),
                "dowel_dia_mm": float(max(8, round(min(base) / 30)))}
-        std = tool_components.bom_standard_lines(tool) + tool_components.standard_lines("mould", env)
+        det = m3d.get("details") or {"counts": {}, "rules": {}}
+        c3 = det["counts"]
+        env |= {k: float(x) for k, x in (det.get("rules") or {}).items()}
+        env |= {"screws_total": float(c3.get("screws", 0)), "dowels_total": float(c3.get("dowels", 0))}
+        std = tool_components.apply_counts(tool_components.bom_standard_lines(tool), {
+            "ejector pin": c3.get("ejector_pins"), "return pin": c3.get("return_pins"), "cooling connectors": c3.get("cooling_connectors"),
+            "slide mechanism": c3.get("slides") and c3["slides"], "lifter guide": c3.get("lifters"), "hot runner nozzle": c3.get("nozzles")})
+        std += tool_components.standard_lines("mould", env)
         steps = tool_components.assembly_steps("mould", env)
         for c in m3d["components"]:
             comps.append(dict(c, prefix="M-", stage=None))
@@ -114,18 +122,56 @@ def _prepare(part_id: int) -> dict:
                    "currency": tool["currency"], "catalogue_base": ({"item": base_line["element"], "price": round(base_line["total"])} if base_line else None),
                    "draft": ({"before_cm2": P["corr"]["before"]["low_draft_cm2"], "after_cm2": P["corr"]["after"]["low_draft_cm2"]} if P["corr"] else None),
                    "example": bool(tool.get("example", {}).get("any"))}
-        part_h = P["rev"]["geometry"]["bbox_axes_mm"][P["axis"]] if P["axis"] in P["rev"]["geometry"]["bbox_axes_mm"] else 0
-        stage_of = {}
+        trial = tool.get("trial") or {}
+        mach = trial.get("machine") or {}
+        tie = min(mach.get("length_mm") or 0, mach.get("width_mm") or 0)
+        b_ins = next((c["shape"] for c in m3d["components"] if c["name"] == "B side insert"), None)
+        pressure = master_data.parameters(P["part_type"]).get("cavity_pressure_bar", 400) / 10.0
+        fea_res = (fea.solve(b_ins, pressure, "cavity", master_data.parameters(P["part_type"])) if b_ins is not None
+                   else {"available": False, "note": "No B side insert to check."})
+        det = m3d.get("details") or {"counts": {}, "rules": {}}
+        facts = {"fea_ok": (1 if fea_res.get("ok") else 0) if fea_res.get("max_deflection_mm") is not None else -1,
+                 "fea_deflection_mm": fea_res.get("max_deflection_mm") or 0, "fea_limit_mm": fea_res.get("deflection_limit_mm") or 0,
+                 "pins_placed": det["counts"].get("ejector_pins", 0), "pins_wanted": det["rules"].get("ejector_pins", 0),
+                 "cool_placed": det["counts"].get("cooling_channels", 0), "cool_wanted": 2 * det["rules"].get("cool_channels", 0),
+                 "slides": det["counts"].get("slides", 0), "lifters": det["counts"].get("lifters", 0),
+                 "undercut_unresolved": det["counts"].get("unresolved", 0), "hot_runner": int(bool(det["counts"].get("nozzles"))),
+                 "draft_left_cm2": (P["corr"]["after"]["low_draft_cm2"] if P["corr"] else 0), "clamp_t": trial.get("force_t", 0),
+                 "machine_t": mach.get("tonnage_t", 0), "tie_bar_fit": int(bool(tie) and min(base) <= 0.95 * tie), "cavities": m3d["cavities_total"]}
+        summary["fea"] = {k: v for k, v in fea_res.items() if k != "vtk"}
+        summary["facts"] = facts
+        fea_vtk = fea_res.get("vtk")
+    elif group == "foundry":
+        _, rev, shape = register.part_shape(part_id)
+        density, _ = register._density(d["material"])
+        if not density:
+            raise ToolNotApplicable("Set the part's material (with a density) before designing the pattern.")
+        axis = rev["geometry"]["pull_direction"]
+        vol = shape.Volume() / 1000.0
+        facts_in = {"part_weight_kg": vol * density / 1000.0, "part_volume_cm3": vol, "part_surface_cm2": shape.Area() / 100.0}
+        F = foundry_design.build(shape, axis, d["material"], facts_in)
+        country = (d["tool_country"] or d["country"] or register_setup.settings()["default_country"]).upper()
+        month = d["costing_month"] or rates.current_month()
+        for c in F["components"]:
+            comps.append(dict(c, prefix="F-", stage=None))
+        c3 = F["counts"]
+        env = {k: float(x) for k, x in F["rules"].items()} | {"screws_total": float(c3.get("screws", 0)), "dowels_total": float(c3.get("dowels", 0))}
+        std = tool_components.standard_lines("foundry", env)
+        steps = tool_components.assembly_steps("foundry", env)
+        facts = {"check_errors": 0, "check_warnings": 0, "pattern_ok": F["pattern_ok"], "gating_ok": F["gating_ok"], "cores": F["cores"]}
+        summary = {"notes": " ".join(F["notes"]), "facts": facts, "foundry": {k: F[k] for k in ("shrinkage_pct", "allowance_mm", "flask_mm", "cores", "draft")},
+                   "rules": F["rules"], "example": True, "opening_axis": axis, "currency": "INR"}
+        P = {"axis": axis}
     else:
         P = design_pack.sheet_prepare(part_id)
         design, fp, shape = P["design"], P["fp"], P["shape"]
         country, month = P["country"], design["month"]
         progressive = design["mode"] == "progressive"
         if progressive:
-            sol = tool_design.progressive_solids(design, fp, shape, open_state=False)
+            sol = tool_design.progressive_solids(design, fp, shape, open_state=False, details=True)
             for c in sol:
                 comps.append(dict(c, prefix="P-", stage=None))
-            env = _stage_env(design["stages"][0])
+            env = _stage_env(design["stages"][0]) | _detail_env(design, "progressive")
             std = tool_components.standard_lines("sheet_metal", env)
             steps = tool_components.assembly_steps("sheet_metal", env)
         else:
@@ -133,11 +179,11 @@ def _prepare(part_id: int) -> dict:
             for s in design["stages"]:
                 width = s["values"]["die_set_l_mm"]
                 # the stage dies stand side by side (one after the other along X) so that they can be viewed and checked together
-                for c in tool_design.stage_solids(design, s, fp, shape, open_state=False):
+                for c in tool_design.stage_solids(design, s, fp, shape, open_state=False, details=True):
                     shifted = c["shape"].translate(cq.Vector(x0 + width / 2, 0, 0))
                     comps.append(dict(c, shape=shifted, prefix=f"S{s['n']}-", stage=s["n"]))
                 x0 += width + 150
-                env = _stage_env(s)
+                env = _stage_env(s) | _detail_env(design, s["n"])
                 for l in tool_components.standard_lines("sheet_metal", env):
                     key = (l["item"], l["spec"])
                     if key in agg:
@@ -149,16 +195,41 @@ def _prepare(part_id: int) -> dict:
             std = list(agg.values())
             steps = []
             for s in design["stages"]:
-                env = _stage_env(s)
+                env = _stage_env(s) | _detail_env(design, s["n"])
                 for st in tool_components.assembly_steps("sheet_metal", env):
                     steps.append(dict(st, text=f"Stage {s['n']} ({s['name']}): {st['text']}"))
             steps = [dict(st, step=i) for i, st in enumerate(steps, start=1)]
-        summary = {"mode": design["mode"], "stages": len(design["stages"]), "total_force_t": design["total_force_t"],
-                   "presses": [s["press"].get("name") for s in design["stages"]], "notes": " ".join(design["warnings"]),
+        biggest = max(design["stages"], key=lambda x: x["force_t"])
+        die_c = next((c for c in comps if c["name"] == "Die block" and (progressive or c["stage"] == biggest["n"])), None)
+        fea_res = {"available": False, "note": "No die block to check."}
+        if die_c is not None:
+            bbd = die_c["shape"].BoundingBox()
+            fea_res = fea.solve(die_c["shape"], (design["total_force_t"] if progressive else biggest["design_force_t"]) * 9806.65 / (bbd.xlen * bbd.ylen),
+                                "top", master_data.parameters("sheet_metal"))
+        dets = list((design.get("_details") or {}).values())
+        sp_placed = sum(d_["counts"].get("springs", 0) for d_ in dets)
+        sp_wanted = sum(int(st["values"].get("springs", 0)) for st in (design["stages"][:1] if progressive else design["stages"]))
+        facts = {"fea_ok": (1 if fea_res.get("ok") else 0) if fea_res.get("max_deflection_mm") is not None else -1,
+                 "fea_deflection_mm": fea_res.get("max_deflection_mm") or 0, "fea_limit_mm": fea_res.get("deflection_limit_mm") or 0,
+                 "press_fit": int(all(s["press"].get("fits") for s in design["stages"])), "springs_placed": sp_placed,
+                 "springs_wanted": sp_wanted or sp_placed, "form_undercuts": sum("undercut" in n for n in design.get("form_notes", [])),
+                 "stages": len(design["stages"])}
+        fea_vtk = fea_res.get("vtk")
+        summary = {"fea": {k: v for k, v in fea_res.items() if k != "vtk"}, "facts": facts,
+                   "mode": design["mode"], "stages": len(design["stages"]), "total_force_t": design["total_force_t"],
+                   "presses": [s["press"].get("name") for s in design["stages"]], "notes": " ".join(design["warnings"] + design.get("form_notes", []) + [n for d_ in (design.get("_details") or {}).values() for n in d_["notes"]]),
                    "corrections": [c for c in P["corr"]["changes"] if c.get("count")], "steel_cost": design["steel_cost"],
                    "currency": design["currency"], "example": design["is_example"], "thickness_mm": design["thickness_mm"]}
     return {"d": d, "group": group, "part_type": proc["part_type"], "code": code, "comps": comps, "std": std, "steps": steps,
-            "summary": summary, "country": country, "month": month, "P": P}
+            "summary": summary, "country": country, "month": month, "P": P, "vtk": fea_vtk}
+
+
+def _detail_env(design: dict, key) -> dict:
+    """Rule values and the counts of screws, dowels, springs and bolts placed in the 3D die set, for the bill of materials."""
+    d = (design.get("_details") or {}).get(key) or {"counts": {}, "rules": {}}
+    c = d["counts"]
+    return {k: float(x) for k, x in d["rules"].items()} | {"screws_total": float(c.get("screws", 0)), "dowels_total": float(c.get("dowels", 0)),
+                                                         "springs_total": float(c.get("springs", 0)), "stripper_bolts_total": float(c.get("stripper_bolts", 0))}
 
 
 def _stage_env(stage: dict) -> dict:
@@ -215,6 +286,11 @@ def generate(part_id: int, note: str = "") -> dict:
             conn.execute(db.tool_component_revs.insert().values(component_id=cid, rev="A", file_id=f["id"], note="generated", info=c["info"],
                                                                 created_by=_user()))
         register._log(conn, "part", part_id, "tool_design_generated", {"version": version, "components": len(rows)})
+        tool_review.sync(conn, did, pre["group"], summary.get("facts", {}))
+        if pre.get("vtk"):
+            f = file_store.put(pre["vtk"], f"{code}_v{version}_fea.vtk", "tool_fea", conn)
+            s2 = dict(summary, fea_file_id=f["id"])
+            conn.execute(update(db.tool_designs).where(db.tool_designs.c.id == did).values(summary=s2))
     check_design(did)
     return get_design(did)
 
@@ -259,6 +335,10 @@ def get_design(design_id: int) -> dict:
     d["components"] = [{k: c[k] for k in ("id", "part_no", "instance", "name", "group", "stage_no", "cls", "kind", "rev", "edited", "color")}
                        | {"info": c["info"]} for c in comps]
     d["bill"] = bill(design_id)
+    with db.engine().connect() as conn:
+        d["review"] = tool_review.items(conn, design_id)
+        d["quotes"] = [{**dict(q), "created_at": q["created_at"].isoformat() if q["created_at"] else None} for q in
+                       conn.execute(select(db.tool_quotes).where(db.tool_quotes.c.design_id == design_id).order_by(db.tool_quotes.c.id)).mappings()]
     return d
 
 
@@ -359,6 +439,8 @@ def check_design(design_id: int) -> dict:
         s["checks"] = {"issues": issues, "errors": sum(i["level"] == "error" for i in issues), "warnings": sum(i["level"] == "warning" for i in issues),
                        "at": datetime.utcnow().isoformat(timespec="seconds"), "components_checked": len(items)}
         conn.execute(update(db.tool_designs).where(db.tool_designs.c.id == design_id).values(summary=s))
+        tool_review.sync(conn, design_id, "mould" if d["kind"] == "mould" else d["kind"], dict(s.get("facts", {}), check_errors=s["checks"]["errors"],
+                                                                                            check_warnings=s["checks"]["warnings"]))
     return s["checks"]
 
 
@@ -450,6 +532,10 @@ def release(design_id: int, accept_warnings: bool = False) -> dict:
             raise RegisterError(f"{checks['errors']} error(s) in the check (solid not valid or parts overlapping): correct them first.")
         if checks["warnings"] and not accept_warnings:
             raise RegisterError(f"{checks['warnings']} warning(s) in the check: look at them, then release with 'accept warnings'.")
+        blocked = tool_review.blockers(conn, design_id)
+        if blocked:
+            raise RegisterError(f"{len(blocked)} review item(s) are not signed off: " + "; ".join(blocked[:3]) + (" …" if len(blocked) > 3 else "")
+                                + " Open the Review tab: sign each one, or waive it with a reason.")
         conn.execute(update(db.tool_designs).where((db.tool_designs.c.part_id == d["part_id"]) & (db.tool_designs.c.status == "released"))
                      .values(status="superseded"))
         conn.execute(update(db.tool_designs).where(db.tool_designs.c.id == design_id)
@@ -474,6 +560,8 @@ def new_revision(design_id: int, note: str = "") -> dict:
                 cls=c["cls"], kind=c["kind"], color=c["color"], file_id=c["file_id"], rev=c["rev"], info=c["info"], edited=0)).inserted_primary_key[0]
             conn.execute(db.tool_component_revs.insert().values(component_id=cid, rev=c["rev"], file_id=c["file_id"], note=f"carried from version {d['version']}",
                                                                 info=c["info"], created_by=_user()))
+    with db.engine().begin() as conn:
+        tool_review.sync(conn, nid, "mould" if d["kind"] == "mould" else d["kind"], (d["summary"] or {}).get("facts", {}))
     check_design(nid)
     return get_design(nid)
 
@@ -504,7 +592,9 @@ def component_drawing(design_id: int, comp_id: int, fmt: str = "pdf") -> tuple[b
         head = _head(conn, d, _part_row(conn, d["part_id"]))
         qty = conn.execute(select(func.count()).select_from(db.tool_components).where((db.tool_components.c.design_id == design_id)
                                                                                       & (db.tool_components.c.part_no == c["part_no"]))).scalar()
-    comp = {"part_no": c["part_no"], "name": c["name"].split(":")[0], "rev": c["rev"], "qty": qty, "stage": c["stage_no"]}
+    with db.engine().connect() as conn:
+        sha = _file_row(conn, c["file_id"])["sha256"]
+    comp = {"part_no": c["part_no"], "name": c["name"].split(":")[0], "rev": c["rev"], "qty": qty, "stage": c["stage_no"], "sha": sha}
     if fmt == "dxf":
         return tool_drawings.component_dxf(comp, c["info"], shape, head), f"{c['part_no']}_rev{c['rev']}.dxf"
     return tool_drawings.component_pdf(comp, c["info"], shape, head), f"{c['part_no']}_rev{c['rev']}.pdf"
@@ -574,3 +664,130 @@ def supplier_package(design_id: int) -> tuple[bytes, str]:
             "The 3D (STEP) file governs where it differs from a drawing. Concept-level tool design generated by Design to Cost: check before cutting steel.\n"
             + ("\nDRAFT: this design is not released. Do not order from it.\n" if d["status"] != "released" else "")))
     return buf.getvalue(), f"{code}_tool_v{d['version']}_rev{d['rev_label']}_{d['status']}_supplier_package.zip"
+
+
+# ------------------------------------------------------------ review
+
+def review_decide(design_id: int, item_id: int, status: str, comment: str) -> dict:
+    with db.engine().begin() as conn:
+        d = _require_draft(conn, design_id)
+        try:
+            row = tool_review.decide(conn, design_id, item_id, status, comment, _user())
+        except ValueError as exc:
+            raise RegisterError(str(exc)) from None
+        register._log(conn, "part", d["part_id"], "tool_review", {"design": d["version"], "item": item_id, "status": status})
+    return row
+
+
+def fea_file(design_id: int) -> tuple[bytes, str]:
+    with db.engine().connect() as conn:
+        d = _design_row(conn, design_id)
+        fid = (d["summary"] or {}).get("fea_file_id")
+        if not fid:
+            raise RegisterError("No structural-check result file for this design (Gmsh and CalculiX are needed).")
+        f = _file_row(conn, fid)
+    return file_store.path_of(f).read_bytes(), f["original_name"]
+
+
+# ------------------------------------------------------------ supplier quotes
+
+QUOTE_COLUMNS = {"material": ("PO-1 Raw material", "Part no.", "Quoted rate per kg"),
+                 "machining": ("PO-2 Machining", "Part no.", "Quoted price each"),
+                 "bought_out": ("PO-3 Bought-out", "Description", "Quoted unit price")}
+
+
+def quotes_import(design_id: int, content: bytes, supplier: str) -> dict:
+    """Read the quoted prices a supplier typed into the purchase-pack workbook (the 'Quoted …' columns) and keep them with the design."""
+    from openpyxl import load_workbook
+    if not supplier.strip():
+        raise RegisterError("Say which supplier quoted.")
+    try:
+        wb = load_workbook(io.BytesIO(content), data_only=True)
+    except Exception:
+        raise RegisterError("The file is not an Excel workbook (.xlsx).") from None
+    d = get_design(design_id)
+    parts = {m["part_no"]: m for m in d["bill"]["made"]}
+    items = {l["item"] for l in d["bill"]["standard"]}
+    found, skipped = [], []
+    for kind, (sheet, key_head, val_head) in QUOTE_COLUMNS.items():
+        if sheet not in wb.sheetnames:
+            continue
+        rows = list(wb[sheet].iter_rows(values_only=True))
+        head_i = next((i for i, r in enumerate(rows) if r and key_head in [str(x) for x in r if x] and any(str(x or "").startswith(val_head) for x in r)), None)
+        if head_i is None:
+            continue
+        head = [str(x or "") for x in rows[head_i]]
+        kc, vc = head.index(key_head), next(i for i, h in enumerate(head) if h.startswith(val_head))
+        for r in rows[head_i + 1:]:
+            key, val = (r[kc] if kc < len(r) else None), (r[vc] if vc < len(r) else None)
+            if key in (None, "") or val in (None, ""):
+                continue
+            try:
+                val = float(val)
+            except (TypeError, ValueError):
+                skipped.append(f"{key}: '{val}' is not a number")
+                continue
+            if val <= 0 or (kind != "bought_out" and key not in parts) or (kind == "bought_out" and key not in items):
+                skipped.append(f"{key}: not a part number / item of this design" if val > 0 else f"{key}: price must be more than 0")
+                continue
+            found.append((kind, str(key), val))
+    if not found:
+        raise RegisterError("No quoted prices found: type them into the 'Quoted …' columns of PO-1, PO-2 or PO-3 of the purchase pack and upload that file." +
+                            (" " + "; ".join(skipped[:3]) if skipped else ""))
+    with db.engine().begin() as conn:
+        _require_draft_or_released(conn, design_id)
+        conn.execute(db.tool_quotes.delete().where((db.tool_quotes.c.design_id == design_id) & (db.tool_quotes.c.supplier == supplier.strip())))
+        for kind, key, val in found:
+            steel = parts[key]["info"]["steel"] if kind == "material" else ""
+            conn.execute(db.tool_quotes.insert().values(design_id=design_id, kind=kind, key=key, steel=steel, value=val,
+                                                        currency=d["bill"]["currency"] if kind != "bought_out" else "INR", supplier=supplier.strip(),
+                                                        created_by=_user()))
+    return {"quotes": len(found), "skipped": skipped, "supplier": supplier.strip()}
+
+
+def _require_draft_or_released(conn, design_id: int) -> dict:
+    d = _design_row(conn, design_id)
+    if d["status"] == "superseded":
+        raise RegisterError("This design is superseded.")
+    return d
+
+
+def quotes_apply(design_id: int, approver: str = "") -> dict:
+    """Make the quotes the approved values of the databases: quoted steel rates → approved tool-steel rates of the tool country (new
+    version, not an example); quoted bought-out prices → Standard parts unit costs. Machining quotes only give the quote / estimate ratio."""
+    d = get_design(design_id)
+    quotes = d["quotes"]
+    if not quotes:
+        raise RegisterError("There are no quotes on this design.")
+    month = rates.current_month()
+    done = {"steel_rates": [], "standard_parts": [], "machining_ratio": None}
+    by_steel = {}
+    made = {m["part_no"]: m for m in d["bill"]["made"]}
+    for q in quotes:
+        if q["kind"] == "material" and q["key"] in made:
+            kg = made[q["key"]]["info"]["stock"]["weight_kg"] * made[q["key"]]["qty"]
+            a = by_steel.setdefault(q["steel"], [0.0, 0.0])
+            a[0] += q["value"] * kg
+            a[1] += kg
+    for steel, (amt, kg) in by_steel.items():
+        rate = round(amt / kg, 2)
+        rates.create({"category": "tool_material", "item": steel, "country": d["country"], "value": rate, "unit": f"{d['bill']['currency']}/kg",
+                      "currency": d["bill"]["currency"], "month": month, "source": f"Supplier quote ({', '.join(sorted({q['supplier'] for q in quotes}))}) "
+                      f"for {d['summary'].get('part_code', '')} v{d['version']}", "comment": "", "is_example": False},
+                     approve=True, origin="quote", approver=approver or _user())
+        done["steel_rates"].append({"steel": steel, "rate": rate})
+    db_ = mould_db.tables()
+    changed = False
+    for q in quotes:
+        if q["kind"] == "bought_out":
+            for r in db_["standard_parts"]:
+                if r["item"] == q["key"]:
+                    r["unit_cost"], r["is_example"], changed = q["value"], 0, True
+                    done["standard_parts"].append({"item": q["key"], "unit_cost_inr": q["value"]})
+    if changed:
+        mould_db.write(db_)
+    mq = [q for q in quotes if q["kind"] == "machining" and q["key"] in made]
+    if mq:
+        est = sum(made[q["key"]]["info"]["machining_cost"] * made[q["key"]]["qty"] for q in mq)
+        done["machining_ratio"] = round(sum(q["value"] * made[q["key"]]["qty"] for q in mq) / est, 3) if est else None
+    return done

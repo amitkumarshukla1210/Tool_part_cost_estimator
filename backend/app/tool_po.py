@@ -56,6 +56,15 @@ def _head(design: dict) -> dict:
             "released": (design["released_at"] or "")[:10], "by": design["released_by"] or design["created_by"]}
 
 
+def q_for(design: dict, kind: str, key: str):
+    """The quoted value entered for a part number / item (latest quote wins), or an empty cell."""
+    best = None
+    for q in design.get("quotes", []):
+        if q["kind"] == kind and q["key"] == key:
+            best = q["value"]
+    return best if best is not None else ""
+
+
 def _ops_columns(m: dict) -> dict:
     cols = {}
     for o in m["info"]["operations"]:
@@ -140,16 +149,16 @@ def workbook(design: dict) -> bytes:
         total_kg += kg
         total_amt += amt
         rows.append([i, m["part_no"], m["name"], m["info"]["steel"], f"{st['size_mm'][0]:g} × {st['size_mm'][1]:g} × {st['size_mm'][2]:g}", m["qty"], st["weight_kg"], round(kg, 2),
-                     m["info"]["steel_rate"] or "", round(amt), m["info"]["hardness"], STEEL_DELIVERY])
-    rows.append(["", "", "TOTAL", "", "", sum(m["qty"] for m in made), "", round(total_kg, 1), "", round(total_amt), "", ""])
+                     m["info"]["steel_rate"] or "", round(amt), m["info"]["hardness"], STEEL_DELIVERY, q_for(design, "material", m["part_no"])])
+    rows.append(["", "", "TOTAL", "", "", sum(m["qty"] for m in made), "", round(total_kg, 1), "", round(total_amt), "", "", ""])
     by_steel = {}
     for m in made:
         d = by_steel.setdefault(m["info"]["steel"], [0.0, 0.0])
         d[0] += m["info"]["stock"]["weight_kg"] * m["qty"]
         d[1] += (m["info"]["material_cost"] or 0) * m["qty"]
-    rows += [["", "", "Steel summary", s, "", "", "", round(v[0], 1), "", round(v[1]), "", ""] for s, v in sorted(by_steel.items())]
+    rows += [["", "", "Steel summary", s, "", "", "", round(v[0], 1), "", round(v[1]), "", "", ""] for s, v in sorted(by_steel.items())]
     sheet("PO-1 Raw material", ["Item", "Part no.", "Name", "Steel grade", "Stock L × W × T (mm)", "Qty", "kg each", "kg total", f"Rate per kg ({f['currency']})",
-                                f"Amount ({f['currency']})", "Supply hardness", "Delivery condition"], rows, [6, 16, 32, 32, 22, 6, 9, 10, 12, 14, 22, 60])
+                                f"Amount ({f['currency']})", "Supply hardness", "Delivery condition", f"Quoted rate per kg ({f['currency']})"], rows, [6, 16, 32, 32, 22, 6, 9, 10, 12, 14, 22, 60, 16])
     # PO-2
     proc_cols = ["Cutting (per kg)", "CNC milling", "Grinding", "EDM", "Wire cut (per cm²)", "Polishing"]
     rows, tot = [], 0
@@ -159,11 +168,11 @@ def workbook(design: dict) -> bytes:
         tot += cost
         rows.append([i, m["part_no"], m["rev"], m["name"], m["qty"], m["info"]["steel"], m["info"]["route"], m["info"]["hardness"], m["info"]["tolerance"],
                      m["info"]["finish_ra"] or "", round(oc.get("CNC milling", 0), 1), round(oc.get("Grinding", 0), 1), round(oc.get("EDM", 0), 1),
-                     round(oc.get("Polishing", 0), 1), m["info"]["machining_cost"], round(cost)])
-    rows.append(["", "", "", "TOTAL", "", "", "", "", "", "", "", "", "", "", "", round(tot)])
+                     round(oc.get("Polishing", 0), 1), m["info"]["machining_cost"], round(cost), q_for(design, "machining", m["part_no"])])
+    rows.append(["", "", "", "TOTAL", "", "", "", "", "", "", "", "", "", "", "", round(tot), ""])
     sheet("PO-2 Machining", ["Item", "Part no.", "Rev", "Name", "Qty", "Steel", "Route", "Hardness", "Tolerances", "Ra", "Milling / drilling h", "Grinding h", "EDM h",
-                             "Polishing h", f"Estimate each ({f['currency']})", f"Estimate total ({f['currency']})"], rows,
-          [6, 16, 5, 30, 5, 28, 60, 22, 44, 6, 12, 10, 8, 10, 14, 16])
+                             "Polishing h", f"Estimate each ({f['currency']})", f"Estimate total ({f['currency']})", f"Quoted price each ({f['currency']})"], rows,
+          [6, 16, 5, 30, 5, 28, 60, 22, 44, 6, 12, 10, 8, 10, 14, 16, 16])
     rows = []
     for m in made:
         for o in m["info"]["operations"]:
@@ -171,13 +180,15 @@ def workbook(design: dict) -> bytes:
     sheet("Machining detail", ["Part no.", "Name", "Qty", "Operation", "Process (rate)", "Amount", "Unit", f"Cost each ({f['currency']})", "Note"], rows,
           [16, 30, 5, 42, 30, 10, 6, 14, 30])
     # PO-3
-    rows = [[i, l["item"], l["spec"], l["quantity"], l["unit"], l["unit_cost_inr"], l["amount_inr"], l["source"]] for i, l in enumerate(b["standard"], start=1)]
-    rows.append(["", "TOTAL", "", "", "", "", sum(l["amount_inr"] for l in b["standard"]), ""])
+    rows = [[i, l["item"], l["spec"], l["quantity"], l["unit"], l["unit_cost_inr"], l["amount_inr"], l["source"], q_for(design, "bought_out", l["item"])]
+            for i, l in enumerate(b["standard"], start=1)]
+    rows.append(["", "TOTAL", "", "", "", "", sum(l["amount_inr"] for l in b["standard"]), "", ""])
     cb = design["summary"].get("catalogue_base")
     if cb:
         rows.append(["", f"Alternative: {cb['item']}", "Buy the catalogue mould base instead of making plates A, B, clamp, support, spacer and ejector plates; "
                      "pockets and holes still to be machined", 1, "set", "", cb["price"], "Tool cost BOM (not in the total)"])
-    sheet("PO-3 Bought-out", ["Item", "Description", "Specification", "Qty", "Unit", "Unit cost (INR)", "Amount (INR)", "Source"], rows, [6, 44, 70, 6, 6, 14, 14, 30])
+    sheet("PO-3 Bought-out", ["Item", "Description", "Specification", "Qty", "Unit", "Unit cost (INR)", "Amount (INR)", "Source", "Quoted unit price (INR)"], rows,
+          [6, 44, 70, 6, 6, 14, 14, 30, 18])
     # Assembly
     rows = [[a["step"], a["text"], a["hours"]] for a in b["assembly"]] + [["", "TOTAL hours", round(sum(a["hours"] for a in b["assembly"]), 1)]]
     sheet("Assembly", ["Step", "Work in your factory", "Hours"], rows, [6, 120, 8])
@@ -203,6 +214,21 @@ def workbook(design: dict) -> bytes:
             for pos in hh["positions_mm"]:
                 rows.append([m["part_no"], "hole", hh["dia_mm"], hh["depth_mm"], hh["axis"], "yes" if hh["through"] else "no", *pos])
     sheet("Features", ["Part no.", "Type", "Ø (mm)", "Depth (mm)", "Axis", "Through", "X from datum", "Y from datum", "Z from datum"], rows, [16, 8, 8, 10, 6, 8, 12, 12, 12])
+    # Quote comparison
+    qrows = []
+    for m in made:
+        qm, qa = q_for(design, "material", m["part_no"]), q_for(design, "machining", m["part_no"])
+        est_m, est_a = (m["info"]["material_cost"] or 0) * m["qty"], m["info"]["machining_cost"] * m["qty"]
+        if qm != "":
+            qrows.append([m["part_no"], "raw material", est_m, round(qm * m["info"]["stock"]["weight_kg"] * m["qty"]), round(qm * m["info"]["stock"]["weight_kg"] * m["qty"] - est_m), f"{qm:g} per kg"])
+        if qa != "":
+            qrows.append([m["part_no"], "machining", est_a, round(qa * m["qty"]), round(qa * m["qty"] - est_a), f"{qa:g} each"])
+    for l in b["standard"]:
+        qs = q_for(design, "bought_out", l["item"])
+        if qs != "":
+            qrows.append([l["item"], "bought-out (INR)", l["amount_inr"], round(qs * l["quantity"]), round(qs * l["quantity"] - l["amount_inr"]), f"{qs:g} each"])
+    qrows.append(["TOTAL", "", sum(r[2] for r in qrows), sum(r[3] for r in qrows), sum(r[4] for r in qrows), ""])
+    sheet("Quote comparison", ["Part / item", "Kind", "Estimate", "Quoted", "Quoted − estimate", "Quote"], qrows, [30, 18, 14, 14, 16, 22])
     # Cost summary
     rows = [[f"Raw material ({f['currency']})", f["material"]], [f"Machining job work ({f['currency']})", f["machining"]], [f"Bought-out parts ({f['currency']})", round(f["standard_inr"] / f["fx"])],
             [f"Assembly in your factory ({f['currency']})", f["assembly"]], [f"Total ({f['currency']})", f["total_local"]], ["Total (INR)", f["total_inr"]], ["INR per " + f["currency"], f["fx"]]]

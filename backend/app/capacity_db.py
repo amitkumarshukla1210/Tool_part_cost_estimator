@@ -329,5 +329,7 @@ def validate(step_t: float = 250.0, as_of: str | None = None) -> dict:
 
 if __name__ == "__main__":
     import json
-    from . import fea, tool_design
-    print(json.dumps({"machines_and_bases": extend(), "stage_rules": tool_design.seed(), "fea_parameters": fea.seed()}, indent=1))
+    from . import fea, foundry_design, tool_components, tool_design, tool_internals, tool_review
+    print(json.dumps({"machines_and_bases": extend(), "stage_rules": tool_design.seed(), "fea_parameters": fea.seed(),
+                      "components": tool_components.seed(), "details": tool_internals.seed(), "review": tool_review.seed(),
+                      "foundry": foundry_design.seed()}, indent=1))
