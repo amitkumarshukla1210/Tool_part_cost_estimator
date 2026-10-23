@@ -219,3 +219,16 @@ def test_delete_part_removes_history_designs_and_files_and_project_delete_remove
     assert client.delete(f"/api/projects/{proj['id']}").status_code == 200
     assert client.get(f"/api/parts/{other}").status_code in (400, 404)
     assert proj["id"] not in [p["id"] for p in client.get("/api/projects").json()]
+
+
+# ---------- drawing views of very complex parts ----------
+
+def test_hidden_line_removal_is_time_limited_and_simplifies_the_view(monkeypatch):
+    from backend.app import outputs3d
+    block = cq.Workplane("XY").box(100, 60, 30).faces(">Z").workplane().hole(10).val()
+    monkeypatch.setattr(outputs3d, "HLR_FACES", 5)
+    exact = outputs3d.hlr_view(block, (0, -1, 0), (1, 0, 0))
+    assert not exact.get("simplified") and exact["hidden"]
+    monkeypatch.setattr(outputs3d, "HLR_SECONDS", 0.001)
+    quick = outputs3d.hlr_view(block, (0, -1, 0), (1, 0, 0))
+    assert quick["simplified"] and quick["bounds"] == (-50.0, -15.0, 50.0, 15.0)

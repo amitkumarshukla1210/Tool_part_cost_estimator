@@ -207,7 +207,51 @@ def _edges_2d(compound) -> list[list[tuple[float, float]]]:
     return out
 
 
+HLR_SECONDS = 25.0          # hidden-line removal of a very complex tool insert can take minutes: past this the view is simplified
+HLR_FACES = 150
+
+
+def _hlr_guarded(shape: cq.Shape, direction: tuple, xdir: tuple, flip_v: bool) -> dict:
+    """hlr_view in a forked process for complex shapes: on a timeout the view is the bounding rectangle, marked as simplified."""
+    import multiprocessing as mp
+    ctx = mp.get_context("fork")
+    q = ctx.Queue()
+
+    def work():
+        try:
+            q.put(_hlr_exact(shape, direction, xdir, flip_v))
+        except Exception as exc:
+            q.put({"error": str(exc)})
+    p = ctx.Process(target=work, daemon=True)
+    p.start()
+    try:
+        out = q.get(timeout=HLR_SECONDS)
+    except Exception:
+        out = None
+    if p.is_alive():
+        p.terminate()
+    p.join(2)
+    if out and "error" not in out:
+        return out
+    bb = shape.BoundingBox()
+    ext = {"x": (bb.xmin, bb.xmax), "y": (bb.ymin, bb.ymax), "z": (bb.zmin, bb.zmax)}
+    u = {(1, 0, 0): "x", (0, 1, 0): "y"}.get(tuple(abs(int(c)) for c in xdir), "x")
+    d = "z" if abs(direction[2]) else ("y" if abs(direction[1]) else "x")
+    v = next(a for a in "xyz" if a not in (u, d)) if u != d else "y"
+    (u0, u1), (v0, v1) = ext[u], ext[v]
+    if flip_v:
+        v0, v1 = -v1, -v0
+    rect = [(u0, v0), (u1, v0), (u1, v1), (u0, v1), (u0, v0)]
+    return {"visible": [rect], "hidden": [], "bounds": (u0, v0, u1, v1), "simplified": True}
+
+
 def hlr_view(shape: cq.Shape, direction: tuple, xdir: tuple, flip_v: bool = False) -> dict:
+    if len(shape.Faces()) > HLR_FACES:
+        return _hlr_guarded(shape, direction, xdir, flip_v)
+    return _hlr_exact(shape, direction, xdir, flip_v)
+
+
+def _hlr_exact(shape: cq.Shape, direction: tuple, xdir: tuple, flip_v: bool = False) -> dict:
     """Visible and hidden edges of `shape` seen along `direction` (2D coordinates of the view plane).
     flip_v mirrors the vertical axis (OpenCascade's Y of the top view is -Y of the model)."""
     from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt

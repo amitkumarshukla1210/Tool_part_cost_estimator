@@ -187,6 +187,8 @@ def component_pdf(comp: dict, info: dict, shape: cq.Shape, head: dict) -> bytes:
              "7. Mark the part number on a non-functional face. Material certificate EN 10204 3.1 with the steel."]
     c.setFont("Helvetica-Bold", 8); c.setFillColor(theme["ink"]); c.drawString(295 * mm, (y) * mm, "NOTES")
     py = (y - 3) * mm
+    if any(views[k].get("simplified") for k in ("front", "top", "right")):
+        notes.append("Views are simplified (bounding outline): this part is too complex for hidden-line removal in the time allowed. The 3D STEP file and the hole table govern.")
     for line in notes:
         p = Paragraph(line, small)
         w, h = p.wrapOn(c, 118 * mm, 40 * mm)
