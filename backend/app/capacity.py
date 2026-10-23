@@ -77,6 +77,7 @@ class CapacityInput(BaseModel):
 
     @model_validator(mode="after")
     def fill_defaults(self):
+        self.__dict__["_plate_default"] = self.plate_length_mm is None and self.plate_width_mm is None
         for key, value in defaults(self.part_type).items():
             if getattr(self, key) is None:
                 setattr(self, key, value)
@@ -113,6 +114,16 @@ def calculate(inp: CapacityInput) -> dict:
         inp.spacing_mm,
     )
     fit = layout["per_sheet"]
+    if fit == 0 and inp.__dict__.get("_plate_default"):
+        # the default plate is a typical size: a large part uses the biggest standard base of its type (up to 3000 t machines)
+        from . import mould_db
+        bases = [b for b in mould_db.tables()["mould_bases"] if b["part_type"] == inp.part_type]
+        if bases:
+            big = max(bases, key=lambda b: b["max_insert_length_mm"] * b["max_insert_width_mm"])
+            inp = inp.model_copy(update={"plate_length_mm": big["max_insert_length_mm"], "plate_width_mm": big["max_insert_width_mm"]})
+            layout = grid_fit(inp.plate_length_mm - 2 * inp.spacing_mm, inp.plate_width_mm - 2 * inp.spacing_mm,
+                              inp.footprint_length_mm, inp.footprint_width_mm, inp.spacing_mm)
+            fit = layout["per_sheet"]
     if fit == 0:
         raise ValueError("The part does not fit on the tool plate. Check the plate size and spacing.")
 

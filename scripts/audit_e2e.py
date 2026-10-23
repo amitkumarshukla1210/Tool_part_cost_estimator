@@ -71,7 +71,7 @@ def expect(cond, msg):
 def run_case(client, case, pack=True) -> Audit:
     name, sample, material, process, group, capacity = case
     a = Audit(name, group, capacity)
-    proj = client.post("/api/projects", json={"code": name.upper()[:12], "name": f"Audit {name}"}).json()
+    proj = client.post("/api/projects", json={"code": "AUD-" + name.upper(), "name": f"Audit {name}"}).json()
     path = ROOT / "samples" / "audit" / f"{sample}.step"
 
     def upload():
@@ -79,7 +79,7 @@ def run_case(client, case, pack=True) -> Audit:
             m = client.post("/api/import/step", files={"file": (path.name, fh)})
         expect(m.status_code == 200, m.text[:200])
         m = m.json()
-        r = client.post(f"/api/import/{m['token']}/commit", json={"project_id": proj["id"], "items": {m["root"]: {"material": material, "process": process, "part_code": name.upper()[:14]}}})
+        r = client.post(f"/api/import/{m['token']}/commit", json={"project_id": proj["id"], "items": {m["root"]: {"material": material, "process": process, "part_code": name.upper()[:24]}}})
         expect(r.status_code == 200, r.text[:200])
         return r.json()["part_ids"][0]
     pid = a.step("1 Upload 3D drawing and register the part", upload)
@@ -106,7 +106,7 @@ def run_case(client, case, pack=True) -> Audit:
             return f"tool cost INR {a.facts['tool_cost_inr']:,}, cavities {j.get('cavities')}"
         a.step("4 Tool and mould cost (BOM costed)", tool)
 
-    if pack and group not in ("foundry",):
+    if pack and group not in ("foundry", "EPS", "blow"):          # the design pack (simulation, corrected drawing, PPT) covers plastic, die casting and sheet metal
         def dp():
             t = time.time()
             r = client.get(f"/api/parts/{pid}/design-pack.zip?video=none")
@@ -189,7 +189,14 @@ def run_case(client, case, pack=True) -> Audit:
                 expect(r.status_code == 200, r.text[:200])
         return f"{len(d2['review'])} review items signed"
     a.step("13 Toolmaker review signed", review)
-    a.step("14 Release the design (drawing revision A)", lambda: expect(client.post(f"{base}/release", json={}).json().get("status") == "released", "not released") or "released")
+    def release():
+        r = client.post(f"{base}/release", json={})
+        if r.status_code != 200:
+            iss = client.get(base).json()["summary"]["checks"]["issues"]
+            expect(False, f"not released: {r.text[:120]} " + "; ".join(i["text"] for i in iss[:3]))
+        expect(r.json().get("status") == "released", "not released")
+        return "released"
+    a.step("14 Release the design (drawing revision A)", release)
 
     def po():
         wb_r = client.get(f"{base}/files/xlsx")

@@ -85,7 +85,10 @@ def _tool_group(part_type: str) -> str:
 
 def _signature(shape: cq.Shape, cls: str) -> tuple:
     bb = shape.BoundingBox()
-    return (cls, tuple(sorted(round(x, 1) for x in (bb.xlen, bb.ylen, bb.zlen))), round(shape.Volume(), -1))
+    com = shape.Center()
+    # the centre of mass inside the bounding box tells mirror images (left / right halves) apart: they are not the same part
+    lean = tuple(round((c - (lo + hi) / 2) / 0.5) * 0.5 for c, lo, hi in ((com.x, bb.xmin, bb.xmax), (com.y, bb.ymin, bb.ymax), (com.z, bb.zmin, bb.zmax)))
+    return (cls, tuple(sorted(round(x, 1) for x in (bb.xlen, bb.ylen, bb.zlen))), round(shape.Volume(), -1), lean)
 
 
 def _prepare(part_id: int, mode: str | None = None) -> dict:
