@@ -15,7 +15,7 @@ async function loadProjects(select) {
   if (want && projects.some((p) => p.id === want)) $("project").value = want;
   $("empty").hidden = projects.length > 0;
   $("content").hidden = projects.length === 0;
-  ["editProject", "newVariant", "openParts", "importLink", "xlsx", "pdf", "rmRecalc", "toolRecalc", "pieceRecalc"].forEach((id) => ($(id).hidden = !projects.length));
+  ["editProject", "deleteProject", "newVariant", "openParts", "importLink", "xlsx", "pdf", "rmRecalc", "toolRecalc", "pieceRecalc"].forEach((id) => ($(id).hidden = !projects.length));
   if (projects.length) load();
 }
 
@@ -198,13 +198,50 @@ $("variants").addEventListener("click", async (e) => {
   const bom = await api(`/api/variants/${v.id}/bom`);
   $("bomTitle").textContent = `BOM · ${v.code} ${v.name}`;
   $("bom").innerHTML = `<thead><tr><th>Part code</th><th>Name</th><th class="num">Qty in parent</th><th class="num">Total qty</th>
-    <th>Sourcing</th><th>Status</th></tr></thead><tbody>` +
+    <th>Sourcing</th><th>Status</th><th></th></tr></thead><tbody>` +
     (bom.length ? bom.map((b) => `<tr><td style="padding-left:${10 + b.depth * 18}px">${b.depth ? "└ " : ""}
       <a class="link" href="/parts?part=${b.child_part_id}">${esc(b.part_code)}</a></td><td>${esc(b.name)}${b.is_assembly ? ' <span class="badge assy">assembly</span>' : ""}${b.kind === "insert" ? ' <span class="badge insert" title="Moulded-in insert of the part above: bought separately, not assembled">moulded-in insert</span>' : ""}</td>
       <td class="calc num">${fmt(b.quantity, 2)}</td><td class="calc num">${fmt(b.total_quantity, 2)}</td><td>${esc(nameOf(meta.sourcing, b.sourcing))}</td>
-      <td><span class="badge status">${esc(nameOf(meta.statuses, b.status))}</span></td></tr>`).join("")
-      : '<tr><td colspan="6" class="empty">This variant has no BOM yet. Import an assembly or use the Excel template with the variant column.</td></tr>') + "</tbody>";
+      <td><span class="badge status">${esc(nameOf(meta.statuses, b.status))}</span></td>
+      <td><button type="button" class="btn btn-outline btn-danger btn-small" data-del-part="${b.child_part_id}" data-code="${esc(b.part_code)}" title="Delete this part and its history">Delete</button></td></tr>`).join("")
+      : '<tr><td colspan="7" class="empty">This variant has no BOM yet. Import an assembly or use the Excel template with the variant column.</td></tr>') + "</tbody>";
   $("bomBlock").hidden = false;
+});
+
+// ---------- delete ----------
+const COUNT_LABEL = {revisions: "3D revisions", rm_costs: "RM cost versions", tool_costs: "tool cost versions", piece_costs: "part cost versions",
+  tool_designs: "tool designs", tool_components: "tool component files", bom_lines: "BOM lines", history: "history entries"};
+const countText = (c) => Object.entries(COUNT_LABEL).filter(([k]) => c[k]).map(([k, l]) => `${c[k]} ${l}`).join(", ") || "no further records";
+
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-del-part]");
+  if (!b) return;
+  const pid = b.dataset.delPart;
+  try {
+    const p = await api(`/api/parts/${pid}/delete-preview`);
+    const used = p.used_in_assemblies ? `\nIt is used in ${p.used_in_assemblies} assembl${p.used_in_assemblies === 1 ? "y" : "ies"}: those BOM lines are removed too.` : "";
+    if (!confirm(`Delete part ${p.part_code} (${p.name}) for good?\n\nThis removes: ${countText(p.counts)}, and the stored files.${used}\n\nThis cannot be undone.`)) return;
+    const r = await api(`/api/parts/${pid}`, { method: "DELETE" });
+    status($("status"), `Part ${r.part_code} deleted with its history (${r.files_removed} stored file(s) removed).`, "ok");
+    const sel = Number($("project").value);
+    $("bomBlock").hidden = true;
+    await loadProjects(sel);
+  } catch (err) { status($("status"), err.message || String(err), "error"); }
+});
+
+$("deleteProject").addEventListener("click", async () => {
+  const id = current();
+  if (!id) return;
+  try {
+    const p = await api(`/api/projects/${id}/delete-preview`);
+    const typed = prompt(`Delete project ${p.code} (${p.name}) with ${p.parts} part(s), ${p.variants} variant(s) and ${p.capex_lines} CAPEX line(s)?\n\nThis removes: ${countText(p.counts)}, and the stored files.\nThis cannot be undone.\n\nType the project code ${p.code} to confirm:`);
+    if (typed === null) return;
+    if (typed.trim() !== p.code) { status($("status"), "The code you typed does not match: nothing was deleted.", "error"); return; }
+    const r = await api(`/api/projects/${id}`, { method: "DELETE" });
+    status($("status"), `Project ${r.code} deleted (${r.parts_removed} part(s), ${r.files_removed} stored file(s)).`, "ok");
+    $("bomBlock").hidden = true;
+    await loadProjects(null);
+  } catch (err) { status($("status"), err.message || String(err), "error"); }
 });
 
 // ---------- dialogs ----------

@@ -116,3 +116,8 @@ footer { margin-top: 0; }
 /* ===== Tool cost (stage 4) ===== */
 .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .cost-table td.how { font-size: 12px; color: var(--grey); }
+
+/* destructive buttons (delete part / project) */
+.btn-danger{border-color:#b91c1c !important;color:#b91c1c !important;}
+.btn-danger:hover{background:#fee2e2 !important;border-color:#991b1b !important;}
+.btn-small{padding:2px 10px;font-size:12px;}

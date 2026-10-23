@@ -21,6 +21,7 @@ from .geometry import PART_TYPES, analyze, blank_estimate, load_step, sheet_thic
 from . import bom_extract as bom_extract_mod
 from . import (capacity, costing_setup, country_rates, file_store, gross_weight, master_data, mould, mould_db, rate_engine, rates,
                register, register_setup, rm_cost, tool_cost, example_values)
+from . import branding
 from . import projects_db
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
@@ -569,6 +570,37 @@ def projects_capex_add(project_id: int, data: dict):
 def capex_update(item_id: int, data: dict):
     from . import leader
     return leader.update_item(item_id, data)
+
+
+def _del(fn):
+    from . import deletion
+    try:
+        return fn(deletion)
+    except (deletion.DeleteError, register.RegisterError) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/delete-preview")
+def part_delete_preview(part_id: int):
+    """What deleting the part removes (counts), for the confirmation on the dashboard."""
+    return _del(lambda m: m.preview_part(part_id))
+
+
+@app.delete("/api/parts/{part_id}")
+def part_delete(part_id: int):
+    """Delete the part with its history, cost versions, tool designs and stored files. Cannot be undone."""
+    return _del(lambda m: m.delete_part(part_id))
+
+
+@app.get("/api/projects/{project_id}/delete-preview")
+def project_delete_preview(project_id: int):
+    return _del(lambda m: m.preview_project(project_id))
+
+
+@app.delete("/api/projects/{project_id}")
+def project_delete(project_id: int):
+    """Delete the project with all its parts, variants, CAPEX lines, history and stored files. Cannot be undone."""
+    return _del(lambda m: m.delete_project(project_id))
 
 
 @app.delete("/api/capex/{item_id}")
@@ -1441,4 +1473,18 @@ def users_page():
 
 
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+@app.middleware("http")
+async def brand_downloads(request: Request, call_next):
+    """Logo and "Design to Cost" on every Excel, PDF, PowerPoint (and ZIP of them) the software hands out."""
+    response = await call_next(request)
+    kind = branding.MEDIA.get((response.headers.get("content-type") or "").split(";")[0].strip())
+    path = request.url.path
+    if not kind or not path.startswith("/api/") or any(path.endswith(x) for x in branding.SKIP) or response.status_code != 200:
+        return response
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    body = branding.stamp(body, "x." + kind)
+    headers = {k: v for k, v in response.headers.items() if k.lower() not in ("content-length",)}
+    return Response(body, status_code=200, headers=headers, media_type=response.headers.get("content-type"))
+
+
 app.mount("/theme", StaticFiles(directory=THEME_DIR), name="theme")

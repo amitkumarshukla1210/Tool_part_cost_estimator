@@ -232,4 +232,7 @@ def allowed(user: dict, method: str, path: str) -> str | None:
         return None
     if not has_role("engineer", user):
         return "Your role 'viewer' can read but not change anything."
+    parts = path.strip("/").split("/")
+    if method == "DELETE" and len(parts) == 3 and parts[1] in ("parts", "projects") and not has_role("approver", user):
+        return "Deleting a part or a project needs the role 'approver' or 'admin'."
     return None

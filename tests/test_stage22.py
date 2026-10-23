@@ -166,3 +166,56 @@ def test_sheet_progressive_vs_stage_comparison_and_package():
     names = z.namelist()
     assert any(n.startswith("progressive/drawings/") for n in names) and any(n.startswith("multi_stage/drawings/") for n in names)
     assert any(n.startswith("multi_stage/po/") for n in names) and "layout/strip.dxf" in names and "README.txt" in names
+
+
+# ---------- logo and name on downloads ----------
+
+def test_downloads_carry_the_logo_and_the_name():
+    import zipfile
+    from pypdf import PdfReader
+    from pptx import Presentation
+    pid, d = mould_design("BR-1")
+    base = f"/api/tool-designs/{d['id']}"
+    wb = load_workbook(io.BytesIO(client.get(f"{base}/files/xlsx").content))
+    ws = wb.worksheets[0]
+    assert ws["B1"].value == "Design to Cost" and len(ws._images) >= 1 and wb.worksheets[1].oddHeader.center.text == "Design to Cost"
+    assert any(str(c.value) == "Part no." for row in wb["PO-1 Raw material"].iter_rows() for c in row)      # data still there
+    pdf = client.get(f"{base}/files/po-material").content
+    assert "Design to Cost" in (PdfReader(io.BytesIO(pdf)).pages[0].extract_text() or "")
+    z = zipfile.ZipFile(io.BytesIO(client.get(f"{base}/supplier-package.zip").content))
+    drawing = next(n for n in z.namelist() if n.startswith("drawings/"))
+    assert "Design to Cost" in (PdfReader(io.BytesIO(z.read(drawing))).pages[0].extract_text() or "")
+    pack = zipfile.ZipFile(io.BytesIO(client.get(f"/api/parts/{pid}/design-pack.zip").content))
+    ppt = next(n for n in pack.namelist() if n.endswith(".pptx"))
+    assert any(s.name == "dtc_brand" for sl in Presentation(io.BytesIO(pack.read(ppt))).slides for s in sl.shapes)
+    # master-data downloads keep the plain layout so that they can be uploaded again
+    md = load_workbook(io.BytesIO(client.get("/api/master-data/download").content))
+    assert md.worksheets[0]["B1"].value != "Design to Cost"
+
+
+# ---------- delete part / project ----------
+
+def test_delete_part_removes_history_designs_and_files_and_project_delete_removes_all():
+    from sqlalchemy import func, select
+    from backend.app import projects_db as pdb
+    proj = project("DEL")
+    pid = add_part(proj, "plastic_cover.step", "ABS", "injection_moulding", "DEL-1")
+    other = add_part(proj, "plate_with_hole.step", "ABS", "injection_moulding", "DEL-2")
+    assert client.post(f"/api/parts/{pid}/rm-cost", json={}).status_code in (200, 400)
+    d = client.post(f"/api/parts/{pid}/tool-designs", json={}).json()
+    prev = client.get(f"/api/parts/{pid}/delete-preview").json()
+    assert prev["part_code"] == "DEL-1" and prev["counts"]["tool_designs"] == 1 and prev["counts"]["tool_components"] >= 10 and prev["counts"]["revisions"] == 1
+    r = client.delete(f"/api/parts/{pid}")
+    assert r.status_code == 200 and r.json()["files_removed"] >= 10
+    assert client.get(f"/api/parts/{pid}").status_code in (400, 404)
+    assert client.get(f"/api/tool-designs/{d['id']}").status_code in (400, 404)
+    with pdb.engine().connect() as conn:
+        assert conn.execute(select(func.count()).select_from(pdb.tool_components).where(pdb.tool_components.c.design_id == d["id"])).scalar() == 0
+        assert conn.execute(select(func.count()).select_from(pdb.history).where((pdb.history.c.entity == "part") & (pdb.history.c.entity_id == pid))).scalar() == 0
+    assert client.get(f"/api/parts/{other}").status_code == 200                      # the other part is untouched
+    assert client.delete(f"/api/parts/{pid}").status_code == 400                      # already gone: a clear message, not a crash
+    pr = client.get(f"/api/projects/{proj['id']}/delete-preview").json()
+    assert pr["parts"] == 1
+    assert client.delete(f"/api/projects/{proj['id']}").status_code == 200
+    assert client.get(f"/api/parts/{other}").status_code in (400, 404)
+    assert proj["id"] not in [p["id"] for p in client.get("/api/projects").json()]
