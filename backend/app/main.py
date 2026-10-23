@@ -931,6 +931,111 @@ def parts_design_pack_file(part_id: int, name: str, video: str = "short"):
                     headers={"Content-Disposition": f'{"inline" if inline else "attachment"}; filename="{name}"'})
 
 
+def _td(fn, *a, **k):
+    from . import tool_design_store as st
+    try:
+        return fn(st, *a, **k)
+    except (register.ToolNotApplicable, register.RegisterError, tool_cost.ToolCostError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/tool-designs")
+def tool_designs_list(part_id: int):
+    """Production tool designs (versions) of the part: drafts, the released one, superseded ones (roadmap stage 21)."""
+    return _td(lambda st: st.list_designs(part_id))
+
+
+@app.post("/api/parts/{part_id}/tool-designs")
+def tool_designs_generate(part_id: int, data: dict | None = None):
+    """Generate a new draft tool design: 3D components with part numbers, drawings, raw stock, machining and the bill of materials."""
+    return _td(lambda st: st.generate(part_id, str((data or {}).get("note") or "")))
+
+
+@app.get("/api/tool-designs/{design_id}")
+def tool_design_get(design_id: int):
+    return _td(lambda st: st.get_design(design_id))
+
+
+@app.get("/api/tool-designs/{design_id}/mesh")
+def tool_design_mesh(design_id: int):
+    """Meshes of every component for the 3D viewer, with the features (holes, radii) to measure."""
+    return _td(lambda st: st.mesh_payload(design_id))
+
+
+@app.get("/api/tool-designs/{design_id}/components/{comp_id}/step")
+def tool_component_step(design_id: int, comp_id: int):
+    content, name = _td(lambda st: st.component_step(design_id, comp_id))
+    return Response(content, media_type="application/step", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.get("/api/tool-designs/{design_id}/components/{comp_id}/drawing.{fmt}")
+def tool_component_drawing(design_id: int, comp_id: int, fmt: str):
+    if fmt not in ("pdf", "dxf"):
+        raise HTTPException(404, "Unknown format.")
+    content, name = _td(lambda st: st.component_drawing(design_id, comp_id, fmt))
+    return Response(content, media_type="application/pdf" if fmt == "pdf" else "application/dxf",
+                    headers={"Content-Disposition": f'{"inline" if fmt == "pdf" else "attachment"}; filename="{name}"'})
+
+
+@app.get("/api/tool-designs/{design_id}/components/{comp_id}/revisions")
+def tool_component_revisions(design_id: int, comp_id: int):
+    return _td(lambda st: st.component_revisions(design_id, comp_id))
+
+
+@app.post("/api/tool-designs/{design_id}/components/{comp_id}/upload")
+async def tool_component_upload(design_id: int, comp_id: int, file: UploadFile = File(...), note: str = Form("")):
+    """Replace a component by a corrected STEP file (edited in your CAD); returns the checks."""
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_MB * 1024 * 1024:
+        raise HTTPException(413, f"The file is larger than {MAX_UPLOAD_MB} MB.")
+    return _td(lambda st: st.upload_component(design_id, comp_id, content, file.filename or "upload.step", note))
+
+
+@app.post("/api/tool-designs/{design_id}/components/{comp_id}/revert")
+def tool_component_revert(design_id: int, comp_id: int, data: dict):
+    return _td(lambda st: st.revert_component(design_id, comp_id, str(data.get("rev") or "")))
+
+
+@app.post("/api/tool-designs/{design_id}/check")
+def tool_design_check(design_id: int):
+    return _td(lambda st: st.check_design(design_id))
+
+
+@app.post("/api/tool-designs/{design_id}/release")
+def tool_design_release(design_id: int, data: dict | None = None):
+    return _td(lambda st: st.release(design_id, bool((data or {}).get("accept_warnings"))))
+
+
+@app.post("/api/tool-designs/{design_id}/new-revision")
+def tool_design_new_revision(design_id: int, data: dict | None = None):
+    return _td(lambda st: st.new_revision(design_id, str((data or {}).get("note") or "")))
+
+
+@app.get("/api/tool-designs/{design_id}/files/{kind}")
+def tool_design_file(design_id: int, kind: str):
+    """kind: xlsx, po-material, po-machining, po-bought-out, assembly-pdf, assembly-step."""
+    content, name = _td(lambda st: st.po_file(design_id, kind))
+    return Response(content, media_type=_media(name), headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.get("/api/tool-designs/{design_id}/assembly.step")
+def tool_design_assembly_step(design_id: int, reference: bool = False):
+    from . import tool_design_store as st
+    content = _td(lambda s: s.assembly_step(design_id, reference))
+    return Response(content, media_type="application/step", headers={"Content-Disposition": f'attachment; filename="tool_assembly_{design_id}.step"'})
+
+
+@app.get("/api/tool-designs/{design_id}/supplier-package.zip")
+def tool_design_package(design_id: int):
+    content, name = _td(lambda st: st.supplier_package(design_id))
+    return Response(content, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+def _media(name: str) -> str:
+    from . import design_pack
+    return design_pack.media_of(name)
+
+
 def _comparison(part_id: int, countries: Optional[str], mode: str, use_fta: bool) -> dict:
     from . import landed
     if mode not in ("sea", "air"):
@@ -1257,6 +1362,11 @@ def users_update(uid: int, data: dict):
 @app.get("/login")
 def login_page():
     return FileResponse(FRONTEND_DIR / "login.html")
+
+
+@app.get("/tool-design")
+def tool_design_page():
+    return FileResponse(FRONTEND_DIR / "tool-design.html")
 
 
 @app.get("/capacity")

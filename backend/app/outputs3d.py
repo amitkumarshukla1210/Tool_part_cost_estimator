@@ -49,8 +49,19 @@ def component_meshes(components: list[dict], tol: float | None = None) -> list[d
     return out
 
 
+def solid_step_bytes(shape: cq.Shape) -> bytes:
+    """One solid as a plain STEP file (no assembly wrapper): what a supplier or a CAD user opens and edits."""
+    fd, path = tempfile.mkstemp(suffix=".step")
+    os.close(fd)
+    try:
+        cq.exporters.export(cq.Workplane("XY").add(shape), path)
+        return Path(path).read_bytes()
+    finally:
+        os.unlink(path)
+
+
 def step_bytes(components: list[dict], name: str = "design") -> bytes:
-    asm = cq.Assembly(name=name)
+    asm = cq.Assembly(name=f"{name}_assembly")
     for c in components:
         r, g, b = c.get("color", (0.7, 0.7, 0.7))
         asm.add(c["shape"], name=c["name"].replace(" ", "_"), color=cq.Color(r, g, b))
@@ -196,8 +207,9 @@ def _edges_2d(compound) -> list[list[tuple[float, float]]]:
     return out
 
 
-def hlr_view(shape: cq.Shape, direction: tuple, xdir: tuple) -> dict:
-    """Visible and hidden edges of `shape` seen along `direction` (2D coordinates of the view plane)."""
+def hlr_view(shape: cq.Shape, direction: tuple, xdir: tuple, flip_v: bool = False) -> dict:
+    """Visible and hidden edges of `shape` seen along `direction` (2D coordinates of the view plane).
+    flip_v mirrors the vertical axis (OpenCascade's Y of the top view is -Y of the model)."""
     from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
     from OCP.HLRAlgo import HLRAlgo_Projector
     from OCP.HLRBRep import HLRBRep_Algo, HLRBRep_HLRToShape
@@ -209,6 +221,9 @@ def hlr_view(shape: cq.Shape, direction: tuple, xdir: tuple) -> dict:
     h = HLRBRep_HLRToShape(algo)
     vis = _edges_2d(h.VCompound()) + _edges_2d(h.Rg1LineVCompound()) + _edges_2d(h.OutLineVCompound())
     hid = _edges_2d(h.HCompound()) + _edges_2d(h.Rg1LineHCompound()) + _edges_2d(h.OutLineHCompound())
+    if flip_v:
+        vis = [[(x, -y) for x, y in pl] for pl in vis]
+        hid = [[(x, -y) for x, y in pl] for pl in hid]
     xs = [p[0] for pl in vis + hid for p in pl] or [0]
     ys = [p[1] for pl in vis + hid for p in pl] or [0]
     return {"visible": vis, "hidden": hid, "bounds": (min(xs), min(ys), max(xs), max(ys))}
@@ -216,7 +231,7 @@ def hlr_view(shape: cq.Shape, direction: tuple, xdir: tuple) -> dict:
 
 def three_views(shape: cq.Shape) -> dict:
     bb = shape.BoundingBox()
-    return {"front": hlr_view(shape, (0, -1, 0), (1, 0, 0)), "top": hlr_view(shape, (0, 0, -1), (1, 0, 0)),
+    return {"front": hlr_view(shape, (0, -1, 0), (1, 0, 0)), "top": hlr_view(shape, (0, 0, -1), (1, 0, 0), flip_v=True),
             "right": hlr_view(shape, (1, 0, 0), (0, 1, 0)),
             "size": (bb.xlen, bb.ylen, bb.zlen)}
 

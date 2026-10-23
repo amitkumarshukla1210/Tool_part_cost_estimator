@@ -257,6 +257,49 @@ Gmsh and trimesh (`pip install -r requirements-optional.txt`; Gmsh needs `apt in
 
 ---
 
+## Production tool design: drawings, STEP, 3D viewer and purchase orders (roadmap stage 21)
+
+Open a part (Parts → the part → **Production tool design**) or go to `/tool-design?part=ID`. **Generate new design** builds the whole
+tool in 3D and splits it into its parts. This works for plastic, die casting, EPS and blow moulds and for sheet-metal dies (every stage
+of a multi-stage tool, or one progressive die).
+
+| For every made part | Where it comes from |
+|---|---|
+| **Part number** (`PC-1-M-07`, `SM-1-S2-03`, `SM-2-P-04`) and drawing revision | identical parts (two spacer blocks, four pillars) share one number |
+| **STEP file** and **drawing** (A3 PDF + DXF) | front / top / right views with overall dimensions; **ballooned holes (H), openings (O) and pockets (P)** with a table of diameter, depth and position from the datum corner; radii; notes with steel, hardness, tolerances, finish, raw stock and route; title block |
+| **Raw stock** and weight | finished size + the class allowance per side + grinding allowance, rounded up (*Component classes*), steel density from *Tool materials*; steel price from the approved tool-steel rate of the tool country |
+| **Machining route** with hours and cost | operations of the class (saw, rough, finish, grind, drill, wire cut, EDM, polish, heat treat); hours from the *Process time parameters*, priced like the tool cost (MHR + operators × labour rate, unit rates with minimum charge) |
+| **Bill of materials** | made parts, bought-out parts (tool-cost BOM and *Standard parts*: pillars, bushes, springs, screws, dowels, ejector pins …), assembly steps with hours (*Assembly steps*) |
+
+**View and measure in 3D.** Rotate, zoom, explode the upper half, section along X / Y / Z, wireframe, isolate a part, hide the part /
+workpiece and bought-out parts. **Measure distance** between two points (they snap to corners; ΔX, ΔY, ΔZ shown). Click a part for its details;
+click a hole, opening, pocket or radius in the list to mark it in 3D. Hover shows X, Y, Z of the point under the cursor.
+
+**Correct a part.** Download its STEP, change it in any CAD (FreeCAD is free): a larger radius, a thinner plate. Upload the edited file with a
+note. The solid is checked, the part becomes the next revision (A → B), **identical parts follow**, and size, stock, weight, machining and cost are
+recalculated. **Check all parts** looks for invalid solids and for parts that overlap (listed with the volume); it runs on every upload. Every
+revision is kept and can be used again.
+
+**Release and order.** *Release for purchase* freezes the design as a drawing revision (it needs a clean check; warnings can be accepted).
+A released design is never edited: *New revision* starts a draft from it. For a design you get:
+- **PO-1 Raw material** (PDF): steel grade, stock size, quantity, kg, rate, amount, delivery condition and certificate;
+- **PO-2 Machining** (PDF): route, hardness, tolerances and an estimate per part, with the drawing list;
+- **PO-3 Bought-out** (PDF): catalogue parts with specification and price;
+- **Excel purchase pack**: Cover, BOM, the three POs, Machining detail, Assembly, Inspection (what to measure), Features, Cost summary
+  (build-up against the tool cost engine);
+- **Assembly sheet** (PDF): exploded 3D with item numbers and the bill of materials;
+- **Supplier package** (ZIP): STEP, PDF and DXF of every made part, the assembly STEP and sheet, the Excel and the POs.
+
+A draft prints DRAFT on every document. Rates and rules that are still EXAMPLE values are flagged. The order documents have blank supplier,
+buyer and PO-number fields for you to fill in.
+
+**Limits.** This is a **concept-level** design generated from the part: plates, inserts, punches and die blocks with their pockets, openings,
+pillar and bush holes. Ejector pins, cooling channels, hot runner, slides, lifters, screws and dowels are in the BOM but **not modelled in 3D**
+(slides and lifters are marked as "to be designed"); draw and bend forming surfaces follow the part for parts without undercuts. The 3D file
+governs where it differs from a drawing. Have your toolmaker check the design before cutting steel. Foundry patterns are not covered yet.
+
+---
+
 ## Master data
 
 Open **Master data** in the page header. It has two data sets, each with a table editor, **Save**, **Undo**,

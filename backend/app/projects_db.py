@@ -212,6 +212,60 @@ tool_costs = Table(
     Index("ix_tool_costs_part", "part_id"),
 )
 
+tool_designs = Table(
+    "tool_designs", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("rev_label", String(10), default="A"),     # drawing revision issued to the supplier
+    Column("status", String(20), default="draft"),     # draft, released, superseded
+    Column("kind", String(20), nullable=False),        # mould, sheet_metal
+    Column("part_type", String(30), nullable=False),
+    Column("country", String(10), default=""),
+    Column("as_of", String(7), default=""),
+    Column("summary", JSON),                           # notes, cavities, press, checks, ...
+    Column("bom", JSON),                               # standard parts, assembly steps, rule values
+    Column("note", String(300), default=""),
+    Column("created_by", String(100), default=""),
+    Column("created_at", DateTime, default=now),
+    Column("released_by", String(100), default=""),
+    Column("released_at", DateTime),
+    UniqueConstraint("part_id", "version"),
+    Index("ix_tool_designs_part", "part_id"),
+)
+
+tool_components = Table(
+    "tool_components", meta,
+    Column("id", Integer, primary_key=True),
+    Column("design_id", ForeignKey("tool_designs.id", ondelete="CASCADE"), nullable=False),
+    Column("part_no", String(60), nullable=False),     # drawing number; identical parts share it
+    Column("instance", Integer, default=1),
+    Column("name", String(120), nullable=False),
+    Column("group", String(20), default=""),           # lower, upper, work, part, proposal
+    Column("stage_no", Integer),
+    Column("cls", String(40), default=""),
+    Column("kind", String(20), default="made"),        # made, standard, work, part, proposal
+    Column("color", JSON),
+    Column("file_id", ForeignKey("files.id")),         # current STEP
+    Column("rev", String(10), default="A"),
+    Column("info", JSON),                              # size, features, stock, operations, costs
+    Column("edited", Integer, default=0),
+    Index("ix_tool_components_design", "design_id"),
+)
+
+tool_component_revs = Table(
+    "tool_component_revs", meta,
+    Column("id", Integer, primary_key=True),
+    Column("component_id", ForeignKey("tool_components.id", ondelete="CASCADE"), nullable=False),
+    Column("rev", String(10), nullable=False),
+    Column("file_id", ForeignKey("files.id")),
+    Column("note", String(300), default=""),
+    Column("info", JSON),
+    Column("created_by", String(100), default=""),
+    Column("created_at", DateTime, default=now),
+    Index("ix_tool_component_revs_component", "component_id"),
+)
+
 piece_costs = Table(
     "piece_costs", meta,
     Column("id", Integer, primary_key=True),

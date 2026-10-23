@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design to Cost — Part Cost Estimator · Tool design</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/register.css" />
+  <link rel="stylesheet" href="/static/tool-design.css" />
+  <script type="importmap">
+    { "imports": { "three": "/static/vendor/three/three.module.js", "three/addons/controls/OrbitControls.js": "/static/vendor/three/OrbitControls.js" } }
+  </script>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img src="/theme/logo.png" alt="Design to Cost logo" />
+        <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/dashboard">Dashboard</a></li>
+          <li><a href="/parts">Parts</a></li>
+          <li><a href="/import">Import</a></li>
+          <li><a href="/bom-extract">Harness &amp; PCB</a></li>
+          <li><a href="/">Estimate</a></li>
+          <li><a href="/rates">Rates</a></li>
+          <li><a href="/master-data">Master data</a></li>
+          <li><a href="/capacity">Capacity &amp; tools</a></li>
+          <li><a href="/help">Help</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main class="td-main">
+    <section class="td-top">
+      <div class="td-title">
+        <p class="kicker"><a class="link" href="/parts" id="backLink">Parts</a> · production tool design</p>
+        <h2 id="title">Tool design</h2>
+        <p class="note" id="subtitle"></p>
+      </div>
+      <div class="td-actions">
+        <label>Version <select id="version"></select></label>
+        <button class="btn btn-primary small" id="generate" type="button">Generate new design</button>
+        <button class="btn btn-outline small" id="check" type="button">Check all parts</button>
+        <button class="btn btn-outline small" id="release" type="button">Release for purchase</button>
+        <button class="btn btn-outline small" id="newrev" type="button">New revision</button>
+        <details class="dl"><summary class="btn btn-outline small">Download ▾</summary>
+          <div class="dl-menu" id="dlMenu"></div></details>
+        <span class="status" id="status"></span>
+      </div>
+    </section>
+
+    <div id="banner"></div>
+
+    <section class="td-body">
+      <aside class="td-side">
+        <nav class="tabs" id="tabs">
+          <button type="button" data-tab="parts" class="on">Parts</button>
+          <button type="button" data-tab="bom">BOM &amp; PO</button>
+          <button type="button" data-tab="checks">Checks</button>
+          <button type="button" data-tab="measure">Measure</button>
+        </nav>
+        <div id="tab-parts" class="tab"></div>
+        <div id="tab-bom" class="tab" hidden></div>
+        <div id="tab-checks" class="tab" hidden></div>
+        <div id="tab-measure" class="tab" hidden></div>
+        <div id="detail" class="card td-detail" hidden></div>
+      </aside>
+      <div class="td-view">
+        <div class="td-toolbar">
+          <button type="button" data-view="iso" class="btn btn-outline small">Iso</button>
+          <button type="button" data-view="top" class="btn btn-outline small">Top</button>
+          <button type="button" data-view="front" class="btn btn-outline small">Front</button>
+          <button type="button" data-view="right" class="btn btn-outline small">Right</button>
+          <button type="button" id="fit" class="btn btn-outline small">Fit</button>
+          <label>Explode <input id="explode" type="range" min="0" max="1" step="0.01" value="0" /></label>
+          <label>Section <select id="secAxis"><option value="">off</option><option value="x">X</option><option value="y">Y</option><option value="z">Z</option></select>
+            <input id="secPos" type="range" min="0" max="1" step="0.005" value="0.5" /></label>
+          <label class="check"><input type="checkbox" id="wire" /> Wireframe</label>
+          <label class="check"><input type="checkbox" id="showRef" checked /> Part / workpiece</label>
+          <label class="check"><input type="checkbox" id="showStd" checked /> Bought-out</label>
+          <button type="button" id="isolate" class="btn btn-outline small">Isolate selected</button>
+          <button type="button" id="showAll" class="btn btn-outline small">Show all</button>
+          <button type="button" id="measureBtn" class="btn btn-outline small">Measure distance</button>
+        </div>
+        <div id="canvasWrap"><canvas id="canvas"></canvas><div id="hud"></div></div>
+      </div>
+    </section>
+  </main>
+  <script src="/static/common.js"></script>
+  <script type="module" src="/static/tool-design.js"></script>
+</body>
+</html>

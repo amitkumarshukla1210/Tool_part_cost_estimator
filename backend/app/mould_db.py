@@ -187,6 +187,40 @@ TABLES = {
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
     ]},
+    "component_classes": {"title": "Component classes", "unique": ("code",), "columns": [
+        col("code", "Class"),
+        col("name", "Name"),
+        col("kind", "Made or standard", "kind", ("made", "standard")),
+        col("steel", "Steel (Tool materials)", required=False),
+        col("stock_allow_mm", "Stock allowance per side (mm)", "number", required=False),
+        col("grind_allow_mm", "Extra on thickness for grinding (mm)", "number", required=False),
+        col("round_mm", "Stock sizes rounded up to (mm)", "number", required=False),
+        col("hardness", "Hardness"),
+        col("ops", "Operations (saw, rough, finish, grind, drill, wire, edm, polish, heat, vacuum)", required=False),
+        col("finish_ra", "Surface finish Ra (µm)", "number", required=False),
+        col("tolerance", "Tolerances and fits"),
+        col("route", "Machining route (text on the PO)"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "standard_parts": {"title": "Standard parts", "unique": ("tool_group", "item"), "columns": [
+        col("tool_group", "Tool group", "tool_group", ("mould", "sheet_metal")),
+        col("item", "Item"),
+        col("spec", "Specification ({name} fills in a value)"),
+        col("quantity_rule", "Quantity (rule)", "formula"),
+        col("unit_cost", "Unit cost (INR, catalogue)", "number"),
+        col("unit", "Unit"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "assembly_steps": {"title": "Assembly steps", "unique": ("tool_group", "step"), "columns": [
+        col("tool_group", "Tool group", "tool_group", ("mould", "sheet_metal")),
+        col("step", "Order", "number"),
+        col("text", "Step"),
+        col("hours", "Fitting hours (rule)", "formula"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
     "hs_codes": {"title": "HS codes", "unique": ("scope", "part_type"), "columns": [
         col("scope", "Of", "scope_of", ("tool", "part")),
         col("part_type", "Part type", "part_type", PART_TYPES),
@@ -242,8 +276,9 @@ def _check(clean: dict) -> None:
             raise MouldDbError(f"Strip rules ({r['name']}): {exc}") from None
         except ArithmeticError:
             senv[r["name"]] = 1.0
-    from . import tool_design
+    from . import tool_components, tool_design
     tool_design.validate(clean)
+    tool_components.validate(clean)
     from . import simulation
     for pt in PART_TYPES:
         env = simulation.sample_env(pt)

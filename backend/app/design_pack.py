@@ -45,7 +45,20 @@ def _frames_tri(tri, colors, n, azim0, azim1, caption_fn, bounds, elev=22):
 
 # ------------------------------------------------------------ plastic and die casting
 
-def _mould_pack(part_id: int, video: str) -> dict:
+def mould_prepare(part_id: int, production: bool = False) -> dict:
+    """Simulation, 3D correction, tool cost and mould 3D of a moulded part. Plastic and die casting go through the simulation and the
+    draft correction; EPS and blow parts use the model as it is, opened along its stored pull direction at its middle."""
+    d = register.part_detail(part_id, with_rm=False)
+    part_type = register_setup.processes()[d["process"]]["part_type"]
+    if part_type not in ("plastic", "die_casting"):
+        _, rev, shape = register.part_shape(part_id)
+        axis = rev["geometry"]["pull_direction"]
+        z = corrections.to_z(shape, axis).BoundingBox()
+        tool = register._tool_compute(part_id)
+        parting = (z.zmin + z.zmax) / 2
+        m3d = tool_design.mould_3d(shape, axis, parting, tool, regions=None, production=production)
+        return {"d": d, "rev": rev, "part_type": part_type, "shape": shape, "fixed": shape, "axis": axis, "corr": None, "tool": tool,
+                "m3d": m3d, "before": None, "after": None, "concept_res": {}, "facts": {}, "min_draft": None}
     d, rev, part_type, verts, tris, concept_res, facts = register._concept_inputs(part_id)
     _, _, shape = register.part_shape(part_id)
     density, _ = register._density(d["material"])
@@ -63,7 +76,17 @@ def _mould_pack(part_id: int, video: str) -> dict:
                       "part_weight_g": m2.net_weight_g}
     after = simulation.run(v2, t2, part_type, facts2, m2.projected_area_mm2)
     tool = register._tool_compute(part_id)
-    m3d = tool_design.mould_3d(fixed, axis, corr["parting_z_mm"], tool, regions=concept_res.get("regions"))
+    m3d = tool_design.mould_3d(fixed, axis, corr["parting_z_mm"], tool, regions=concept_res.get("regions"), production=production)
+    return {"d": d, "rev": rev, "part_type": part_type, "shape": shape, "fixed": fixed, "axis": axis, "corr": corr, "tool": tool, "m3d": m3d,
+            "before": before, "after": after, "concept_res": concept_res, "facts": facts, "min_draft": min_draft, "m2": m2, "v2": v2, "t2": t2,
+            "verts": verts, "tris": tris, "density": density}
+
+
+def _mould_pack(part_id: int, video: str) -> dict:
+    P = mould_prepare(part_id)
+    d, rev, part_type, shape, fixed, axis, corr, tool, m3d = (P[k] for k in ("d", "rev", "part_type", "shape", "fixed", "axis", "corr", "tool", "m3d"))
+    before, after, min_draft, verts, tris, v2, t2, concept_res, facts = (P[k] for k in ("before", "after", "min_draft", "verts", "tris", "v2", "t2", "concept_res", "facts"))
+
     r0, r1 = before["results"], after["results"]
     mach = after["machine"]
     b_insert = next((c["shape"] for c in m3d["components"] if c["name"] == "B side insert"), None)
@@ -231,9 +254,9 @@ def _mould_video(before: dict, after: dict, tool_meshes: list, m3d: dict, mode: 
 
 # ------------------------------------------------------------ sheet metal
 
-def _sheet_pack(part_id: int, video: str) -> dict:
-    from . import sheet_layout
-    from . import sheet_tools
+def sheet_prepare(part_id: int) -> dict:
+    """Sheet-metal context with the model corrected (bend radii, minimum holes), flat pattern, strip and the stage design."""
+    from . import sheet_layout, sheet_tools
     d, rev, shape, blank, res = register._sheet_context(part_id)
     t = res["features"]["t"]
     res0, shape0 = res, shape
@@ -258,6 +281,15 @@ def _sheet_pack(part_id: int, video: str) -> dict:
     sl = sheet_layout.strip_layout(fp, t, len(res["operations"]))
     country = (d["tool_country"] or d["country"] or register_setup.settings()["default_country"]).upper()
     design = tool_design.sheet_design(fp, sl, res, geometry_used, country, d["costing_month"] or rates.current_month())
+    return {"d": d, "rev": rev, "shape": shape, "shape0": shape0, "blank": blank, "res": res, "res0": res0, "t": t, "corr": corr,
+            "geometry": geometry_used, "fp": fp, "sl": sl, "design": design, "country": country}
+
+
+def _sheet_pack(part_id: int, video: str) -> dict:
+    from . import sheet_layout
+    P = sheet_prepare(part_id)
+    d, rev, shape, shape0, res, res0, t, corr, geometry_used, fp, sl, design, country = (
+        P[k] for k in ("d", "rev", "shape", "shape0", "res", "res0", "t", "corr", "geometry", "fp", "sl", "design", "country"))
     code = _safe(d["part_code"])
     files, scenes, stage_pages, rows, comp_rows, stage_pics = {}, [], [], [], [], []
     progressive = design["mode"] == "progressive"

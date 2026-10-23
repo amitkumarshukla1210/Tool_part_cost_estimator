@@ -266,7 +266,7 @@ def sheet_design(fp: dict, sl: dict, res: dict, geometry: dict, country: str = "
               "shut_height_mm": s["values"]["shut_height_mm"], "press": s["press"]} for s in out_stages])
     total_weight = sum(s["weight_kg"] for s in (out_stages[:1] if progressive else out_stages))
     return {"mode": res["mode"], "material": res["material"], "thickness_mm": base["t"], "pitch_mm": sv.get("pitch_mm", 0), "country": country, "month": month,
-            "stages": out_stages, "die_sets": sets, "warnings": warnings, "total_force_t": round(total_force, 1),
+            "stages": out_stages, "die_sets": sets, "rotate": bool(progressive and sl.get("best", {}).get("feed", "").endswith("width")), "warnings": warnings, "total_force_t": round(total_force, 1),
             "tool_weight_kg": round(total_weight, 1),
             "steel_cost": round(sum(s["steel_cost"] for s in (out_stages[:1] if progressive else out_stages))),
             "currency": rates.lookup("tool_material", DIE_STEEL, country, month)["currency"] if _steel(DIE_STEEL, country, month)[1] else "",
@@ -374,11 +374,16 @@ def _features(design: dict, stage: dict, fp: dict, final_shape, z_die: float, z_
     clr = v["clearance_mm"]
     outline, ox, oy = _centred(fp["outline"])
     holes = [[[x - ox, y - oy] for x, y in h] for h in fp["holes"]]
+    turn = bool(design.get("rotate"))                           # progressive strip fed along the blank width: blank turned 90°
+    if turn:
+        outline = [[y, x] for x, y in outline]
+        holes = [[[y, x] for x, y in h] for h in holes]
     f = {"die": [], "strip": [], "punch": [], "plate_cut": [], "work": None}
+    place = (lambda shp: place_formed(shp, z_top).rotate(cq.Vector(0, 0, 0), cq.Vector(0, 0, 1), 90)) if turn else (lambda shp: place_formed(shp, z_top))
     sh = lambda wp: wp.translate((dx, 0, 0))
     code = stage["code"]
     if code == "trim" and stage.get("after_forming") and final_shape is not None:
-        f["work"] = sh(place_formed(final_shape, z_top))
+        f["work"] = sh(place(final_shape))
     if code in ("blank", "trim"):
         f["die"].append(sh(_prism(_offset(outline, clr), dieb, z_die)))
         f["strip"].append(sh(_prism(_offset(outline, clr * 0.5), strp, z_top + t + gap)))
@@ -395,7 +400,7 @@ def _features(design: dict, stage: dict, fp: dict, final_shape, z_die: float, z_
         f["work"] = sh(work)
     elif code in ("draw", "bend") and stage.get("real_form") and final_shape is not None:
         try:
-            placed = place_formed(final_shape, z_top)
+            placed = place(final_shape)
             fp_ = forming_parts(placed, z_top, t, v["die_set_l_mm"] - 2 * v["margin_mm"] * 0.4, v["die_set_w_mm"] - 2 * v["margin_mm"] * 0.4,
                                 strp + v["punch_plate_t_mm"])
             f["die"].append(sh(fp_["die_cut"]))
@@ -458,26 +463,34 @@ def _assemble(design: dict, stages: list[dict], offsets: list[float], fp: dict, 
         if f["work"] is not None:
             works.append((st, f["work"]))
     z_pp = z_top + t + strp + gap
-    parts = [("Lower shoe", "lower", _box(sl_, sw_, shoe), (0.55, 0.57, 0.60)),
-             ("Die block", "lower", die, (0.20, 0.35, 0.75)),
-             ("Stripper plate", "upper", stripper, (0.85, 0.55, 0.15)),
-             ("Punch plate", "upper", plate, (0.55, 0.57, 0.60)),
-             ("Backing plate", "upper", _box(inner_l * 0.8, inner_w * 0.8, back, z=z_pp + pun), (0.35, 0.37, 0.40)),
-             ("Upper shoe", "upper", _box(sl_, sw_, shoe, z=z_pp + pun + back), (0.55, 0.57, 0.60))]
-    for i, (st, p) in enumerate(punches, start=1):
-        parts.append((f"Punch {i} (stage {st['n']})" if len(punches) > 1 else "Punch", "upper", p, (0.80, 0.15, 0.15)))
     pil = v["pillar_dia_mm"]
-    for i, (sx, sy) in enumerate([(1, 1), (-1, -1), (1, -1), (-1, 1)][:int(v["pillars"])], start=1):
-        parts.append((f"Guide pillar {i}", "lower", cq.Workplane("XY").circle(pil / 2).extrude(v["shut_height_mm"] - shoe)
-                      .translate((sx * (sl_ / 2 - mg * 0.5), sy * (sw_ / 2 - mg * 0.5), shoe)), (0.75, 0.75, 0.78)))
+    bush_od = pil + 16
+    pillars = [(sx * (sl_ / 2 - mg * 0.5), sy * (sw_ / 2 - mg * 0.5)) for sx, sy in [(1, 1), (-1, -1), (1, -1), (-1, 1)][:int(v["pillars"])]]
+    lower_shoe, upper_shoe = _box(sl_, sw_, shoe), _box(sl_, sw_, shoe, z=z_pp + pun + back)
+    for px, py in pillars:
+        lower_shoe = lower_shoe.cut(cq.Workplane("XY").circle(pil / 2).extrude(shoe * 0.6).translate((px, py, shoe * 0.4)))
+        upper_shoe = upper_shoe.cut(cq.Workplane("XY").circle(bush_od / 2).extrude(shoe).translate((px, py, z_pp + pun + back)))
+    us_closed = z_top + t + strp + pun + back
+    parts = [("Lower shoe", "lower", lower_shoe, (0.55, 0.57, 0.60), "shoe", False),
+             ("Die block", "lower", die, (0.20, 0.35, 0.75), "die_block", False),
+             ("Stripper plate", "upper", stripper, (0.85, 0.55, 0.15), "stripper", False),
+             ("Punch plate", "upper", plate, (0.55, 0.57, 0.60), "punch_plate", False),
+             ("Backing plate", "upper", _box(inner_l * 0.8, inner_w * 0.8, back, z=z_pp + pun), (0.35, 0.37, 0.40), "backing_plate", False),
+             ("Upper shoe", "upper", upper_shoe, (0.55, 0.57, 0.60), "shoe", False)]
+    for i, (st, p) in enumerate(punches, start=1):
+        parts.append((f"Punch {i} (stage {st['n']})" if len(punches) > 1 else "Punch", "upper", p, (0.80, 0.15, 0.15), "punch", False))
+    for i, (px, py) in enumerate(pillars, start=1):
+        parts.append((f"Guide pillar {i}", "lower", cq.Workplane("XY").circle(pil / 2).extrude(us_closed + shoe * 0.6 - shoe * 0.4)
+                      .translate((px, py, shoe * 0.4)), (0.75, 0.75, 0.78), "guide_pillar", True))
+        parts.append((f"Guide bush {i}", "upper", _tube(bush_od, pil + 0.04, shoe, px, py, z_pp + pun + back), (0.70, 0.55, 0.20), "guide_bush", True))
     for st, w in works:
-        parts.append((f"Workpiece after {st['name'].lower()}", "work", w, (0.95, 0.80, 0.25)))
+        parts.append((f"Workpiece after {st['name'].lower()}", "work", w, (0.95, 0.80, 0.25), "work", False))
     out = []
-    for n, g, w, c in parts:
+    for n, g, w, c, cls, std in parts:
         shp = w.val() if hasattr(w, "val") else w
         try:
             if shp.Volume() > 1e-6:
-                out.append({"name": n, "group": g, "shape": shp, "color": c})
+                out.append({"name": n, "group": g, "shape": shp, "color": c, "cls": cls, "standard": std})
         except Exception:
             pass                                   # an empty result of a boolean: nothing to show
     return out
@@ -499,18 +512,28 @@ def progressive_solids(design: dict, fp: dict, final_shape, open_state: bool = T
 # ------------------------------------------------------------ mould concept in 3D
 
 MAX_FACES_FOR_BOOLEAN = 4000
+PICTURE_CAVITIES = 8          # pictures show at most this many cavities; a production design has all of them
+MAX_PRODUCTION_CAVITIES = 64
 
 
-def mould_3d(shape: cq.Shape, axis: str, parting_z: float, tool: dict, open_gap: float = 60.0, regions: list | None = None) -> dict:
-    """Concept 3D of a mould / die: plates, pillars, core and cavity inserts cut from the part along the parting plane.
+def _tube(od: float, idia: float, h: float, x: float, y: float, z: float):
+    return cq.Workplane("XY").circle(od / 2).circle(idia / 2).extrude(h).translate((x, y, z))
 
-    `shape` is the (corrected) part, `tool` the tool_cost.run result (cavity layout and mould base). Returns components."""
+
+def mould_3d(shape: cq.Shape, axis: str, parting_z: float, tool: dict, open_gap: float = 60.0, regions: list | None = None,
+             production: bool = False) -> dict:
+    """3D of a mould / die: plates with pillar and bush holes, guide pillars and bushes, sprue bush, locating ring, and the core and
+    cavity inserts cut from the part along the parting plane.
+
+    `shape` is the (corrected) part, `tool` the tool_cost.run result (cavity layout and mould base). With `production` all
+    cavities are modelled and the tool is closed (open_gap ignored); plates are thickened where the insert is deeper than the
+    catalogue plate. Each component carries `cls` (its class in Component classes) and `standard` (bought-out)."""
     base, layout = tool["base"], tool["layout"]
     z = corrections.to_z(shape, axis)
     bb = z.BoundingBox()
     cx, cy = (bb.xmin + bb.xmax) / 2, (bb.ymin + bb.ymax) / 2
     n = layout["rows"] * layout["cols"] - layout["empty"]
-    cavs = min(n, 8)                                  # the picture shows at most 8 cavities; the BOM has them all
+    cavs = min(n, MAX_PRODUCTION_CAVITIES if production else PICTURE_CAVITIES)
     pitch_x, pitch_y = layout["each_l"] + 10, layout["each_w"] + 10
     pos = []
     for r in range(layout["rows"]):
@@ -523,40 +546,58 @@ def mould_3d(shape: cq.Shape, axis: str, parting_z: float, tool: dict, open_gap:
     pocket_l, pocket_w = layout["pocket_l"], layout["pocket_w"]
     if cavs < n:
         pocket_l, pocket_w = (max(p[0] for p in pos) - min(p[0] for p in pos)) + layout["each_l"], (max(p[1] for p in pos) - min(p[1] for p in pos)) + layout["each_w"]
-    comps = []
-
-    def add(name, group, wp, color):
-        comps.append({"name": name, "group": group, "shape": wp.val() if hasattr(wp, "val") else wp, "color": color})
-
-    gap = open_gap
-    # parting plane at z=0. B side below, A side above.
-    z_b_top = 0.0
-    add("B plate (core plate)", "lower", _box(L, W, b_).cut(_box(pocket_l, pocket_w, b_)).translate((0, 0, -b_)), (0.30, 0.45, 0.80))
-    add("Support plate", "lower", _box(L, W, support, z=-b_ - support), (0.45, 0.50, 0.58))
-    add("Spacer blocks", "lower", _box(L * 0.12, W, spacer, x=-L * 0.38, z=-b_ - support - spacer).union(
-        _box(L * 0.12, W, spacer, x=L * 0.38, z=-b_ - support - spacer)), (0.40, 0.42, 0.45))
-    add("Ejector plates", "lower", _box(L * 0.64, W * 0.8, ej, z=-b_ - support - spacer + 5), (0.80, 0.55, 0.15))
-    add("Bottom clamp plate", "lower", _box(L, W, clamp, z=-b_ - support - spacer - clamp), (0.55, 0.57, 0.60))
-    add("A plate (cavity plate)", "upper", _box(L, W, a).cut(_box(pocket_l, pocket_w, a)).translate((0, 0, gap)), (0.30, 0.45, 0.80))
-    add("Top clamp plate", "upper", _box(L, W, clamp, z=a + gap), (0.55, 0.57, 0.60))
-    add("Locating ring", "upper", cq.Workplane("XY").circle(50).extrude(10).translate((0, 0, a + clamp + gap)), (0.8, 0.2, 0.2))
-    add("Sprue bush", "upper", cq.Workplane("XY").circle(14).extrude(a + clamp).translate((0, 0, gap)), (0.8, 0.2, 0.2))
-    pil = max(20.0, round(min(L, W) / 25.0))
-    for i, (sx, sy) in enumerate([(1, 1), (-1, -1), (1, -1), (-1, 1)], start=1):
-        add(f"Guide pillar {i}", "lower",
-            cq.Workplane("XY").circle(pil / 2).extrude(a + b_ * 0.6).translate((sx * (L / 2 - pil * 1.3), sy * (W / 2 - pil * 1.3), -b_ * 0.6)),
-            (0.78, 0.78, 0.80))
-    # core / cavity inserts cut from the part
     top, bot = bb.zmax - parting_z, parting_z - bb.zmin
     h_up, h_dn = top + 15, bot + 15
+    notes = []
+    if production:
+        a_eff, b_eff = max(a, math.ceil(h_up / 5) * 5), max(b_, math.ceil(h_dn / 5) * 5)
+        if a_eff > a or b_eff > b_:
+            notes.append(f"Plates thickened for the insert depth: A {a:g} → {a_eff:g} mm, B {b_:g} → {b_eff:g} mm (catalogue base {base['size_code']}).")
+        a, b_ = a_eff, b_eff
+    gap = 0.0 if production else open_gap
+    comps = []
+
+    def add(name, group, wp, color, cls, standard=False):
+        comps.append({"name": name, "group": group, "shape": wp.val() if hasattr(wp, "val") else wp, "color": color, "cls": cls,
+                      "standard": standard})
+
+    pil = max(20.0, round(min(L, W) / 25.0))
+    bush_od = pil + 16
+    pil_xy = [(sx * (L / 2 - bush_od / 2 - 6), sy * (W / 2 - bush_od / 2 - 6)) for sx, sy in ((1, 1), (-1, -1), (1, -1), (-1, 1))]
+    sprue_d, ring_d = 28.0, 100.0
+    # parting plane at z=0. B side below, A side above.
+    bplate = _box(L, W, b_).cut(_box(pocket_l, pocket_w, b_)).translate((0, 0, -b_))
+    aplate = _box(L, W, a).cut(_box(pocket_l, pocket_w, a)).translate((0, 0, gap))
+    for px, py in pil_xy:
+        bplate = bplate.cut(cq.Workplane("XY").circle(pil / 2).extrude(b_ * 0.6).translate((px, py, -b_ * 0.6)))
+        aplate = aplate.cut(cq.Workplane("XY").circle(bush_od / 2).extrude(a).translate((px, py, gap)))
+    clamp_top = _box(L, W, clamp, z=a + gap).cut(cq.Workplane("XY").circle(sprue_d / 2).extrude(clamp).translate((0, 0, a + gap)))
+    add("B plate (core plate)", "lower", bplate, (0.30, 0.45, 0.80), "base_plate")
+    add("Support plate", "lower", _box(L, W, support, z=-b_ - support), (0.45, 0.50, 0.58), "support_plate")
+    for k, sx in enumerate((-1, 1), start=1):
+        add(f"Spacer block {k}", "lower", _box(L * 0.12, W, spacer, x=sx * L * 0.38, z=-b_ - support - spacer), (0.40, 0.42, 0.45), "spacer_block")
+    add("Ejector plate", "lower", _box(L * 0.64, W * 0.8, ej, z=-b_ - support - spacer + 5), (0.80, 0.55, 0.15), "ejector_plate")
+    add("Bottom clamp plate", "lower", _box(L, W, clamp, z=-b_ - support - spacer - clamp), (0.55, 0.57, 0.60), "clamp_plate")
+    add("A plate (cavity plate)", "upper", aplate, (0.30, 0.45, 0.80), "base_plate")
+    add("Top clamp plate", "upper", clamp_top, (0.55, 0.57, 0.60), "clamp_plate")
+    add("Locating ring", "upper", cq.Workplane("XY").circle(ring_d / 2).circle(sprue_d / 2).extrude(10).translate((0, 0, a + clamp + gap)),
+        (0.8, 0.2, 0.2), "locating_ring", True)
+    add("Sprue bush", "upper", cq.Workplane("XY").circle(sprue_d / 2).circle(sprue_d / 2 - 8).extrude(a + clamp).translate((0, 0, gap)),
+        (0.8, 0.2, 0.2), "sprue_bush", True)
+    for i, (px, py) in enumerate(pil_xy, start=1):
+        add(f"Guide pillar {i}", "lower", cq.Workplane("XY").circle(pil / 2).extrude(a * 0.55 + b_ * 0.6).translate((px, py, -b_ * 0.6)),
+            (0.78, 0.78, 0.80), "guide_pillar", True)
+        add(f"Guide bush {i}", "upper", _tube(bush_od, pil + 0.04, a, px, py, gap), (0.70, 0.55, 0.20), "guide_bush", True)
+    # core / cavity inserts cut from the part
     exact = len(z.Faces()) <= MAX_FACES_FOR_BOOLEAN
     placed = None
     for i, (px, py) in enumerate(pos, start=1):
         moved = z.translate(cq.Vector(px - cx, py - cy, -parting_z))
         placed = moved if placed is None else placed.fuse(moved)
     note = ""
-    lower_block = _box(pocket_l, pocket_w, h_dn, z=-h_dn)
-    upper_block = _box(pocket_l, pocket_w, h_up, z=0)
+    ins_up, ins_dn = (a if production else h_up), (b_ if production else h_dn)
+    lower_block = _box(pocket_l, pocket_w, ins_dn, z=-ins_dn)
+    upper_block = _box(pocket_l, pocket_w, ins_up, z=0)
     try:
         if not exact or placed is None:
             raise ValueError("part has too many faces for the boolean cut")
@@ -565,35 +606,42 @@ def mould_3d(shape: cq.Shape, axis: str, parting_z: float, tool: dict, open_gap:
         #            and above the parting plane outside it
         #   B side = everything below the LOWER envelope inside the footprint and below the parting plane outside it
         # Anything left between the envelopes is a window or an undercut: it stays empty and needs a slide or lifter.
-        big = (bb.zlen + h_up + h_dn) * 2 + 20
+        big = (bb.zlen + ins_up + ins_dn) * 2 + 20
         up, dn = sweep(placed, big), sweep(placed, -big)
         if up is None or dn is None:
             raise ValueError("no surface faces the opening direction")
         sil = up.fuse(dn)
-        full = _box(pocket_l, pocket_w, h_up + h_dn, z=-h_dn).val()
+        full = _box(pocket_l, pocket_w, ins_up + ins_dn, z=-ins_dn).val()
         a_side = upper_block.val().cut(sil).fuse(full.intersect(sil).cut(dn))
         b_side = lower_block.val().cut(sil).fuse(full.intersect(sil).cut(up))
-        for tag, solid, group, color, lift in (("A side insert", a_side, "upper", (0.25, 0.65, 0.35), gap),
-                                               ("B side insert", b_side, "lower", (0.85, 0.30, 0.25), 0.0)):
+        a_side = a_side.cut(cq.Workplane("XY").circle(sprue_d / 2).extrude(a).val())       # the sprue bush passes through the A insert
+        for tag, solid, group, color, lift, cls in (("A side insert", a_side, "upper", (0.25, 0.65, 0.35), gap, "insert_a"),
+                                                    ("B side insert", b_side, "lower", (0.85, 0.30, 0.25), 0.0, "insert_b")):
             parts = sorted(solid.Solids(), key=lambda x: -x.Volume())
             for k, sd in enumerate(parts):
                 if sd.Volume() < 1.0:
                     continue
-                add(tag if k == 0 else f"{tag}: island {k}", group, cq.Workplane("XY").add(sd).translate((0, 0, lift)), color)
+                add(tag if k == 0 else f"{tag}: island {k}", group, cq.Workplane("XY").add(sd).translate((0, 0, lift)), color, cls)
         gaps = full.intersect(sil).cut(a_side).cut(b_side).cut(placed)
         if gaps.Volume() > 1.0:
             note = f"Voids between the part's envelopes ({gaps.Volume() / 1000:.1f} cm³) are undercuts or windows: they need slides, lifters or shut-offs."
     except Exception as exc:
         note = f"Insert shapes not cut from the part ({str(exc)[:80]}): plain blocks shown."
-        add("B side insert", "lower", lower_block, (0.85, 0.30, 0.25))
-        add("A side insert", "upper", upper_block.translate((0, 0, gap)), (0.25, 0.65, 0.35))
+        add("B side insert", "lower", lower_block, (0.85, 0.30, 0.25), "insert_b")
+        add("A side insert", "upper", upper_block.cut(cq.Workplane("XY").circle(sprue_d / 2).extrude(a)).translate((0, 0, gap)), (0.25, 0.65, 0.35), "insert_a")
     for k, r in enumerate(regions or [], start=1):
         # proposal markers: a slide / lifter block at each undercut region of the concept, on the first cavity
         c = corrections.to_z_point(r["centre_mm"], axis)
         side = max(r["area_mm2"] ** 0.5, 6.0)
         mk = _box(side, side, side, x=c[0] - cx + pos[0][0], y=c[1] - cy + pos[0][1], z=c[2] - parting_z - side / 2).val()
-        add(f"{r['kind'].capitalize()} {k} (proposal)", "lower", mk, (0.55, 0.25, 0.75))
+        add(f"{r['kind'].capitalize()} {k} (proposal)", "proposal", mk, (0.55, 0.25, 0.75), "proposal")
     if placed is not None:
-        add("Part (corrected)", "part", placed.translate(cq.Vector(0, 0, gap / 2)) if hasattr(placed, "translate") else placed, (0.95, 0.80, 0.25))
+        add("Part (corrected)", "part", placed.translate(cq.Vector(0, 0, gap / 2)) if hasattr(placed, "translate") else placed,
+            (0.95, 0.80, 0.25), "part")
+    if cavs < n:
+        notes.append(f"Only {cavs} of {n} cavities are modelled (limit {MAX_PRODUCTION_CAVITIES}); the BOM quantities cover all of them.")
+    if note:
+        notes.append(note)
     return {"components": comps, "cavities_shown": cavs, "cavities_total": n, "base": base["size_code"],
-            "parting_z_mm": parting_z, "note": note, "base_mm": [L, W], "open_gap_mm": gap}
+            "parting_z_mm": parting_z, "note": " ".join(notes), "base_mm": [L, W], "open_gap_mm": gap,
+            "plate_a_mm": a, "plate_b_mm": b_, "pillar_dia_mm": pil, "bush_od_mm": bush_od, "sprue_dia_mm": sprue_d}

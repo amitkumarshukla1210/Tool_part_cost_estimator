@@ -405,6 +405,7 @@ function renderPart() {
     ${toolBlock(p)}
     ${pieceBlock(p)}
     ${sheetBlock(p)}
+    ${toolDesignBlock(p)}
     ${designPackBlock(p)}
     ${compareBlock(p)}
     ${insertsBlock(p)}
@@ -927,3 +928,15 @@ $("panelBody").addEventListener("click", async (e) => {
   }
   e.target.disabled = false;
 });
+
+
+// Production tool design (roadmap stage 21): per-part 3D, drawings, STEP files, bill of materials and purchase orders
+function toolDesignBlock(p) {
+  const ok = !p.is_assembly && ((p.tool?.applicable && !p.tool.problem) || p.sheet);
+  if (!ok) return "";
+  return `<h3 class="block-title">Production tool design: 3D, drawings, STEP, purchase orders</h3>
+    <div class="card"><p class="note">Every plate, insert, punch and stripper as its own 3D part with a part number, manufacturing drawing (PDF, DXF) and STEP file,
+      raw-stock sizes, machining routes and the bill of materials. View and measure it in 3D, correct a part by uploading an edited STEP, release the design and
+      issue purchase orders for raw material, machining and bought-out parts. You assemble the tool in your factory.</p>
+      <a class="btn btn-primary small" href="/tool-design?part=${p.id}">Open the tool design</a></div>`;
+}
