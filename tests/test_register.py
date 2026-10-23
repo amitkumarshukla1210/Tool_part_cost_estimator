@@ -214,7 +214,7 @@ def test_dashboard_and_exports():
     assert pdf.content[:4] == b"%PDF"
     xlsx = client.get("/api/parts/export.xlsx", params={"project_id": p["id"]})
     ws = load_workbook(io.BytesIO(xlsx.content))["Part register"]
-    assert ws.max_row == 7
+    assert ws.max_row == 7 + 3                                  # + logo and name rows
 
 
 # ---------- master data for the register ----------

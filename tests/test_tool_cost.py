@@ -300,5 +300,5 @@ def test_search_dashboard_and_exports_show_the_tool_cost():
     assert all(ws["A1"].value == EXAMPLE_WARNING for ws in wb.worksheets)
     assert client.get(f"/api/parts/{pid}/tool-cost/export.pdf").content.startswith(b"%PDF")
     parts = load_workbook(io.BytesIO(client.get("/api/parts/export.xlsx", params={"project_id": p["id"]}).content)).active
-    assert parts["A1"].value == EXAMPLE_WARNING and "tool_capex_inr" in [c.value for c in parts[2]]
+    assert parts["A1"].value == EXAMPLE_WARNING and any("tool_capex_inr" in [c.value for c in row] for row in parts.iter_rows(min_row=1, max_row=6))
     assert client.get(f"/api/projects/{p['id']}/dashboard.pdf").content.startswith(b"%PDF")

@@ -178,7 +178,7 @@ def test_downloads_carry_the_logo_and_the_name():
     base = f"/api/tool-designs/{d['id']}"
     wb = load_workbook(io.BytesIO(client.get(f"{base}/files/xlsx").content))
     ws = wb.worksheets[0]
-    assert ws["B1"].value == "Design to Cost" and len(ws._images) >= 1 and wb.worksheets[1].oddHeader.center.text == "Design to Cost"
+    assert "Design to Cost" in [ws.cell(r, 2).value for r in (1, 2)] and len(ws._images) >= 1 and wb.worksheets[1].oddHeader.center.text == "Design to Cost"
     assert any(str(c.value) == "Part no." for row in wb["PO-1 Raw material"].iter_rows() for c in row)      # data still there
     pdf = client.get(f"{base}/files/po-material").content
     assert "Design to Cost" in (PdfReader(io.BytesIO(pdf)).pages[0].extract_text() or "")
@@ -190,7 +190,7 @@ def test_downloads_carry_the_logo_and_the_name():
     assert any(s.name == "dtc_brand" for sl in Presentation(io.BytesIO(pack.read(ppt))).slides for s in sl.shapes)
     # master-data downloads keep the plain layout so that they can be uploaded again
     md = load_workbook(io.BytesIO(client.get("/api/master-data/download").content))
-    assert md.worksheets[0]["B1"].value != "Design to Cost"
+    assert "Design to Cost" not in [md.worksheets[0].cell(r, 2).value for r in (1, 2)]
 
 
 # ---------- delete part / project ----------

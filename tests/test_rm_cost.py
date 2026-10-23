@@ -242,7 +242,7 @@ def test_search_filter_dashboard_rollup_and_exports():
     assert "Rate library #" in inputs["Material rate"] and "EXAMPLE" in inputs["Material rate"]
     assert client.get(f"/api/parts/{a}/rm-cost/export.pdf").content[:4] == b"%PDF"
     parts_xlsx = load_workbook(io.BytesIO(client.get("/api/parts/export.xlsx", params={"project_id": p["id"]}).content))
-    assert "net_rm_cost_inr" in [c.value for c in parts_xlsx.active[2]]   # row 1 is the example-rate banner
+    assert any("net_rm_cost_inr" in [c.value for c in row] for row in parts_xlsx.active.iter_rows(min_row=1, max_row=6))   # banner and logo rows come first
 
 
 def test_project_recalculation_uses_the_latest_rates():

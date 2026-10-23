@@ -21,30 +21,31 @@ SKIP = ("/download", "/template.xlsx")           # round-trip files: the upload 
 ROWS = 3
 
 
-def _shift_rows(ws, n: int) -> None:
+def _shift_rows(ws, n: int, at: int = 1) -> None:
     merged = [str(m) for m in ws.merged_cells.ranges]
     for m in merged:
         ws.unmerge_cells(m)
-    ws.insert_rows(1, n)
+    ws.insert_rows(at, n)
     from openpyxl.worksheet.cell_range import CellRange
     for m in merged:
         cr = CellRange(m)
-        cr.shift(row_shift=n)
+        if cr.min_row >= at:
+            cr.shift(row_shift=n)
         ws.merge_cells(cr.coord)
     for img in getattr(ws, "_images", []):
         try:
-            img.anchor._from.row += n
-            if hasattr(img.anchor, "to") and img.anchor.to is not None:
-                img.anchor.to.row += n
+            if img.anchor._from.row + 1 >= at:
+                img.anchor._from.row += n
+                if hasattr(img.anchor, "to") and img.anchor.to is not None:
+                    img.anchor.to.row += n
         except Exception:
             pass
     if ws.freeze_panes:
         from openpyxl.utils import coordinate_to_tuple, get_column_letter
         r, c = coordinate_to_tuple(ws.freeze_panes)
-        ws.freeze_panes = f"{get_column_letter(c)}{r + n}"
-    for r in sorted((k for k in ws.row_dimensions if isinstance(k, int)), reverse=True):
-        if r + n not in ws.row_dimensions or True:
-            ws.row_dimensions[r + n].height = ws.row_dimensions[r].height
+        ws.freeze_panes = f"{get_column_letter(c)}{r + n if r >= at else r}"
+    for r in sorted((k for k in ws.row_dimensions if isinstance(k, int) and k >= at), reverse=True):
+        ws.row_dimensions[r + n].height = ws.row_dimensions[r].height
 
 
 def stamp_xlsx(data: bytes) -> bytes:
@@ -55,17 +56,19 @@ def stamp_xlsx(data: bytes) -> bytes:
     if not wb.worksheets:
         return data
     first = wb.worksheets[0]
-    if str(first.cell(1, 2).value or "") == NAME:
+    # the example-rate / DRAFT warning stays on row 1; the brand goes under it
+    at = 2 if str(first.cell(1, 1).value or "").startswith(("Uses example", "DRAFT")) else 1
+    if str(first.cell(at, 2).value or "") == NAME or str(first.cell(1, 2).value or "") == NAME:
         return data
-    _shift_rows(first, ROWS)
-    for r in range(1, ROWS + 1):
+    _shift_rows(first, ROWS, at)
+    for r in range(at, at + ROWS):
         first.row_dimensions[r].height = 16
-    first.cell(1, 2, NAME).font = Font(bold=True, size=14, color="1F3A5F")
-    first.cell(2, 2, TAGLINE).font = Font(color="6B7280")
+    first.cell(at, 2, NAME).font = Font(bold=True, size=14, color="1F3A5F")
+    first.cell(at + 1, 2, TAGLINE).font = Font(color="6B7280")
     if LOGO.exists():
         img = XlImage(str(LOGO))
         img.width = img.height = 44
-        first.add_image(img, "A1")
+        first.add_image(img, f"A{at}")
         first.column_dimensions["A"].width = max(first.column_dimensions["A"].width or 0, 8)
     for ws in wb.worksheets:
         ws.oddHeader.center.text = NAME

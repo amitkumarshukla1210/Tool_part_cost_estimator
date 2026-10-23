@@ -313,6 +313,22 @@ bill of materials, the bought-out list, the purchase orders, and the blank / str
 and the tool mark-up are *Parameters* (sheet_metal) rows, EXAMPLE until you replace them.
 API: `POST /api/parts/{id}/sheet-compare`, `GET` the same path, and `…/xlsx`, `…/pdf`, `…/package.zip`.
 
+**Delete a part or a project.** On the dashboard, *Delete* on a BOM row removes that part and *Delete project* removes the project. A
+confirmation lists what goes (3D revisions, RM / tool / part cost versions, tool designs and component files, BOM lines, history entries, stored
+files nothing else uses); a project is confirmed by typing its code. It is removed from the database and the screen and cannot be undone. In
+server mode it needs the role approver or admin. API: `GET …/delete-preview`, `DELETE /api/parts/{id}`, `DELETE /api/projects/{id}`.
+
+**Logo and name on downloads.** Every Excel, PDF and PowerPoint file (also those inside a ZIP) carries the Design to Cost logo and name: the
+first sheet of a workbook has them in the top rows (an example-rate or DRAFT warning stays on row 1), PDFs in the page margin, slides in the
+corner. Master-data downloads and templates stay plain so that they can be uploaded again.
+
+**End-to-end audit.** `python scripts/audit_e2e.py` takes sample 3D parts of every tool group at a low and a high capacity
+(`samples/audit/`, made by `samples/make_audit_samples.py`) from upload to the supplier ZIP, downloads and re-opens every file and writes
+`docs/audit_e2e_report.md`: 14 of 14 cases pass (plastic, die casting, foundry, sheet-metal progressive and stage, EPS, blow). The design pack
+(simulation, corrected drawing, PowerPoint) exists for plastic, die casting and sheet metal; EPS, blow and foundry use the tool-design page.
+Very large tools take minutes to build (a 2500 t plastic or die-casting mould about 30 minutes in the audit) and a drawing of a very complex
+insert is simplified to its outline when hidden-line removal takes more than 25 seconds.
+
 **Toolmaker review.** Each design has a checklist (*Review checklist* master data): automatic items from the design facts (overlaps, FEA, pins and
 cooling placed, undercuts resolved, tie-bar fit, pattern and gating) and manual items for the toolmaker (OK, Issue, N/A or Waive, each with a
 name and a comment). A blocking item that is not signed stops the release; an automatic check that fails cannot be signed OK, only waived with a

@@ -204,7 +204,7 @@ def run_case(client, case, pack=True) -> Audit:
         from openpyxl import load_workbook
         wb = load_workbook(io.BytesIO(wb_r.content))
         expect({"BOM", "PO-1 Raw material", "PO-2 Machining", "PO-3 Bought-out", "Assembly"} <= set(wb.sheetnames), f"sheets {wb.sheetnames}")
-        expect(wb.worksheets[0]["B1"].value == "Design to Cost", "no logo / name on the Excel")
+        expect("Design to Cost" in [wb.worksheets[0].cell(r, 2).value for r in (1, 2)], "no logo / name on the Excel")
         rows = [r for r in wb["PO-1 Raw material"].iter_rows(values_only=True) if r and r[1] and str(r[1]).startswith(des["summary"]["part_code"])]
         expect(rows, "PO-1 has no part rows")
         from pypdf import PdfReader
