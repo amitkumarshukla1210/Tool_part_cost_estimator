@@ -582,7 +582,27 @@ def _part_row(conn, part_id: int):
     return conn.execute(select(db.parts).where(db.parts.c.id == part_id)).mappings().one()
 
 
+_DRAWINGS: OrderedDict = OrderedDict()      # finished drawings by (component, revision, file, format, status): the supplier ZIP reuses them
+DRAWING_CACHE = 400
+
+
 def component_drawing(design_id: int, comp_id: int, fmt: str = "pdf") -> tuple[bytes, str]:
+    with db.engine().connect() as conn:
+        c0 = conn.execute(select(db.tool_components).where((db.tool_components.c.id == comp_id) & (db.tool_components.c.design_id == design_id))).mappings().first()
+        d0 = _design_row(conn, design_id) if c0 else None
+    key = (db.engine().url.render_as_string(), comp_id, c0["rev"], c0["file_id"], fmt, d0["status"], d0["rev_label"]) if c0 else None
+    if key and key in _DRAWINGS:
+        _DRAWINGS.move_to_end(key)
+        return _DRAWINGS[key]
+    out = _component_drawing(design_id, comp_id, fmt)
+    if key:
+        _DRAWINGS[key] = out
+        while len(_DRAWINGS) > DRAWING_CACHE:
+            _DRAWINGS.popitem(last=False)
+    return out
+
+
+def _component_drawing(design_id: int, comp_id: int, fmt: str = "pdf") -> tuple[bytes, str]:
     from . import tool_drawings
     with db.engine().connect() as conn:
         d = _design_row(conn, design_id)

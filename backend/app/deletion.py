@@ -169,6 +169,6 @@ def delete_project(project_id: int) -> dict:
 
 def _clear_caches() -> None:
     from . import design_pack, tool_design_store
-    for c in (getattr(design_pack, "CACHE", None), getattr(tool_design_store, "_SHAPES", None)):
+    for c in (getattr(design_pack, "CACHE", None), getattr(tool_design_store, "_SHAPES", None), getattr(tool_design_store, "_DRAWINGS", None)):
         if c is not None:
             c.clear()
