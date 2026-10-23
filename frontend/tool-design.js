@@ -339,6 +339,33 @@ function checksTab() {
     <p class="note">The check looks for invalid solids and for parts that overlap. Standard parts are included. Run it again after every correction (done automatically on upload).</p>`;
 }
 
+async function compareTab(run) {
+  const el = $("tab-compare"), base = `/api/parts/${design.part_id}/sheet-compare`;
+  let c = null, err = "";
+  if (run) el.innerHTML = `<p class="note">Generating the progressive and the stage-die designs with drawings and BOM … about a minute.</p>`;
+  try { c = await api(base, { method: run ? "POST" : "GET" }); } catch (e) { err = e.message || String(e); }
+  const head = `<p><button type="button" id="cmpRun" class="primary">${c ? "Generate again" : "Generate comparison"}</button>
+    ${c ? `<a class="link" href="${base}/xlsx">Excel</a> · <a class="link" href="${base}/pdf">PDF</a> · <a class="link" href="${base}/package.zip">Full package (ZIP)</a>` : ""}</p>`;
+  if (!c) { el.innerHTML = head + `<p class="note">${esc(err)}</p><p class="note">Compares a progressive die with stage dies: press tonnage, gross raw material and strip layout, process cost, tool cost, with the drawings, BOM and bought-out parts of both.</p>`; $("cmpRun").onclick = () => compareTab(true); return; }
+  const A = c.modes.progressive, B = c.modes.multi_stage, v = c.verdict;
+  const row = (l, a, b) => `<tr><td>${l}</td><td>${a}</td><td>${b}</td></tr>`;
+  el.innerHTML = head + `<div class="info"><b>${esc(v.label)}</b> is cheaper per part by INR ${fmt(v.saving_per_part, 2)}. ${esc(v.note)}</div>
+    <table class="grid"><thead><tr><th></th><th>${esc(A.label)}</th><th>${esc(B.label)}</th></tr></thead><tbody>
+    ${row("Presses · largest (t)", `${A.concept.presses} · ${A.concept.largest_press_t}`, `${B.concept.presses} · ${B.concept.largest_press_t}`)}
+    ${row("Total force (t)", A.concept.total_force_t, B.concept.total_force_t)}
+    ${row("Raw material layout", esc(A.rm.layout), esc(B.rm.layout))}
+    ${row("Gross weight per part (g) · utilisation", `${A.rm.gross_weight_g} · ${A.rm.utilisation_pct} %`, `${B.rm.gross_weight_g} · ${B.rm.utilisation_pct} %`)}
+    ${row("RM cost per part (INR)", fmt(A.rm.rm_cost_per_part, 2), fmt(B.rm.rm_cost_per_part, 2))}
+    ${row("Process cost per part (INR)", fmt(A.process.cost_per_part, 3), fmt(B.process.cost_per_part, 3))}
+    ${row("Tool: made parts · bought-out items", `${A.tool.made_parts} · ${A.tool.bought_out_items}`, `${B.tool.made_parts} · ${B.tool.bought_out_items}`)}
+    ${row("Tool cost (INR)", fmt(A.tool.total_inr, 0), fmt(B.tool.total_inr, 0))}
+    ${row("Tool amortisation per part (INR)", fmt(A.per_part.tool, 3), fmt(B.per_part.tool, 3))}
+    ${row("<b>Total per part (INR)</b>", `<b>${fmt(A.per_part.total, 3)}</b>`, `<b>${fmt(B.per_part.total, 3)}</b>`)}
+    ${row("Open the tool design (drawings, BOM, POs)", `<a class="link" href="/tool-design?design=${A.design_id}">version ${A.design_version}</a>`, `<a class="link" href="/tool-design?design=${B.design_id}">version ${B.design_version}</a>`)}
+    </tbody></table><p class="note">Strokes per minute, operators, scrap credit, tool mark-up, rates and machines are EXAMPLE values until replaced in master data.</p>`;
+  $("cmpRun").onclick = () => compareTab(true);
+}
+
 function reviewTab() {
   const items = design.review || [], draft = design.status === "draft", f = design.summary.fea;
   const open = items.filter((r) => r.blocking && !["ok", "na", "waived"].includes(r.status)).length;
@@ -373,6 +400,8 @@ function render() {
     : d.status === "released" ? `<div class="info">Released as drawing revision ${esc(d.rev_label)} by ${esc(d.released_by)} on ${esc((d.released_at || "").slice(0, 10))}. To change a part, start a new revision.</div>`
     : `<div class="info">Superseded by a newer release.</div>`) + (s.example ? `<div class="warn">Uses example rates – not for negotiation</div>` : "") + (s.notes ? `<div class="info">${esc(s.notes)}</div>` : "");
   partsTab(); bomTab(); reviewTab(); checksTab(); renderMeasure();
+  $("compareBtn").hidden = d.kind !== "sheet_metal";
+  if (d.kind === "sheet_metal") compareTab(false);
 }
 
 // ---------------------------------------------------------------- loading and actions

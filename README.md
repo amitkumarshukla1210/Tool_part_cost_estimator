@@ -304,6 +304,15 @@ forming block gets the void and a note. Check **Checks** for overlaps: a design 
 core boxes with core prints for side holes and bosses, the match plate, and sprue, runner, ingate and riser patterns sized from the casting
 modulus. Alloy data is in *Foundry materials*, gating sizes in *Tool detail rules* (foundry). The flask size is stated in the notes.
 
+**Progressive die or stage dies (stage 23).** For a sheet-metal part the tool-design page has a *Progressive vs stage* tab. One click
+generates the full production design of both die types and compares them: press tonnage and number of presses, blank / strip layout
+(pitch, strip width, utilisation) and gross raw material per part, process cost (strokes per minute, machine hour rate, operators), tool cost
+(steel, machining, bought-out parts, assembly, mark-up), cost per part with tool amortisation, and the break-even volume. Downloads:
+Excel, PDF and a **full package ZIP** with, for each die type, the STEP and drawing (PDF, DXF) of every made part, the assembly sheet with the
+bill of materials, the bought-out list, the purchase orders, and the blank / strip layout. Strokes per minute, operators per press, scrap credit
+and the tool mark-up are *Parameters* (sheet_metal) rows, EXAMPLE until you replace them.
+API: `POST /api/parts/{id}/sheet-compare`, `GET` the same path, and `…/xlsx`, `…/pdf`, `…/package.zip`.
+
 **Toolmaker review.** Each design has a checklist (*Review checklist* master data): automatic items from the design facts (overlaps, FEA, pins and
 cooling placed, undercuts resolved, tie-bar fit, pattern and gating) and manual items for the toolmaker (OK, Issue, N/A or Waive, each with a
 name and a comment). A blocking item that is not signed stops the release; an automatic check that fails cannot be signed OK, only waived with a

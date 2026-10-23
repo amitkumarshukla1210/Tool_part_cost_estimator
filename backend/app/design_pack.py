@@ -265,7 +265,7 @@ def _mould_video(before: dict, after: dict, tool_meshes: list, m3d: dict, mode: 
 
 # ------------------------------------------------------------ sheet metal
 
-def sheet_prepare(part_id: int) -> dict:
+def sheet_prepare(part_id: int, mode: str | None = None) -> dict:
     """Sheet-metal context with the model corrected (bend radii, minimum holes), flat pattern, strip and the stage design."""
     from . import sheet_layout, sheet_tools
     d, rev, shape, blank, res = register._sheet_context(part_id)
@@ -288,6 +288,10 @@ def sheet_prepare(part_id: int) -> dict:
         by_process = {"sheet_metal_progressive": "progressive", "sheet_metal_multistage": "multi_stage"}.get(d["process"], "")
         res = sheet_tools.run(feat, d["material"], typed, by_process) | {"part_id": part_id, "rev": rev["rev"], "typed": typed,
                                                                          "process": d["process"]}
+    if mode and res["mode"] != mode:       # the other die type, for the progressive / stage comparison
+        typed = {k: v for k, v in res["typed"].items() if k != "mode"}
+        res = sheet_tools.run(res["features"], d["material"], typed, mode) | {"part_id": part_id, "rev": rev["rev"], "typed": res["typed"],
+                                                                              "process": d["process"]}
     fp = sheet_layout.flat_pattern(shape, geometry_used, blank, t)
     sl = sheet_layout.strip_layout(fp, t, len(res["operations"]))
     country = (d["tool_country"] or d["country"] or register_setup.settings()["default_country"]).upper()

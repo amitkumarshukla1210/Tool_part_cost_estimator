@@ -88,7 +88,7 @@ def _signature(shape: cq.Shape, cls: str) -> tuple:
     return (cls, tuple(sorted(round(x, 1) for x in (bb.xlen, bb.ylen, bb.zlen))), round(shape.Volume(), -1))
 
 
-def _prepare(part_id: int) -> dict:
+def _prepare(part_id: int, mode: str | None = None) -> dict:
     d = register.part_detail(part_id, with_rm=False)
     proc = register_setup.processes().get(d["process"])
     if not proc:
@@ -163,7 +163,7 @@ def _prepare(part_id: int) -> dict:
                    "rules": F["rules"], "example": True, "opening_axis": axis, "currency": "INR"}
         P = {"axis": axis}
     else:
-        P = design_pack.sheet_prepare(part_id)
+        P = design_pack.sheet_prepare(part_id, mode)
         design, fp, shape = P["design"], P["fp"], P["shape"]
         country, month = P["country"], design["month"]
         progressive = design["mode"] == "progressive"
@@ -239,9 +239,9 @@ def _stage_env(stage: dict) -> dict:
     return env
 
 
-def generate(part_id: int, note: str = "") -> dict:
+def generate(part_id: int, note: str = "", mode: str | None = None) -> dict:
     """Build a new draft design version of the part's tool. Returns the design (see get_design)."""
-    pre = _prepare(part_id)
+    pre = _prepare(part_id, mode)
     code, part_type, country, month = pre["code"], pre["part_type"], pre["country"], pre["month"]
     # part numbers: identical parts share one, per prefix
     counters, numbers, infos = {}, {}, {}

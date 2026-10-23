@@ -142,3 +142,27 @@ def test_fea_removes_small_holes_before_meshing():
     block = cq.Workplane("XY").box(200, 150, 60, centered=False).faces(">Z").workplane().pushPoints([(20, 20), (60, 60)]).hole(6).val()
     out, n = fea.defeature(block, 20.0)
     assert n >= 2 and out.Volume() > block.Volume() and len(out.Faces()) < len(block.Faces())
+
+
+# ---------- stage 23: progressive vs stage comparison ----------
+
+def test_sheet_progressive_vs_stage_comparison_and_package():
+    import zipfile
+    pid = add_part(project("CMP"), "sheet_metal_bracket.step", "Mild steel CRCA / HR", "sheet_metal_progressive", "CM-1")
+    r = client.post(f"/api/parts/{pid}/sheet-compare")
+    assert r.status_code == 200, r.text
+    c = r.json()
+    a, b = c["modes"]["progressive"], c["modes"]["multi_stage"]
+    assert a["concept"]["presses"] == 1 and b["concept"]["presses"] == len(b["concept"]["stages"]) >= 2
+    assert a["rm"]["gross_weight_g"] > c["net_weight_g"] and b["rm"]["gross_weight_g"] > c["net_weight_g"]
+    assert a["tool"]["total_inr"] > 0 and b["tool"]["total_inr"] > 0 and a["per_part"]["total"] > 0 and b["per_part"]["total"] > 0
+    assert a["checks"] == 0 and b["checks"] == 0
+    assert c["verdict"]["cheaper"] in ("progressive", "multi_stage") and c["verdict"]["note"]
+    assert client.get(f"/api/parts/{pid}/sheet-compare").json()["verdict"] == c["verdict"]
+    assert client.get(f"/api/parts/{pid}/sheet-compare/pdf").content[:4] == b"%PDF"
+    wb = load_workbook(io.BytesIO(client.get(f"/api/parts/{pid}/sheet-compare/xlsx").content))
+    assert wb.sheetnames == ["Comparison", "Progressive stations", "Stage dies"]
+    z = zipfile.ZipFile(io.BytesIO(client.get(f"/api/parts/{pid}/sheet-compare/package.zip").content))
+    names = z.namelist()
+    assert any(n.startswith("progressive/drawings/") for n in names) and any(n.startswith("multi_stage/drawings/") for n in names)
+    assert any(n.startswith("multi_stage/po/") for n in names) and "layout/strip.dxf" in names and "README.txt" in names

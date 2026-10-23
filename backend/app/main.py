@@ -867,6 +867,42 @@ def parts_sheet_layout_file(part_id: int, kind: str):
     return Response(content, media_type=media, headers={"Content-Disposition": f'attachment; filename="{kind.split(".")[0]}_part_{part_id}.{kind.split(".")[1]}"'})
 
 
+def _cmp(fn):
+    from . import sheet_compare
+    try:
+        return fn(sheet_compare)
+    except (sheet_compare.CompareError, register.ToolNotApplicable, register.RegisterError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.post("/api/parts/{part_id}/sheet-compare")
+def sheet_compare_generate(part_id: int):
+    """Generate the progressive and the stage-die production designs and compare them (roadmap stage 23)."""
+    return _cmp(lambda m: m.generate(part_id))
+
+
+@app.get("/api/parts/{part_id}/sheet-compare")
+def sheet_compare_get(part_id: int):
+    return _cmp(lambda m: m.compare(part_id))
+
+
+@app.get("/api/parts/{part_id}/sheet-compare/{kind}")
+def sheet_compare_file(part_id: int, kind: str):
+    """kind: xlsx, pdf or package.zip (comparison + both tool designs' drawings, BOM, bought-out list, POs, strip layout)."""
+    if kind not in ("xlsx", "pdf", "package.zip"):
+        raise HTTPException(404, "Unknown file.")
+    if kind == "package.zip":
+        content, name = _cmp(lambda m: m.package(part_id))
+        media = "application/zip"
+    else:
+        c = _cmp(lambda m: m.compare(part_id))
+        from . import sheet_compare
+        content = sheet_compare.workbook(c) if kind == "xlsx" else sheet_compare.pdf(c)
+        name = f"{c['part_code']}_progressive_vs_stage.{kind}"
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if kind == "xlsx" else "application/pdf"
+    return Response(content, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
 @app.get("/api/capacity/validation")
 def capacity_validation(step_t: float = 250.0):
     """Machines, mould bases / die holders, rates and tool designs checked from 0 to 3000 t (roadmap stage 20)."""
@@ -948,7 +984,7 @@ def tool_designs_list(part_id: int):
 @app.post("/api/parts/{part_id}/tool-designs")
 def tool_designs_generate(part_id: int, data: dict | None = None):
     """Generate a new draft tool design: 3D components with part numbers, drawings, raw stock, machining and the bill of materials."""
-    return _td(lambda st: st.generate(part_id, str((data or {}).get("note") or "")))
+    return _td(lambda st: st.generate(part_id, str((data or {}).get("note") or ""), (data or {}).get("mode") or None))
 
 
 @app.get("/api/tool-designs/{design_id}")
