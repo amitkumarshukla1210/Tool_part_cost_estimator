@@ -45,10 +45,10 @@ def _frames_tri(tri, colors, n, azim0, azim1, caption_fn, bounds, elev=22):
 
 # ------------------------------------------------------------ plastic and die casting
 
-def _mould_kwargs(tool: dict, rev: dict, part_h: float = 0.0, area_cm2: float = 0.0) -> dict:
+def _mould_kwargs(tool: dict, rev: dict, part_h: float = 0.0, area_cm2: float = 0.0, axis: str | None = None) -> dict:
     qty = {l["element"]: l["quantity"] for l in tool.get("lines", []) if l.get("category") == "bought_out"}
     g = rev["geometry"]
-    ax = g.get("pull_direction", "z")
+    ax = axis or g.get("pull_direction", "z")
     pick = lambda *words: int(next((q for k, q in qty.items() if all(w in k.lower() for w in words)), 0))
     return {"part_h": part_h or g["bbox_axes_mm"].get(ax, 0), "part_area_cm2": area_cm2 or g["projected_area_mm2"].get(ax, 0) / 100,
             "bom": {"ejector_pins": pick("ejector"), "return_pins": pick("return pin") or 4, "cooling_connectors": pick("cooling"),
@@ -62,11 +62,11 @@ def mould_prepare(part_id: int, production: bool = False) -> dict:
     part_type = register_setup.processes()[d["process"]]["part_type"]
     if part_type not in ("plastic", "die_casting"):
         _, rev, shape = register.part_shape(part_id)
-        axis = rev["geometry"]["pull_direction"]
+        axis = register.tool_pull(part_type, rev["geometry"])
         z = corrections.to_z(shape, axis).BoundingBox()
         tool = register._tool_compute(part_id)
         parting = (z.zmin + z.zmax) / 2
-        m3d = tool_design.mould_3d(shape, axis, parting, tool, regions=None, production=production, **_mould_kwargs(tool, rev))
+        m3d = tool_design.mould_3d(shape, axis, parting, tool, regions=None, production=production, **_mould_kwargs(tool, rev, axis=axis))
         return {"d": d, "rev": rev, "part_type": part_type, "shape": shape, "fixed": shape, "axis": axis, "corr": None, "tool": tool,
                 "m3d": m3d, "before": None, "after": None, "concept_res": {}, "facts": {}, "min_draft": None}
     d, rev, part_type, verts, tris, concept_res, facts = register._concept_inputs(part_id)

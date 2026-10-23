@@ -230,10 +230,13 @@ def build(shape: cq.Shape, axis: str, material: str, facts: dict) -> dict:
         else:
             notes.append(f"{name} is too thin at the parting face for screws: fix it to the plate by bonding or through ribs your pattern maker adds.")
     counts["screws"], counts["dowels"] = n_s, n_d
-    # core boxes
+    # core boxes: laid out in a row beside the match plate, each centred on the centre line
+    run = 0.0
     for i, core in enumerate(core_solids, start=1):
         cb = core.BoundingBox()
         m = 20.0
+        T = cq.Vector(x_lo + L + 60 + 2 * m - cb.xmin + run, -(cb.ymin + cb.ymax) / 2, -cb.zmin - 2 * m)
+        run += cb.xlen + 6 * m + 40
         block = cq.Workplane("XY").box(cb.xlen + 2 * m, cb.ylen + 2 * m, cb.zlen + 2 * m, centered=False).translate((cb.xmin - m, cb.ymin - m, cb.zmin - m)).val()
         box = block.cut(core)
         mid = (cb.ymin + cb.ymax) / 2
@@ -242,8 +245,8 @@ def build(shape: cq.Shape, axis: str, material: str, facts: dict) -> dict:
         h2 = box.cut(h1)
         for k, half in enumerate((h1, h2), start=1):
             if half.Volume() > 1:
-                add(f"Core box {i}, half {k}", "lower", half.translate(cq.Vector(pb.xmax + 3 * v["sprue_dia_mm"] + cb.xlen + 80, 0, 0)), (0.45, 0.65, 0.80), "core_box")
-        add(f"Core {i} (sand, reference)", "part", core.translate(cq.Vector(pb.xmax + 3 * v["sprue_dia_mm"] + cb.xlen + 80, 0, 0)), (0.9, 0.85, 0.6), "part")
+                add(f"Core box {i}, half {k}", "lower", half.translate(T), (0.45, 0.65, 0.80), "core_box")
+        add(f"Core {i} (sand, reference)", "part", core.translate(T), (0.9, 0.85, 0.6), "part")
     # the casting and the flask for reference
     add("Casting (reference)", "part", placed.scale(1.0), (0.95, 0.80, 0.25), "part")
     fl = v["flask_margin_mm"]

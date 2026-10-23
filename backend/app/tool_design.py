@@ -278,6 +278,16 @@ def sheet_design(fp: dict, sl: dict, res: dict, geometry: dict, country: str = "
 
 # ------------------------------------------------------------ tool surfaces from the part (sweeps along the press / opening direction)
 
+def _fuse_all(out: list):
+    """Fuse the swept faces; when the kernel cannot fuse them (revolved surfaces) keep them as one compound, which still intersects and cuts."""
+    if len(out) == 1:
+        return out[0]
+    try:
+        return out[0].fuse(*out[1:])
+    except Exception:
+        return cq.Compound.makeCompound(out)
+
+
 def sweep(shape: cq.Shape, dz: float) -> cq.Shape | None:
     """The volume swept by `shape` along Z by dz: the region above (dz > 0) or below (dz < 0) every material point.
     Vertical faces sweep to nothing and are skipped; every other face is swept with its orientation fixed and fused."""
@@ -296,7 +306,7 @@ def sweep(shape: cq.Shape, dz: float) -> cq.Shape | None:
             out.append(p)
     if not out:
         return None
-    return out[0].fuse(*out[1:]) if len(out) > 1 else out[0]
+    return _fuse_all(out)
 
 
 def sweep_vec(shape: cq.Shape, vec: tuple) -> cq.Shape | None:
@@ -318,7 +328,7 @@ def sweep_vec(shape: cq.Shape, vec: tuple) -> cq.Shape | None:
             out.append(p)
     if not out:
         return None
-    return out[0].fuse(*out[1:]) if len(out) > 1 else out[0]
+    return _fuse_all(out)
 
 
 def flange_level(shape: cq.Shape) -> float:
@@ -502,9 +512,10 @@ def _features(design: dict, stage: dict, fp: dict, final_shape, z_die: float, z_
         half = math.radians(v.get("bend_punch_angle_deg", 90.0)) / 2
         depth = (vo / 2) / math.tan(half)
         pd = (vo / 3) / math.tan(half)
-        f["die"].append(sh(cq.Workplane("XZ").polyline([(-vo / 2, z_top), (vo / 2, z_top), (0, z_top - depth)]).close().extrude(L / 2, both=True)))
-        f["punch"].append(sh(cq.Workplane("XZ").polyline([(-vo / 3, z_top + t + strp + gap), (vo / 3, z_top + t + strp + gap),
-                                                          (0, z_top + t - pd + gap)]).close().extrude(L / 2, both=True)))
+        turned = (lambda w: w.rotate((0, 0, 0), (0, 0, 1), 90)) if turn else (lambda w: w)       # bend line along the long side of the turned blank
+        f["die"].append(sh(turned(cq.Workplane("XZ").polyline([(-vo / 2, z_top), (vo / 2, z_top), (0, z_top - depth)]).close().extrude(L / 2, both=True))))
+        f["punch"].append(sh(turned(cq.Workplane("XZ").polyline([(-vo / 3, z_top + t + strp + gap), (vo / 3, z_top + t + strp + gap),
+                                                                 (0, z_top + t - pd + gap)]).close().extrude(L / 2, both=True))))
         if final_shape is not None:
             bb = final_shape.BoundingBox()
             f["work"] = sh(cq.Workplane("XY").add(final_shape).translate((-(bb.xmin + bb.xmax) / 2, -(bb.ymin + bb.ymax) / 2, z_top - bb.zmin)))
@@ -594,6 +605,16 @@ def progressive_solids(design: dict, fp: dict, final_shape, open_state: bool = T
     """One progressive die set with every station (the stages side by side at the strip pitch)."""
     stages = design["stages"]
     pitch = design.get("pitch_mm") or max(fp["length_mm"], fp["width_mm"]) * 1.1
+    # stations are at least as far apart as the widest punch of any station along the feed (pierce slots can be longer than the strip pitch)
+    for s in stages:
+        try:
+            f = _features(dict(design), s, fp, final_shape, 0.0, 0.0, 0.0, 0.0)
+            for pch in f["punch"]:
+                bbp = (pch.val() if hasattr(pch, "val") else pch).BoundingBox()
+                if bbp.xlen < 0.8 * s["values"]["die_set_l_mm"]:          # the big forming core of a stage is not a station-width limit
+                    pitch = max(pitch, bbp.xlen + 6.0)
+        except Exception:
+            pass
     offsets = [(i - (len(stages) - 1) / 2) * pitch for i in range(len(stages))]
     return _assemble(design, stages, offsets, fp, final_shape, open_state, details)
 
@@ -646,7 +667,12 @@ def mould_3d(shape: cq.Shape, axis: str, parting_z: float, tool: dict, open_gap:
     gap = 0.0 if production else open_gap
     comps = []
 
+    def zbox(l, w, h, **k):          # EPS steam chests and blow-mould holders have no clamp, support, spacer or ejector plates
+        return _box(l, w, h, **k) if h > 0 else None
+
     def add(name, group, wp, color, cls, standard=False):
+        if wp is None:
+            return
         comps.append({"name": name, "group": group, "shape": wp.val() if hasattr(wp, "val") else wp, "color": color, "cls": cls,
                       "standard": standard})
 
@@ -661,13 +687,14 @@ def mould_3d(shape: cq.Shape, axis: str, parting_z: float, tool: dict, open_gap:
     for px, py in pil_xy:
         bplate = bplate.cut(cq.Workplane("XY").circle(pil / 2).extrude(b_ * 0.6).translate((px, py, -b_ * 0.6)))
         aplate = aplate.cut(cq.Workplane("XY").circle(bush_od / 2).extrude(a).translate((px, py, gap)))
-    clamp_top = _box(L, W, clamp, z=a + gap).cut(cq.Workplane("XY").circle(sprue_d / 2).extrude(clamp).translate((0, 0, a + gap)))
+    clamp_top = zbox(L, W, clamp, z=a + gap)
+    clamp_top = clamp_top.cut(cq.Workplane("XY").circle(sprue_d / 2).extrude(clamp).translate((0, 0, a + gap))) if clamp_top is not None else None
     add("B plate (core plate)", "lower", bplate, (0.30, 0.45, 0.80), "base_plate")
-    add("Support plate", "lower", _box(L, W, support, z=-b_ - support), (0.45, 0.50, 0.58), "support_plate")
+    add("Support plate", "lower", zbox(L, W, support, z=-b_ - support), (0.45, 0.50, 0.58), "support_plate")
     for k, sx in enumerate((-1, 1), start=1):
-        add(f"Spacer block {k}", "lower", _box(L * 0.12, W, spacer, x=sx * L * 0.38, z=-b_ - support - spacer), (0.40, 0.42, 0.45), "spacer_block")
-    add("Ejector plate", "lower", _box(L * 0.64, W * 0.8, ej, z=-b_ - support - spacer + 5), (0.80, 0.55, 0.15), "ejector_plate")
-    add("Bottom clamp plate", "lower", _box(L, W, clamp, z=-b_ - support - spacer - clamp), (0.55, 0.57, 0.60), "clamp_plate")
+        add(f"Spacer block {k}", "lower", zbox(L * 0.12, W, spacer, x=sx * L * 0.38, z=-b_ - support - spacer), (0.40, 0.42, 0.45), "spacer_block")
+    add("Ejector plate", "lower", zbox(L * 0.64, W * 0.8, ej, z=-b_ - support - spacer + 5), (0.80, 0.55, 0.15), "ejector_plate")
+    add("Bottom clamp plate", "lower", zbox(L, W, clamp, z=-b_ - support - spacer - clamp), (0.55, 0.57, 0.60), "clamp_plate")
     add("A plate (cavity plate)", "upper", aplate, (0.30, 0.45, 0.80), "base_plate")
     add("Top clamp plate", "upper", clamp_top, (0.55, 0.57, 0.60), "clamp_plate")
     add("Locating ring", "upper", cq.Workplane("XY").circle(ring_d / 2).circle(sprue_d / 2).extrude(10).translate((0, 0, a + clamp + gap)),
@@ -690,6 +717,8 @@ def mould_3d(shape: cq.Shape, axis: str, parting_z: float, tool: dict, open_gap:
     lower_block = _box(pocket_l, pocket_w, ins_dn, z=-ins_dn)
     upper_block = _box(pocket_l, pocket_w, ins_up, z=0)
     try:
+        if tool.get("part_type") == "blow":
+            raise ValueError("blow-mould halves split on the bottle's axis plane")
         if not exact or placed is None:
             raise ValueError("part has too many faces for the boolean cut")
         # Split by the part's own envelopes along the opening direction (valid where there is no undercut):
@@ -715,15 +744,34 @@ def mould_3d(shape: cq.Shape, axis: str, parting_z: float, tool: dict, open_gap:
                     continue
                 add(tag if k == 0 else f"{tag}: island {k}", group, cq.Workplane("XY").add(sd).translate((0, 0, lift)), color, cls)
         gaps = full.intersect(sil).cut(a_side).cut(b_side).cut(placed)
-        if not hot:
+        if not hot and gaps.Solids():           # a part with no undercut leaves no void
             gaps = gaps.cut(cq.Workplane("XY").circle(sprue_d / 2).extrude(a).val())
         gap_solids = [x for x in gaps.Solids() if x.Volume() > 1.0]
-        if gaps.Volume() > 1.0:
+        if gaps.Solids() and gaps.Volume() > 1.0:
             note = f"Voids between the part's envelopes ({gaps.Volume() / 1000:.1f} cm³) are undercuts or windows: they need slides, lifters or shut-offs."
     except Exception as exc:
-        note = f"Insert shapes not cut from the part ({str(exc)[:80]}): plain blocks shown."
-        add("B side insert", "lower", lower_block, (0.85, 0.30, 0.25), "insert_b")
-        add("A side insert", "upper", upper_block.cut(cq.Workplane("XY").circle(sprue_d / 2).extrude(a)).translate((0, 0, gap)), (0.25, 0.65, 0.35), "insert_a")
+        comps[:] = [c for c in comps if not c["name"].startswith(("A side insert", "B side insert"))]
+        try:       # no envelope sweep (revolved bottles, surface-heavy parts): the cavity is the plain boolean cut of the part from each block
+            if placed is None:
+                raise ValueError("no part")
+            a_side = upper_block.val().cut(placed)
+            b_side = lower_block.val().cut(placed)
+            if not hot:
+                a_side = a_side.cut(cq.Workplane("XY").circle(sprue_d / 2).extrude(a).val())
+            for tag, solid, group, color, lift, cls in (("A side insert", a_side, "upper", (0.25, 0.65, 0.35), gap, "insert_a"),
+                                                        ("B side insert", b_side, "lower", (0.85, 0.30, 0.25), 0.0, "insert_b")):
+                parts = sorted(solid.Solids(), key=lambda x: -x.Volume())
+                for k, sd in enumerate(parts):
+                    if sd.Volume() >= 1.0:
+                        add(tag if k == 0 else f"{tag}: island {k}", group, cq.Workplane("XY").add(sd).translate((0, 0, lift)), color, cls)
+            if not any(c["cls"] == "insert_b" for c in comps) or not any(c["cls"] == "insert_a" for c in comps):
+                raise ValueError("empty insert")
+            note = (f"The cavity is cut from the part by a plain boolean ({str(exc)[:60]}): undercuts are not analysed, check slides and lifters with your toolmaker.")
+        except Exception:
+            comps[:] = [c for c in comps if not c["name"].startswith(("A side insert", "B side insert"))]
+            note = f"Insert shapes not cut from the part ({str(exc)[:80]}): plain blocks shown."
+            add("B side insert", "lower", lower_block, (0.85, 0.30, 0.25), "insert_b")
+            add("A side insert", "upper", upper_block.cut(cq.Workplane("XY").circle(sprue_d / 2).extrude(a)).translate((0, 0, gap)), (0.25, 0.65, 0.35), "insert_a")
     for k, r in enumerate(regions or [], start=1):
         # proposal markers: a slide / lifter block at each undercut region of the concept, on the first cavity
         c = corrections.to_z_point(r["centre_mm"], axis)

@@ -31,8 +31,10 @@ def u_channel(l, w, h, t):
 
 
 def bottle(r, h, neck_r, wall):
-    prof = cq.Workplane("XZ").polyline([(0, 0), (r, 0), (r, h * 0.7), (neck_r, h * 0.85), (neck_r, h), (0, h)]).close().revolve(360, (0, 0, 0), (0, 1, 0))
-    return prof.faces(">Z").shell(-wall)
+    def body(rr, hh, nr, z0):
+        pts = [(0, z0), (rr, z0), (rr, hh * 0.7), (nr, hh * 0.85), (nr, hh + 1 if z0 else hh), (0, hh + 1 if z0 else hh)]
+        return cq.Workplane("XZ").polyline(pts).close().revolve(360, (0, 0, 0), (0, 1, 0))
+    return body(r, h, neck_r, 0).cut(body(r - wall, h - wall * 0.5, neck_r - wall, wall))
 
 
 PARTS = {

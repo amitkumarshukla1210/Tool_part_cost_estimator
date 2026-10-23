@@ -1540,6 +1540,16 @@ def _tool_master_hash(part_type: str) -> str:
     return hashlib.sha1(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()[:12]
 
 
+def tool_pull(part_type: str, g: dict) -> str:
+    """Opening direction of the tool. Blow-mould halves open across the bottle (perpendicular to its longest axis); the stored pull
+    direction is kept for every other part type."""
+    if part_type == "blow":
+        axes = g["bbox_axes_mm"]
+        longest = max(axes, key=axes.get)
+        return max((a for a in axes if a != longest), key=lambda a: (axes[a], a == "x"))
+    return g["pull_direction"]
+
+
 def _tool_compute(part_id: int, country: str | None = None) -> dict:
     """Dry run: the traced tool cost of the part's current revision. Raises ToolNotApplicable / ToolCostError."""
     d = part_detail(part_id, with_rm=False)
@@ -1554,7 +1564,7 @@ def _tool_compute(part_id: int, country: str | None = None) -> dict:
     if "weight" not in t.nodes:
         raise ToolNotApplicable("Set the part's material (with a density in Master data → Materials) to cost its tool.")
     g = rev["geometry"]
-    pull = g["pull_direction"]
+    pull = tool_pull(part_type, g)
     across = sorted((v for a, v in g["bbox_axes_mm"].items() if a != pull), reverse=True)
     cad = {"type": "cad", "file": rev["original_name"], "rev": rev["rev"], "sha256": rev["sha256"]}
     volume, volume_note = _annual_volume(d)

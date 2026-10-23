@@ -338,7 +338,7 @@ def cooling(comps: list[dict], ctx: dict, v: dict, side: str) -> dict:
     ins, plate = find(comps, iname), find(comps, pname)
     placed = ctx.get("placed")
     if ins is None or plate is None or placed is None:
-        return {"channels": 0, "connectors": 0}
+        return {"channels": 0, "connectors": 0, "wanted": 0}
     d, wall, want = v["cool_dia_mm"], v["cool_min_wall_mm"], int(v["cool_channels"])
     r = d / 2
     bb = ins["shape"].BoundingBox()
@@ -397,7 +397,7 @@ def mould_details(comps: list[dict], ctx: dict, v: dict) -> dict:
     out.update(sp_["counts"])
     notes += sp_["notes"]
     out["ejector_pins"] = ejector_pins(comps, ctx, v)
-    if out["ejector_pins"] < int(v["ejector_pins"]):
+    if find(comps, "Ejector plate") is not None and out["ejector_pins"] < int(v["ejector_pins"]):
         notes.append(f"{out['ejector_pins']} of {int(v['ejector_pins'])} ejector pins fit under the part: the rest go on the ribs and bosses the toolmaker chooses.")
     out["return_pins"] = return_pins(comps, ctx, v)
     cb, ca = cooling(comps, ctx, v, "B"), cooling(comps, ctx, v, "A")
@@ -430,12 +430,12 @@ def mould_details(comps: list[dict], ctx: dict, v: dict) -> dict:
         bx = sb["shape"].BoundingBox()
         pos = [p for p in sp if bx.xmin < p[0] < bx.xmax]
         out["screws"] += fasten(comps, ["Bottom clamp plate", spacer, "Support plate", "B plate (core plate)"], pos, sd, False, f"Screw M{sd:g} (B side)")
-    if out["screws"] < int(v["screws_a"]) + int(v["screws_b"]):
+    if find(comps, "Top clamp plate") is not None and out["screws"] < int(v["screws_a"]) + int(v["screws_b"]):
         notes.append(f"{out['screws']} of {int(v['screws_a']) + int(v['screws_b'])} cap screws placed: the plate frame is too narrow for the rest, use a larger base.")
     k = int(v["dowels_per_interface"])
     rp = [(x, y, r + dd) for x, y, r in ctx.get("return_xy", [])]
     dpos_a = ring_positions(L, W, inset + 2 * sd, k, circles + [(p[0], p[1], 2.5 * sd) for p in ps], [pocket])
-    dpos_b = ring_positions(L, W, inset + 2 * sd, k, circles + rp, [pocket])
+    dpos_b = ring_positions(L, W, inset + 2 * sd, k, circles + rp + [(p[0], p[1], 2.5 * sd) for p in sp], [pocket])
     out["dowels"] = dowels(comps, a_chain[-2], "A plate (cavity plate)", dpos_a, dd, f"Dowel pin Ø{dd:g} (A side)")
     out["dowels"] += dowels(comps, "B plate (core plate)", "Support plate", dpos_b, dd, f"Dowel pin Ø{dd:g} (B side)")
     return {"counts": out, "notes": notes, "cooling": {"B": cb, "A": ca}}
@@ -541,8 +541,13 @@ def slides_and_lifters(comps: list[dict], ctx: dict, v: dict) -> dict:
         p_lo, p_hi = along(pb)
         outer = (u[0] + u[1]) > 0
         # a slide needs a free path outward: the void swept along u must not meet the part
-        probe = tool_design.sweep_vec(g, tuple(c * 60.0 for c in u))
-        free = probe is None or probe.intersect(placed).Volume() < 1.0
+        try:
+            probe = tool_design.sweep_vec(g, tuple(c * 60.0 for c in u))
+            free = probe is None or probe.intersect(placed).Volume() < 1.0
+        except Exception:                 # the kernel cannot decide (revolved surfaces): leave the void to the toolmaker
+            notes.append(f"Void at ({centre[0]:.0f}, {centre[1]:.0f}) could not be checked for a slide path: the toolmaker decides slide or lifter.")
+            counts["unresolved"] += 1
+            continue
         if free:
             # slide: moves outward along u
             depth = gb.xlen if u[0] else gb.ylen

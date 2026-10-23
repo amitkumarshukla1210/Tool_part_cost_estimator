@@ -40,6 +40,9 @@ NEW_BASES = (
     + [("die_casting", "Die holder", w, l) for w, l in
        [(100, 100), (100, 120), (120, 120), (120, 140), (140, 150), (150, 160), (160, 170)]]
 )
+# Blow-mould holders and EPS steam chests for large containers / boxes: (part_type, series, length mm, width mm, insert length, insert width, plate mm, stack mm)
+EXTRA_BASES = [("blow", "Blow mould holder", 600, 300, 520, 240, 80, 200), ("blow", "Blow mould holder", 800, 400, 700, 340, 100, 240),
+               ("blow", "Blow mould holder", 1000, 500, 900, 440, 120, 280), ("blow", "Blow mould holder", 1200, 600, 1100, 540, 140, 320)]
 KG_COST = {"plastic": 260.0, "die_casting": 300.0}   # same INR per kg as the seeded bases
 
 
@@ -117,6 +120,14 @@ def extend(month: str | None = None) -> dict:
     db = mould_db.tables()
     have_b = {(b["part_type"], b["size_code"]) for b in db["mould_bases"]}
     new_b = [_base_row(*b) for b in NEW_BASES if (b[0], _code(b[2], b[3])) not in have_b]
+    for pt, series, length, width, il, iw, plate, stack in EXTRA_BASES:
+        code = f"{round(length / 10)}{round(width / 10)}"
+        if (pt, code) not in have_b:
+            wt = round(length * width * stack * 7.85e-6 * 0.6, 1)
+            new_b.append({"part_type": pt, "series": series, "size_code": code, "length_mm": float(length), "width_mm": float(width),
+                          "max_insert_length_mm": float(il), "max_insert_width_mm": float(iw), "a_plate_mm": float(plate), "b_plate_mm": float(plate),
+                          "clamp_plates_mm": 0.0, "support_plate_mm": 0.0, "spacer_block_mm": 0.0, "ejector_plates_mm": 0.0, "stack_height_mm": float(stack),
+                          "weight_kg": wt, "cost": round(wt * 300.0, -2), "is_example": 1, "notes": BASE_NOTE})
     if new_b:
         db["mould_bases"] = db["mould_bases"] + new_b
         mould_db.write(db)
