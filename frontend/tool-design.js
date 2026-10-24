@@ -229,6 +229,7 @@ async function detail(id) {
       ${(f.pockets || []).map((p, k) => `<tr class="clickable feat" data-k="p${k}"><td>pocket ${fmt(p.length_mm, 1)} × ${fmt(p.width_mm, 1)}</td><td>depth ${fmt(p.depth_mm, 1)}</td><td></td></tr>`).join("")}
       ${(f.fillets || []).slice(0, 12).map((r, k) => `<tr class="clickable feat" data-k="r${k}"><td>radius R${fmt(r.radius_mm, 2)}</td><td>${r.convex ? "convex" : "concave"}</td><td>length ${fmt(r.length_mm, 1)}</td></tr>`).join("")}
     </tbody></table>
+    <h4>Technical data on the drawing</h4><div id="techData" class="note">Loading …</div>
     <h4>Correct this part</h4>
     ${draft ? `<p class="note">Download the STEP, change it in your CAD (a radius, a thickness …) and upload it here. Identical parts follow; size, stock, weight, machining and the overlap check are recalculated.</p>
       <input type="file" id="upFile" accept=".step,.stp" /><input id="upNote" placeholder="What did you change?" style="width:100%" />
@@ -237,6 +238,7 @@ async function detail(id) {
     <h4>Revisions</h4><div id="revs"></div>`;
   el.querySelectorAll(".feat").forEach((tr) => tr.addEventListener("click", () => markFeature(c, tr.dataset.k)));
   $("upGo")?.addEventListener("click", () => upload(c));
+  techData(c, draft);
   const revs = await api(`${base}/revisions`).catch(() => []);
   $("revs").innerHTML = `<table class="cost-table"><tbody>${revs.map((r) => `<tr><td><b>${esc(r.rev)}</b></td><td>${esc(r.note)}</td><td>${fmt(r.volume_cm3, 1)} cm³</td>
     <td>${draft && r.rev !== c.rev ? `<button class="btn btn-outline small revert" data-rev="${esc(r.rev)}" type="button">use</button>` : ""}</td></tr>`).join("")}</tbody></table>`;
@@ -244,6 +246,40 @@ async function detail(id) {
     await api(`${base}/revert`, { method: "POST", body: JSON.stringify({ rev: b.dataset.rev }) });
     await loadDesign(design.id, id);
   }));
+}
+
+const TD_LABEL = { steel: "Material grade", hardness: "Hardness", heat_treatment: "Heat treatment", surface_treatment: "Surface treatment", tolerance_class: "General tolerance class",
+  finish_ra: "Surface roughness Ra (µm)", tolerance: "Tolerance text" };
+
+async function techData(c, draft) {
+  const el = $("techData");
+  let data;
+  try { data = await api(`/api/tool-designs/${design.id}/drawing-data`); } catch (err) { el.textContent = err.message; return; }
+  const p = data.parts.find((x) => x.part_no === c.part_no);
+  if (!p) { el.textContent = "No technical data for this part."; return; }
+  const ef = p.effective, df = p.defaults, dis = draft ? "" : "disabled";
+  const field = (k) => {
+    const inp = k === "steel" ? `<select data-k="${k}" ${dis} style="width:100%">${data.steels.map((s) => `<option ${s === ef[k] ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>`
+      : k === "tolerance_class" ? `<select data-k="${k}" ${dis} style="width:100%">${["f", "m", "c", "v"].map((s) => `<option ${s === ef[k] ? "selected" : ""}>${s}</option>`).join("")}</select>`
+      : `<input data-k="${k}" value="${esc(ef[k])}" ${dis} style="width:100%" />`;
+    return `<tr><td style="width:34%">${TD_LABEL[k]}</td><td>${inp}<div class="note">default: ${esc(df[k])}</div></td></tr>`;
+  };
+  el.className = "";
+  el.innerHTML = `<table class="cost-table"><tbody>${Object.keys(TD_LABEL).map(field).join("")}
+    <tr><td>Extra note points<br><span class="note">one per line, printed on the drawing (PDF and DXF)</span></td><td><textarea id="tdNotes" rows="4" style="width:100%" ${dis}>${esc((ef.notes || []).join("\n"))}</textarea></td></tr></tbody></table>
+    ${draft ? `<button class="btn btn-primary small" id="tdSave" type="button">Save technical data</button> <span class="status" id="tdStatus"></span>
+      <p class="note">Saved changes go into the drawing, the bill of materials, the purchase orders and the revision history on the drawing. A new steel grade re-weighs and re-prices the stock.</p>`
+      : `<p class="note">This design is ${esc(design.status)}: its drawings are fixed. Start a new revision to change the data.</p>`}`;
+  $("tdSave")?.addEventListener("click", async () => {
+    const fields = {};
+    el.querySelectorAll("[data-k]").forEach((i) => { if (String(i.value) !== String(df[i.dataset.k])) fields[i.dataset.k] = i.value; });
+    const notes = $("tdNotes").value.split("\n").map((x) => x.trim()).filter(Boolean);
+    try {
+      const r = await api(`/api/tool-designs/${design.id}/drawing-data`, { method: "PUT", body: JSON.stringify({ items: [{ part_no: c.part_no, fields, notes }] }) });
+      status($("tdStatus"), r.changed.length ? "Saved. The drawing now shows the new data." : "No change.");
+      if (r.changed.length) await loadDesign(design.id, c.id);
+    } catch (err) { status($("tdStatus"), err.message, "error"); }
+  });
 }
 
 function markFeature(c, key) {
@@ -304,6 +340,13 @@ function bomTab() {
     <ul class="links"><li><a class="link" href="${base}/files/po-material">PO-1 Raw material (PDF)</a></li><li><a class="link" href="${base}/files/po-machining">PO-2 Machining (PDF)</a></li>
       <li><a class="link" href="${base}/files/po-bought-out">PO-3 Bought-out (PDF)</a></li><li><a class="link" href="${base}/files/xlsx">Purchase pack (Excel)</a></li>
       <li><a class="link" href="${base}/files/assembly-pdf">Assembly sheet with BOM (PDF)</a></li><li><a class="link" href="${base}/supplier-package.zip"><b>Supplier package (ZIP: STEP, drawings, DXF, POs)</b></a></li></ul>
+    <h4>Drawing data sheet (review, add notes, upload)</h4>
+    <p class="note">Hardness, material grade, general tolerances (ISO 2768 class, linear and angular), surface roughness, heat and surface treatment and your own note points of every
+      tool part. Download the sheet, review and change it in Excel, upload it again: the drawings (PDF, DXF), BOM and purchase orders follow. Each change is kept in the revision
+      history on the drawing. Every 2D drawing carries the logo, “Design to Cost”, release date, approved by, projection and revision history.</p>
+    <a class="btn btn-outline small" href="${base}/drawing-data.xlsx">Download drawing data (Excel)</a>
+    ${design.status === "draft" ? `<input type="file" id="ddFile" accept=".xlsx" /> <button class="btn btn-primary small" id="ddGo" type="button">Upload changed sheet</button> <span class="status" id="ddStatus"></span>`
+      : `<span class="note">Released design: start a new revision to change the data.</span>`}
     <h4>Made parts</h4><table class="cost-table"><thead><tr><th>#</th><th>Part no.</th><th>Name</th><th class="num">Qty</th><th>Steel</th><th class="num">Stock kg</th></tr></thead><tbody>
     ${b.made.map((m, i) => `<tr class="clickable" data-id="${m.ids[0]}"><td>${i + 1}</td><td>${esc(m.part_no)}</td><td>${esc(m.name)}</td><td class="num">${m.qty}</td><td>${esc(m.info.steel)}</td><td class="num">${fmt(m.info.stock.weight_kg, 1)}</td></tr>`).join("")}</tbody></table>
     <h4>Bought-out parts</h4><table class="cost-table"><thead><tr><th>Item</th><th>Specification</th><th class="num">Qty</th><th class="num">INR</th></tr></thead><tbody>
@@ -317,6 +360,16 @@ function bomTab() {
     <button class="btn btn-primary small" id="qApply" type="button" ${design.quotes?.length ? "" : "disabled"}>Use quotes as approved rates and prices</button> <span class="status" id="qStatus"></span>
     ${design.quotes?.length ? `<table class="cost-table"><thead><tr><th>Supplier</th><th>Kind</th><th>Part / item</th><th class="num">Quoted</th></tr></thead><tbody>
       ${design.quotes.map((q) => `<tr><td>${esc(q.supplier)}</td><td>${esc(q.kind)}</td><td>${esc(q.key)}</td><td class="num">${fmt(q.value, 2)} ${esc(q.currency)}</td></tr>`).join("")}</tbody></table>` : ""}`;
+  $("ddGo")?.addEventListener("click", async () => {
+    const f = $("ddFile").files[0];
+    if (!f) return status($("ddStatus"), "Choose the drawing data sheet (.xlsx).", "error");
+    const fd = new FormData(); fd.append("file", f);
+    try {
+      const r = await api(`/api/tool-designs/${design.id}/drawing-data/upload`, { method: "POST", body: fd });
+      status($("ddStatus"), `${r.changed.length} part(s) changed, ${r.unchanged} unchanged.`);
+      await loadDesign(design.id, selected); document.querySelector('[data-tab="bom"]').click();
+    } catch (err) { status($("ddStatus"), err.message, "error"); }
+  });
   $("qGo")?.addEventListener("click", async () => {
     const f = $("qFile").files[0], sup = $("qSupplier").value.trim();
     if (!f || !sup) return status($("qStatus"), "Choose the workbook and enter the supplier name.", "error");

@@ -889,8 +889,8 @@ def parts_sheet_layout(part_id: int):
 
 @app.get("/api/parts/{part_id}/sheet-layout/{kind}")
 def parts_sheet_layout_file(part_id: int, kind: str):
-    """kind: blank.dxf, strip.dxf or tool-pack.pdf."""
-    if kind not in ("blank.dxf", "strip.dxf", "tool-pack.pdf"):
+    """kind: blank.dxf, strip.dxf, strip.pdf (A3 strip layout drawing) or tool-pack.pdf."""
+    if kind not in ("blank.dxf", "strip.dxf", "strip.pdf", "tool-pack.pdf"):
         raise HTTPException(404, "Unknown file.")
     try:
         content, media = register.sheet_layout_file(part_id, kind)
@@ -1103,6 +1103,32 @@ async def tool_component_upload(design_id: int, comp_id: int, file: UploadFile =
     if len(content) > MAX_UPLOAD_MB * 1024 * 1024:
         raise HTTPException(413, f"The file is larger than {MAX_UPLOAD_MB} MB.")
     return _td(lambda st: st.upload_component(design_id, comp_id, content, file.filename or "upload.step", note))
+
+
+@app.get("/api/tool-designs/{design_id}/drawing-data")
+def tool_drawing_data_get(design_id: int):
+    return _td(lambda st: st.drawing_data_get(design_id))
+
+
+@app.put("/api/tool-designs/{design_id}/drawing-data")
+def tool_drawing_data_put(design_id: int, data: dict):
+    """data: {items: [{part_no, fields: {steel, hardness, ...}, notes: [...]}]}. Draft designs only; each change is kept in the revision history."""
+    return _td(lambda st: st.drawing_data_save(design_id, list(data.get("items") or [])))
+
+
+@app.get("/api/tool-designs/{design_id}/drawing-data.xlsx")
+def tool_drawing_data_xlsx(design_id: int):
+    content, name = _td(lambda st: st.drawing_data_xlsx(design_id))
+    return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.post("/api/tool-designs/{design_id}/drawing-data/upload")
+async def tool_drawing_data_upload(design_id: int, file: UploadFile = File(...)):
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_MB * 1024 * 1024:
+        raise HTTPException(413, f"The file is larger than {MAX_UPLOAD_MB} MB.")
+    return _td(lambda st: st.drawing_data_upload(design_id, content))
 
 
 @app.post("/api/tool-designs/{design_id}/components/{comp_id}/revert")

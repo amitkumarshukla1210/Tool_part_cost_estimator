@@ -1334,12 +1334,16 @@ def sheet_layout_result(part_id: int) -> dict:
 
 def sheet_layout_file(part_id: int, kind: str) -> tuple[bytes, str]:
     from . import sheet_layout
+    from . import drawing_data
     d, rev, fp, sl, res = _layout(part_id)
+    code = d["part_code"]
     if kind == "blank.dxf":
-        return sheet_layout.blank_dxf(fp, d["part_code"]), "application/dxf"
+        return sheet_layout.blank_dxf(fp, code, drawing_data.part_meta(part_id, f"{code} blank (flat pattern)", f"{code}-BLANK", rev["rev"], "1:1 (as drawn)")), "application/dxf"
     if kind == "strip.dxf":
-        return sheet_layout.strip_dxf(fp, sl, d["part_code"]), "application/dxf"
-    return sheet_layout.pack_pdf(fp, sl, res, d, rev["rev"]), "application/pdf"
+        return sheet_layout.strip_dxf(fp, sl, code, drawing_data.part_meta(part_id, f"{code} strip layout", f"{code}-STRIP", rev["rev"], "1:1 (as drawn)")), "application/dxf"
+    if kind == "strip.pdf":
+        return sheet_layout.strip_sheet_pdf(fp, sl, d, rev["rev"], drawing_data.part_meta(part_id, f"{code} strip layout", f"{code}-STRIP", rev["rev"])), "application/pdf"
+    return sheet_layout.pack_pdf(fp, sl, res, d, rev["rev"], drawing_data.part_meta(part_id, f"{code} sheet-metal tool pack", f"{code}-PACK", rev["rev"])), "application/pdf"
 
 
 def _piece_inputs(v, where):

@@ -81,7 +81,7 @@ def _place(outline, dx, dy, rot=False):
     return [[(y if rot else x) + dx, (x if rot else y) + dy] for x, y in outline]
 
 
-def blank_dxf(fp: dict, part_code: str) -> bytes:
+def blank_dxf(fp: dict, part_code: str, meta: dict | None = None) -> bytes:
     doc = ezdxf.new("R2010")
     doc.layers.add("CUT", color=7)
     doc.layers.add("DIM", color=3)
@@ -92,6 +92,10 @@ def blank_dxf(fp: dict, part_code: str) -> bytes:
     msp.add_linear_dim(base=(0, -12), p1=(0, 0), p2=(fp["length_mm"], 0), dimstyle="EZDXF").render()
     msp.add_linear_dim(base=(-12, 0), p1=(0, 0), p2=(0, fp["width_mm"]), angle=90, dimstyle="EZDXF").render()
     msp.add_text(f"{part_code} blank", dxfattribs={"layer": "DIM", "height": 4}).set_placement((0, fp["width_mm"] + 8))
+    from . import drawing_sheet
+    meta = meta or drawing_sheet.sheet_meta(None, [], f"{part_code} blank (flat pattern)", f"{part_code}-BLANK", "A", "1:1 (as drawn)")
+    drawing_sheet.dxf_title_block(doc, msp, 0.0, -45.0 - 12 * max(1, len(meta["history"])) * 0, meta, max(1.0, fp["length_mm"] / 150),
+                                  [f"Blank {fp['length_mm']:.2f} x {fp['width_mm']:.2f} mm, area {fp['area_mm2']:.0f} mm2 - {fp['method']}"])
     return _dxf_bytes(doc)
 
 
@@ -109,7 +113,7 @@ def strip_cells(fp: dict, sl: dict, count: int = 5):
            [[_place(h, i * v["pitch_mm"] + v["bridge_mm"] / 2, v["edge_mm"], rot) for h in fp["holes"]] for i in range(count)]
 
 
-def strip_dxf(fp: dict, sl: dict, part_code: str) -> bytes:
+def strip_dxf(fp: dict, sl: dict, part_code: str, meta: dict | None = None) -> bytes:
     v = sl["best"]["values"]
     doc = ezdxf.new("R2010")
     msp = doc.modelspace()
@@ -125,10 +129,14 @@ def strip_dxf(fp: dict, sl: dict, part_code: str) -> bytes:
     msp.add_linear_dim(base=(0, -14), p1=(0, 0), p2=(v["pitch_mm"], 0), dimstyle="EZDXF").render()
     msp.add_linear_dim(base=(-14, 0), p1=(0, 0), p2=(0, v["strip_width_mm"]), angle=90, dimstyle="EZDXF").render()
     msp.add_text(f"{part_code} strip, feed {sl['best']['feed']}, pitch {v['pitch_mm']:.1f}", dxfattribs={"height": 4}).set_placement((0, v["strip_width_mm"] + 8))
+    from . import drawing_sheet
+    meta = meta or drawing_sheet.sheet_meta(None, [], f"{part_code} strip layout", f"{part_code}-STRIP", "A", "1:1 (as drawn)")
+    drawing_sheet.dxf_title_block(doc, msp, 0.0, -50.0, meta, max(1.0, n * v["pitch_mm"] / 300),
+                                  [f"Feed {sl['best']['feed']}  pitch {v['pitch_mm']:.2f}  strip width {v['strip_width_mm']:.2f}  stations {n}  utilisation {v['utilisation_pct']:.1f} %"])
     return _dxf_bytes(doc)
 
 
-def pack_pdf(fp: dict, sl: dict, res: dict, part: dict, rev: str) -> bytes:
+def pack_pdf(fp: dict, sl: dict, res: dict, part: dict, rev: str, meta: dict | None = None) -> bytes:
     """Tool drawing pack: dimensioned blank, strip layout, simplified stage sketches, forces."""
     from reportlab.graphics.shapes import Drawing, Line, PolyLine, String
     from reportlab.lib.pagesizes import A4, landscape
@@ -164,7 +172,9 @@ def pack_pdf(fp: dict, sl: dict, res: dict, part: dict, rev: str) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=14 * mm, rightMargin=14 * mm, topMargin=12 * mm,
                             bottomMargin=12 * mm, title=f"Design to Cost — Tool pack {part['part_code']}", author="Design to Cost")
-    head = [Paragraph("SHEET-METAL TOOL PACK", ParagraphStyle("k", parent=ss["Normal"], textColor=theme["brand"], fontSize=8)),
+    from . import drawing_sheet
+    meta = meta or drawing_sheet.sheet_meta(None, [], f"{part['part_code']} tool pack", f"{part['part_code']}-PACK", rev)
+    head = [drawing_sheet.flow_title(meta, theme, 267), Spacer(1, 3 * mm), Paragraph("SHEET-METAL TOOL PACK", ParagraphStyle("k", parent=ss["Normal"], textColor=theme["brand"], fontSize=8)),
             Paragraph(f"{part['part_code']} · {part['name']}", h1),
             Paragraph(f"Rev {rev} · {res['material']} · thickness {res['features']['t']:g} mm · {fp['method']}", note)]
     if res["is_example"] or sl["is_example"]:
@@ -205,5 +215,111 @@ def pack_pdf(fp: dict, sl: dict, res: dict, part: dict, rev: str) -> bytes:
     story += [Spacer(1, 3 * mm), _table([["#", "Operation", "Force (t)", "Stage weight (g)"]] +
               [[str(o["n"]), o["name"], f"{o['force_t']:.1f}", f"{o['stage_weight_g']:.1f}"] for o in res["operations"]], theme, [15 * mm, 80 * mm, 30 * mm, 40 * mm])]
     story.append(Paragraph("Bend and draw stages are shown as the flat blank: the sketches are not formed-shape drawings.", note))
+    story += [Paragraph("Revision history", h2), drawing_sheet.flow_history(meta, theme, 267)]
     doc.build(story)
+    return buf.getvalue()
+
+
+def strip_sheet_pdf(fp: dict, sl: dict, part: dict, rev: str, meta: dict | None = None) -> bytes:
+    """The strip layout as one A3 drawing to scale: strip with blanks, pilots and dimensions, the blank, the data table, notes and the title block
+    (logo, name, release date, approved by, projection, revision history)."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A3, landscape
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas
+    from reportlab.platypus import Paragraph, Table, TableStyle
+    from . import drawing_sheet
+    from .pdf_report import _theme
+    theme = _theme()
+    code = part["part_code"]
+    meta = meta or drawing_sheet.sheet_meta(None, [], f"{code} strip layout", f"{code}-STRIP", rev)
+    v = sl["best"]["values"]
+    n = int(v["stations"])
+    show = min(n, 8)
+    total_l = max(show * v["pitch_mm"], v["pitch_mm"])
+    area_w, area_h = 380.0, 165.0                      # mm on the sheet for the strip
+    scales = [1, 2, 2.5, 5, 10, 20, 25, 50, 100]
+    sc = next((1 / k for k in scales if (total_l + 2 * 15) / k <= area_w and (v["strip_width_mm"] + 35) / k <= area_h), 1 / 100)
+    ratio = f"1:{round(1 / sc):g}"
+    meta = dict(meta, scale=ratio)
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=landscape(A3))
+    c.setTitle(f"Design to Cost - strip layout {code}")
+    c.setStrokeColor(theme["border"]); c.setLineWidth(0.6)
+    c.rect(8 * mm, 8 * mm, 404 * mm, 281 * mm)
+    ox, oy = 22.0, 108.0                               # mm: strip origin (lower-left)
+
+    def poly(pts, color=None, w=0.5, close=True):
+        c.setStrokeColor(color or theme["ink"]); c.setLineWidth(w)
+        p = c.beginPath()
+        p.moveTo((ox + pts[0][0] * sc) * mm, (oy + pts[0][1] * sc) * mm)
+        for x, y in pts[1:]:
+            p.lineTo((ox + x * sc) * mm, (oy + y * sc) * mm)
+        if close:
+            p.close()
+        c.drawPath(p, stroke=1, fill=0)
+    poly([(0, 0), (show * v["pitch_mm"], 0), (show * v["pitch_mm"], v["strip_width_mm"]), (0, v["strip_width_mm"])], w=0.8)
+    outs, hs = strip_cells(fp, sl, show)
+    for o, hh in zip(outs, hs):
+        poly(o, w=0.6)
+        for h in hh:
+            poly(h, w=0.4)
+    c.setStrokeColor(colors.HexColor("#b91c1c")); c.setLineWidth(0.4)
+    for i in range(show + 1):
+        c.circle((ox + i * v["pitch_mm"] * sc) * mm, (oy + v["edge_mm"] / 2 * sc) * mm, max(v["pilot_dia_mm"] / 2 * sc, 0.4) * mm)
+    # dimensions
+    c.setStrokeColor(theme["brand"]); c.setFillColor(theme["brand"]); c.setFont("Helvetica", 7.5); c.setLineWidth(0.3)
+    y = (oy - 8) * mm
+    c.line(ox * mm, y, (ox + v["pitch_mm"] * sc) * mm, y)
+    c.drawCentredString((ox + v["pitch_mm"] * sc / 2) * mm, y - 3.5 * mm, f"pitch {v['pitch_mm']:.2f}")
+    x = (ox - 8) * mm
+    c.line(x, oy * mm, x, (oy + v["strip_width_mm"] * sc) * mm)
+    c.saveState(); c.translate(x - 1.5 * mm, (oy + v["strip_width_mm"] * sc / 2) * mm); c.rotate(90); c.drawCentredString(0, 0, f"strip width {v['strip_width_mm']:.2f}"); c.restoreState()
+    c.setFillColor(theme["ink"]); c.setFont("Helvetica-Bold", 11)
+    c.drawString(ox * mm, (oy + v["strip_width_mm"] * sc + 8) * mm, f"STRIP LAYOUT  {code} · {part['name']}")
+    c.setFont("Helvetica", 8)
+    c.drawString(ox * mm, (oy + v["strip_width_mm"] * sc + 3.5) * mm, f"Feed {sl['best']['feed']} · first {show} of {n} stations shown · scale {ratio} · material utilisation {v['utilisation_pct']:.1f} %")
+    # table and notes (right of the lower area), title block and history at the lower right
+    RX = 420 - 12 - 113
+    tb_rows = [("Part", f"{code} {part['name']}"[:46], "Strip rev", rev), ("Blank", f"{fp['length_mm']:.1f} × {fp['width_mm']:.1f} mm", "Area", f"{fp['area_mm2']:.0f} mm²"),
+               ("Feed", sl["best"]["feed"][:34], "Stations", str(n))]
+    th = drawing_sheet.pdf_title_block(c, 420 - 12, 12, meta, theme, tb_rows, width=113)
+    hh = drawing_sheet.pdf_history(c, RX, 12 + th + 3, meta["history"], theme, width=113)
+    rows = [["Item", "Value"], ["Pitch (mm)", f"{v['pitch_mm']:.2f}"], ["Bridge (mm)", f"{v['bridge_mm']:.2f}"], ["Edge margin (mm)", f"{v['edge_mm']:.2f}"],
+            ["Strip width (mm)", f"{v['strip_width_mm']:.2f}"], ["Stations", str(n)], ["Pilots", f"{int(v['pilots'])} × Ø{v['pilot_dia_mm']:.1f}"],
+            ["Utilisation (%)", f"{v['utilisation_pct']:.1f}"], ["Other feed utilisation (%)", f"{sl['other']['values']['utilisation_pct']:.1f}"]]
+    t = Table(rows, colWidths=[42 * mm, 30 * mm], rowHeights=5 * mm)
+    t.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 7.5), ("BACKGROUND", (0, 0), (-1, 0), theme["head"]), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                           ("GRID", (0, 0), (-1, -1), 0.2, theme["border"])]))
+    w, h = t.wrapOn(c, 0, 0)
+    t.drawOn(c, 15 * mm, 90 * mm - h)
+    c.setFont("Helvetica-Bold", 8); c.setFillColor(theme["ink"]); c.drawString(15 * mm, 91 * mm, "STRIP DATA")
+    ss = getSampleStyleSheet()
+    small = ParagraphStyle("s", parent=ss["Normal"], fontSize=7, leading=8.5)
+    notes = ["1. All dimensions in mm. Third-angle projection. Feed direction left to right.",
+             "2. Pitch, bridge and edge margin from the Strip rules (Master data); check against the die before cutting steel.",
+             f"3. {fp['method']}."] + sl["problems"]
+    c.setFont("Helvetica-Bold", 8); c.drawString(100 * mm, 91 * mm, "NOTES")
+    py = 88 * mm
+    for line in notes:
+        p = Paragraph(line, small)
+        w, h = p.wrapOn(c, 150 * mm, 30 * mm)
+        p.drawOn(c, 100 * mm, py - h)
+        py -= h + 1 * mm
+    # the blank, small, beside the notes
+    bs = min(80 / max(fp["length_mm"], 1), 38 / max(fp["width_mm"], 1))
+    bx, by = 200.0, 16.0
+    c.setStrokeColor(theme["ink"]); c.setLineWidth(0.5)
+    for pts in [fp["outline"]] + fp["holes"]:
+        p = c.beginPath()
+        p.moveTo((bx + pts[0][0] * bs) * mm, (by + pts[0][1] * bs) * mm)
+        for x, y in pts[1:]:
+            p.lineTo((bx + x * bs) * mm, (by + y * bs) * mm)
+        c.drawPath(p, stroke=1, fill=0)
+    c.setFont("Helvetica-Bold", 8); c.setFillColor(theme["ink"]); c.drawString(bx * mm, (by + fp["width_mm"] * bs + 3) * mm, "BLANK (flat pattern)")
+    c.setFont("Helvetica", 6); c.setFillColor(theme["grey"])
+    c.drawString(15 * mm, 9.2 * mm, "Design to Cost · concept-level strip layout from the Strip rules: check before cutting steel" + (" · EXAMPLE rules" if sl["is_example"] else ""))
+    c.showPage()
+    c.save()
     return buf.getvalue()

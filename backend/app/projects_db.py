@@ -301,6 +301,28 @@ tool_component_revs = Table(
     Index("ix_tool_component_revs_component", "component_id"),
 )
 
+tool_drawing_data = Table(
+    "tool_drawing_data", meta,
+    Column("id", Integer, primary_key=True),
+    Column("design_id", ForeignKey("tool_designs.id", ondelete="CASCADE"), nullable=False),
+    Column("part_no", String(80), nullable=False),     # a made part number, or "*" for the whole design (strip layout, assembly sheet)
+    Column("fields", JSON),                            # technical data typed over the class defaults: steel, hardness, heat_treatment, surface_treatment, tolerance_class, angular_tol, finish_ra
+    Column("notes", JSON),                             # extra note points printed on the drawing
+    Column("edited_by", String(100), default=""),
+    Column("edited_at", DateTime, default=now),
+    UniqueConstraint("design_id", "part_no", name="uq_drawing_data"),
+)
+
+tool_drawing_edits = Table(
+    "tool_drawing_edits", meta,
+    Column("id", Integer, primary_key=True),
+    Column("design_id", ForeignKey("tool_designs.id", ondelete="CASCADE"), nullable=False),
+    Column("part_no", String(80), nullable=False),
+    Column("summary", String(500), nullable=False),
+    Column("by", String(100), default=""),
+    Column("at", DateTime, default=now),
+)
+
 design_skills = Table(
     "design_skills", meta,
     Column("id", Integer, primary_key=True),

@@ -803,6 +803,25 @@ Use *Examples only* in the Rate library to work through them.
 
 ---
 
+## Technical data and title block on the 2D drawings (roadmap stage 28)
+
+**1. All the data to make the part is on the drawing.** Every tool part drawing (PDF and DXF) shows a *Technical data* table: **material grade, hardness, heat treatment, surface treatment, surface
+roughness Ra, general tolerances, raw stock, weight, quantity, edge break**, the **general tolerance tables of the class** (ISO 2768 f / m / c / v: linear size ranges and angles by the shorter leg),
+the route and the note points. The defaults come from the component class (Master data → *Component classes*) and the new master-data table *General tolerances* (EXAMPLE values: check them against
+your copy of the standard).
+
+**2. Review it, add note points, change it: download and upload.** On the tool-design page, *Technical data on the drawing* (select a part) is a form: change the grade, hardness, treatments, tolerance
+class, Ra, tolerance text and type your own **note points** (one per line). *BOM & PO → Drawing data sheet* downloads **one Excel row per made part**; change the yellow columns and **upload** it
+again: the PDF, the DXF, the bill of materials and the purchase orders (hardness, tolerance, steel, stock weight and price) follow. A grade must exist in *Tool materials*; the class is f, m, c or v. Only
+a **draft** design is changed; a released design is locked (start a new revision: the data is carried over). API: `GET / PUT /api/tool-designs/{id}/drawing-data`, `GET …/drawing-data.xlsx`,
+`POST …/drawing-data/upload`. The supplier ZIP contains the sheet.
+
+**3. Every 2D drawing has the same title block:** the **logo and the name "Design to Cost"**, **release date**, **approved by** (the person who released the design; a draft says *NOT RELEASED* and
+*DRAFT - NOT FOR PRODUCTION*), **projection** (third-angle symbol and text), drawing number, revision, scale and the **revision history** (drawing revisions with date, change, by and approved;
+every change of the technical data is logged). It is on the **tool part drawings** (PDF, DXF), the **tool assembly drawing** (PDF) and the **strip layout drawings** (the new A3 *strip layout*
+PDF, strip DXF, blank DXF, tool pack PDF; the release is that of the part's released sheet-metal tool design). The DXF carries the logo as vectors. *Sheet-layout files:*
+`GET /api/parts/{id}/sheet-layout/strip.pdf`.
+
 ## Machine, process parameters and design skills (roadmap stage 27)
 
 **1. The machine the tool runs on.** On the tool-design page *Generate new design* first asks: *Which machine will this tool run on?* Type what you know (clamp tonnage, platen or bolster size,

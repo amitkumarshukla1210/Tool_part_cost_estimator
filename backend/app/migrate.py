@@ -23,10 +23,10 @@ def _project_db() -> dict:
 
 
 def _seeds() -> dict:
-    from . import capacity_db, fea, foundry_design, sheet_compare, tool_components, tool_design, tool_internals, tool_review
+    from . import capacity_db, drawing_data, fea, foundry_design, sheet_compare, tool_components, tool_design, tool_internals, tool_review
     return {"machines_and_bases": capacity_db.extend(), "stage_rules": tool_design.seed(), "fea_parameters": fea.seed(),
             "components": tool_components.seed(), "details": tool_internals.seed(), "review": tool_review.seed(),
-            "foundry": foundry_design.seed(), "sheet_compare": sheet_compare.seed()}
+            "foundry": foundry_design.seed(), "sheet_compare": sheet_compare.seed(), "drawing_data": drawing_data.seed()}
 
 
 def _self_test() -> dict:

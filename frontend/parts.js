@@ -745,6 +745,7 @@ function layoutBlock(p) {
     ${l.strip.problems.map((x) => `<p class="note"><b>${esc(x)}</b></p>`).join("")}
     <p class="note">Download: <a class="link" href="/api/parts/${p.id}/sheet-layout/blank.dxf">Blank DXF</a> ·
       <a class="link" href="/api/parts/${p.id}/sheet-layout/strip.dxf">Strip DXF</a> ·
+      <a class="link" href="/api/parts/${p.id}/sheet-layout/strip.pdf">Strip layout drawing A3 (PDF)</a> ·
       <a class="link" href="/api/parts/${p.id}/sheet-layout/tool-pack.pdf">Tool pack PDF</a></p>`;
 }
 

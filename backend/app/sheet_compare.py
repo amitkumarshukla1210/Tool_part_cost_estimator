@@ -287,9 +287,10 @@ def package(part_id: int) -> tuple[bytes, str]:
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(f"{code}_progressive_vs_stage_comparison.xlsx", workbook(c))
         z.writestr(f"{code}_progressive_vs_stage_comparison.pdf", pdf(c))
-        z.writestr("layout/blank.dxf", sheet_layout.blank_dxf(fp, d["part_code"]))
-        z.writestr("layout/strip.dxf", sheet_layout.strip_dxf(fp, sl, d["part_code"]))
-        z.writestr("layout/strip_layout_and_tool_pack.pdf", sheet_layout.pack_pdf(fp, sl, res, d, rev["rev"]))
+        from . import design_pack
+        names = {"blank.dxf": "blank.dxf", "strip.dxf": "strip.dxf", "strip_layout.pdf": "strip_layout_drawing_A3.pdf", "tool_pack.pdf": "strip_layout_and_tool_pack.pdf"}
+        for n_, b_ in design_pack._layout_files("x", d, rev, fp, sl, res, "layout/").items():
+            z.writestr("layout/" + names[n_.split("/x_", 1)[1]], b_)
         for mode in MODES:
             data, _ = store.supplier_package(c["modes"][mode]["design_id"])
             with zipfile.ZipFile(io.BytesIO(data)) as inner:

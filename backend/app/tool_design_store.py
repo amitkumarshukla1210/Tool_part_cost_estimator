@@ -26,7 +26,7 @@ import cadquery as cq
 import numpy as np
 from sqlalchemy import func, select, update
 
-from . import (corrections, design_pack, design_skills, fea, file_store, foundry_design, geometry, machine_spec, master_data, mould_db, outputs3d, rates, register, register_setup,
+from . import (auth, corrections, design_pack, drawing_data, drawing_sheet, design_skills, fea, file_store, foundry_design, geometry, machine_spec, master_data, mould_db, outputs3d, rates, register, register_setup,
                tool_components, tool_design, tool_review)
 from . import projects_db as db
 from .register import RegisterError, ToolNotApplicable
@@ -377,12 +377,14 @@ def bill(design_id: int) -> dict:
     with db.engine().connect() as conn:
         d = _design_row(conn, design_id)
         comps = _comp_rows(conn, design_id)
+        over = drawing_data.stored(conn, design_id)
     made = {}
     for c in comps:
         if c["kind"] != "made":
             continue
         m = made.setdefault(c["part_no"], {"part_no": c["part_no"], "name": c["name"].split(":")[0] if c["instance"] > 1 else c["name"],
-                                           "cls": c["cls"], "stage_no": c["stage_no"], "rev": c["rev"], "qty": 0, "info": c["info"], "ids": []})
+                                           "cls": c["cls"], "stage_no": c["stage_no"], "rev": c["rev"], "qty": 0,
+                                           "info": drawing_data.apply(c["info"], over.get(c["part_no"]), d["country"], d["as_of"]), "ids": []})
         m["qty"] += 1
         m["ids"].append(c["id"])
         m["rev"] = max(m["rev"], c["rev"])
@@ -597,6 +599,11 @@ def new_revision(design_id: int, note: str = "") -> dict:
                                                                 info=c["info"], created_by=_user()))
     with db.engine().begin() as conn:
         tool_review.sync(conn, nid, "mould" if d["kind"] == "mould" else d["kind"], (d["summary"] or {}).get("facts", {}))
+        for r in conn.execute(select(db.tool_drawing_data).where(db.tool_drawing_data.c.design_id == design_id)).mappings().all():
+            conn.execute(db.tool_drawing_data.insert().values(design_id=nid, part_no=r["part_no"], fields=r["fields"], notes=r["notes"],
+                                                              edited_by=r["edited_by"], edited_at=r["edited_at"]))
+        for r in conn.execute(select(db.tool_drawing_edits).where(db.tool_drawing_edits.c.design_id == design_id).order_by(db.tool_drawing_edits.c.id)).mappings().all():
+            conn.execute(db.tool_drawing_edits.insert().values(design_id=nid, part_no=r["part_no"], summary=r["summary"], by=r["by"], at=r["at"]))
     check_design(nid)
     return get_design(nid)
 
@@ -622,7 +629,8 @@ def component_drawing(design_id: int, comp_id: int, fmt: str = "pdf") -> tuple[b
     with db.engine().connect() as conn:
         c0 = conn.execute(select(db.tool_components).where((db.tool_components.c.id == comp_id) & (db.tool_components.c.design_id == design_id))).mappings().first()
         d0 = _design_row(conn, design_id) if c0 else None
-    key = (db.engine().url.render_as_string(), comp_id, c0["rev"], c0["file_id"], fmt, d0["status"], d0["rev_label"]) if c0 else None
+        dv = _data_version(conn, design_id, c0["part_no"]) if c0 else None
+    key = (db.engine().url.render_as_string(), comp_id, c0["rev"], c0["file_id"], fmt, d0["status"], d0["rev_label"], d0["released_at"], dv) if c0 else None
     if key and key in _DRAWINGS:
         _DRAWINGS.move_to_end(key)
         return _DRAWINGS[key]
@@ -650,9 +658,110 @@ def _component_drawing(design_id: int, comp_id: int, fmt: str = "pdf") -> tuple[
     with db.engine().connect() as conn:
         sha = _file_row(conn, c["file_id"])["sha256"]
     comp = {"part_no": c["part_no"], "name": c["name"].split(":")[0], "rev": c["rev"], "qty": qty, "stage": c["stage_no"], "sha": sha}
+    with db.engine().connect() as conn:
+        over = drawing_data.stored(conn, design_id).get(c["part_no"])
+        hist = drawing_data.history(conn, design_id, c["part_no"])
+    info = drawing_data.apply(c["info"], over, d["country"], d["as_of"])
+    data = drawing_data.effective(info, over)
+    meta = drawing_sheet.sheet_meta(d, hist, comp["name"], c["part_no"], c["rev"], "", sha, bool(info.get("is_example")))
     if fmt == "dxf":
-        return tool_drawings.component_dxf(comp, c["info"], shape, head), f"{c['part_no']}_rev{c['rev']}.dxf"
-    return tool_drawings.component_pdf(comp, c["info"], shape, head), f"{c['part_no']}_rev{c['rev']}.pdf"
+        return tool_drawings.component_dxf(comp, info, shape, head, data, meta), f"{c['part_no']}_rev{c['rev']}.dxf"
+    return tool_drawings.component_pdf(comp, info, shape, head, data, meta), f"{c['part_no']}_rev{c['rev']}.pdf"
+
+
+def _data_version(conn, design_id: int, part_no: str):
+    """Changes with every edit of the technical data of one part: the drawing cache key."""
+    n = conn.execute(select(func.max(db.tool_drawing_edits.c.id)).where((db.tool_drawing_edits.c.design_id == design_id)
+                     & (db.tool_drawing_edits.c.part_no.in_([part_no, "*"])))).scalar()
+    return n or 0
+
+
+# ------------------------------------------------------------ technical data of the drawings (review, change, download, upload)
+
+def drawing_data_get(design_id: int) -> dict:
+    """The data printed on each made part's drawing, the defaults it started from and the stored changes."""
+    with db.engine().connect() as conn:
+        d = _design_row(conn, design_id)
+        comps = _comp_rows(conn, design_id)
+        over = drawing_data.stored(conn, design_id)
+    parts, seen = [], set()
+    for c in comps:
+        if c["kind"] != "made" or c["part_no"] in seen:
+            continue
+        seen.add(c["part_no"])
+        o = over.get(c["part_no"])
+        info = drawing_data.apply(c["info"], o, d["country"], d["as_of"])
+        qty = sum(1 for x in comps if x["part_no"] == c["part_no"])
+        parts.append({"part_no": c["part_no"], "name": c["name"].split(":")[0], "qty": qty, "rev": c["rev"], "component_id": c["id"],
+                      "defaults": drawing_data.defaults(c["info"]), "effective": {k: v for k, v in drawing_data.effective(info, o).items() if k in drawing_data.FIELDS or k == "notes"},
+                      "changed": bool(o and (o["fields"] or o["notes"])), "edited_by": (o or {}).get("edited_by"), "edited_at": (o or {}).get("edited_at"),
+                      "stock_kg": info["stock"]["weight_kg"], "material_cost": info["material_cost"]})
+    return {"design_id": design_id, "status": d["status"], "editable": d["status"] == "draft", "fields": drawing_data.LABELS, "parts": parts,
+            "tolerance_tables": {k: drawing_data.tolerance_table(k, "linear") for k in drawing_data.CLASSES},
+            "steels": sorted({r["code"] for r in mould_db.tables()["tool_materials"]})}
+
+
+def drawing_data_save(design_id: int, items: list[dict]) -> dict:
+    """items: [{part_no, fields: {...}, notes: [...]}]: replaces the stored data of those parts (an empty field goes back to the default)."""
+    changed = []
+    with db.engine().begin() as conn:
+        d = _require_draft(conn, design_id)
+        known = {c["part_no"] for c in _comp_rows(conn, design_id) if c["kind"] == "made"}
+        for it in items:
+            if it["part_no"] not in known:
+                raise RegisterError(f"Part {it['part_no']} is not a made part of this design.")
+            try:
+                r = drawing_data.save(conn, design_id, it["part_no"], it.get("fields"), it.get("notes"), _user())
+            except auth.AuthError as exc:
+                raise RegisterError(f"{it['part_no']}: {exc}") from None
+            if r:
+                changed.append(r)
+        if changed:
+            register._log(conn, "part", d["part_id"], "tool_drawing_data", {"version": d["version"], "parts": [c["part_no"] for c in changed]})
+    if changed:
+        check_design(design_id)
+    return {"changed": changed, "unchanged": len(items) - len(changed)}
+
+
+def drawing_data_xlsx(design_id: int) -> tuple[bytes, str]:
+    data = drawing_data_get(design_id)
+    d = get_design(design_id)
+    with db.engine().connect() as conn:
+        hist = []
+        for p in data["parts"]:
+            for h in drawing_data.history(conn, design_id, p["part_no"]):
+                hist.append(dict(h, part_no=p["part_no"]))
+        for h in drawing_data.history(conn, design_id, None):
+            hist.append(dict(h, part_no="(tool assembly)"))
+        over = drawing_data.stored(conn, design_id)
+    rows = [{"part_no": p["part_no"], "name": p["name"], "qty": p["qty"], "rev": p["rev"], "eff": p["effective"], "edited_by": p["edited_by"]} for p in data["parts"]]
+    code = _safe(d["summary"].get("part_code", f"design{design_id}"))
+    return drawing_data.workbook(design_id, rows, hist), f"{code}_v{d['version']}_rev{d['rev_label']}_drawing_data.xlsx"
+
+
+def drawing_data_upload(design_id: int, content: bytes) -> dict:
+    """Apply a changed drawing data sheet. Checked as a whole before anything is stored."""
+    sheet = drawing_data.read_workbook(content)
+    cur = {p["part_no"]: p for p in drawing_data_get(design_id)["parts"]}
+    unknown = [k for k in sheet if k not in cur]
+    if unknown:
+        raise RegisterError("Part number(s) not in this design: " + ", ".join(unknown[:5]) + ". Download the sheet again from this design.")
+    items = []
+    for part_no, row in sheet.items():
+        defaults = cur[part_no]["defaults"]
+        # a cell equal to the default is not stored as an override
+        def same(k, v):
+            if k == "finish_ra":
+                try:
+                    return float(v) == float(defaults[k])
+                except (TypeError, ValueError):
+                    return False
+            return str(v).strip() == str(defaults.get(k)).strip()
+        fields = {k: v for k, v in row["fields"].items() if not same(k, v)}
+        items.append({"part_no": part_no, "fields": fields, "notes": row["notes"]})
+    out = drawing_data_save(design_id, items)
+    out["parts_in_sheet"] = len(items)
+    return out
 
 
 def assembly_drawing(design_id: int) -> tuple[bytes, str]:
@@ -665,7 +774,9 @@ def assembly_drawing(design_id: int) -> tuple[bytes, str]:
     with db.engine().connect() as conn:
         d = _design_row(conn, design_id)
         head = _head(conn, d, _part_row(conn, d["part_id"]))
-    return tool_drawings.assembly_pdf(d, b, parts, head), f"{head['part_code']}_assembly_{d['status']}_{d['rev_label']}.pdf"
+        hist = drawing_data.history(conn, design_id, None)
+    meta = drawing_sheet.sheet_meta(d, hist, f"Tool assembly {head['part_code']}", f"{head['part_code']}-ASM", d["rev_label"])
+    return tool_drawings.assembly_pdf(d, b, parts, head, meta), f"{head['part_code']}_assembly_{d['status']}_{d['rev_label']}.pdf"
 
 
 # ------------------------------------------------------------ purchase-order pack
@@ -706,6 +817,15 @@ def supplier_package(design_id: int) -> tuple[bytes, str]:
             z.writestr(f"step/{c['part_no']}_rev{c['rev']}.step", component_step(design_id, c["id"])[0])
             z.writestr(f"drawings/{c['part_no']}_rev{c['rev']}.pdf", component_drawing(design_id, c["id"], "pdf")[0])
             z.writestr(f"dxf/{c['part_no']}_rev{c['rev']}.dxf", component_drawing(design_id, c["id"], "dxf")[0])
+        z.writestr("drawing_data/drawing_data_sheet.xlsx", drawing_data_xlsx(design_id)[0])
+        if d["kind"] != "mould":
+            try:                                          # sheet metal: the strip layout and blank drawings of the part, with the same title block
+                dp, rv, fp, sl, res = register._layout(d["part_id"])
+                names = {"blank.dxf": "blank.dxf", "strip.dxf": "strip.dxf", "strip_layout.pdf": "strip_layout_A3.pdf", "tool_pack.pdf": "tool_pack.pdf"}
+                for n_, b_ in design_pack._layout_files("x", dp, rv, fp, sl, res, "layout/").items():
+                    z.writestr("layout/" + names[n_.split("/x_", 1)[1]], b_)
+            except (ToolNotApplicable, RegisterError):
+                pass
         for kind in ("xlsx", "po-material", "po-machining", "po-bought-out", "assembly-pdf", "assembly-step"):
             content, name = po_file(design_id, kind)
             z.writestr((f"assembly/{name}" if kind.startswith("assembly") else f"po/{name}"), content)
@@ -715,7 +835,9 @@ def supplier_package(design_id: int) -> tuple[bytes, str]:
             "drawings/    manufacturing drawing (PDF) per made part\n"
             "dxf/         the same views and features as DXF\n"
             "assembly/    assembly STEP and the assembly sheet with the bill of materials\n"
-            "po/          Excel purchase pack and the three order documents (raw material, machining, bought-out)\n\n"
+            "po/          Excel purchase pack and the three order documents (raw material, machining, bought-out)\n"
+            "drawing_data/ the technical data of every part (material grade, hardness, tolerances, notes) as Excel\n"
+            "layout/      sheet metal: blank and strip layout drawings (A3 PDF, DXF)\n\n"
             "The 3D (STEP) file governs where it differs from a drawing. Concept-level tool design generated by Design to Cost: check before cutting steel.\n"
             + ("\nDRAFT: this design is not released. Do not order from it.\n" if d["status"] != "released" else "")))
     return buf.getvalue(), f"{code}_tool_v{d['version']}_rev{d['rev_label']}_{d['status']}_supplier_package.zip"

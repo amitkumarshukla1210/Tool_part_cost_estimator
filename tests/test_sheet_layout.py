@@ -52,7 +52,7 @@ def test_dxf_and_pdf_pack():
     fp = sheet_layout.flat_pattern(flat_plate(), GEOM, BLANK, 2.0)
     sl = sheet_layout.strip_layout(fp, 2.0, 2)
     doc = ezdxf.read(io.StringIO(sheet_layout.blank_dxf(fp, "P1").decode()))
-    assert len(list(doc.modelspace().query("LWPOLYLINE"))) == 5            # outline + 4 holes
+    assert len(list(doc.modelspace().query('LWPOLYLINE[layer=="CUT"]'))) == 5   # outline + 4 holes (the title block is on its own layer)
     strip = ezdxf.read(io.StringIO(sheet_layout.strip_dxf(fp, sl, "P1").decode()))
     assert len(list(strip.modelspace().query("CIRCLE"))) == 4              # stations + 1 pilots
 

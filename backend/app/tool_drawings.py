@@ -19,7 +19,7 @@ from . import outputs3d
 
 SCALES = [(1, 1), (1, 2), (1, 2.5), (1, 5), (1, 10), (1, 20), (1, 25), (1, 50), (1, 100)]
 PAGE_W, PAGE_H = 420.0, 297.0          # A3 landscape, mm
-VIEW_BOX = (15.0, 75.0, 275.0, 210.0)  # x, y, w, h of the area for the views (mm from the lower-left corner)
+VIEW_BOX = (15.0, 80.0, 275.0, 205.0)  # x, y, w, h of the area for the views (mm from the lower-left corner)
 
 
 def _scale_for(L, W, H) -> tuple:
@@ -63,8 +63,9 @@ def _group_holes(holes: list[dict]) -> list[dict]:
 
 # ------------------------------------------------------------ PDF
 
-def component_pdf(comp: dict, info: dict, shape: cq.Shape, head: dict) -> bytes:
-    """comp: {part_no, name, rev, qty, stage}; head: {part_code, part_name, tool, revision_label, status, country, project, date}."""
+def component_pdf(comp: dict, info: dict, shape: cq.Shape, head: dict, data: dict | None = None, meta: dict | None = None) -> bytes:
+    """comp: {part_no, name, rev, qty, stage}; head: {part_code, part_name, tool, revision_label, status, country, project, date};
+    data: effective technical data (drawing_data.effective); meta: title-block / release / revision history (drawing_sheet.sheet_meta)."""
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A3, landscape
     from reportlab.lib.units import mm
@@ -145,73 +146,99 @@ def component_pdf(comp: dict, info: dict, shape: cq.Shape, head: dict) -> bytes:
         balloon("top", o["x_mm"] + org[0] + o["length_mm"] / 2, o["y_mm"] + org[1] + o["width_mm"] / 2, o["id"], green)
     for p_ in feats["pockets"]:
         balloon("top", p_["x_mm"] + org[0] + p_["length_mm"] / 2, p_["y_mm"] + org[1] + p_["width_mm"] / 2, p_["id"], orange)
-    # tables on the right
+    # right column: the tables, above the revision history and the title block
+    from . import drawing_data, drawing_sheet
+    data = data or drawing_data.effective(info, None)
+    meta = meta or drawing_sheet.sheet_meta(None, [], comp["name"], comp["part_no"], comp["rev"], f"{n}:{d:g}", comp.get("sha", ""), bool(info.get("is_example")))
+    meta = dict(meta, scale=f"{n}:{d:g}", checksum=meta.get("checksum") or comp.get("sha", ""))
+    st = info["stock"]
+    tb_rows = [("Tool", head["tool"], "Stage", str(comp["stage"]) if comp.get("stage") else "-"),
+               ("Project / part", f"{head['project']} / {head['part_code']} {head['part_name']}"[:46], "Design", f"{head['status']} {head['revision_label']}"),
+               ("Material", data["steel"][:28], "Qty / tool", str(comp.get("qty", 1))),
+               ("Size (finished)", f"{L:g} × {W:g} × {H:g} mm", "Weight", f"{st['finished_weight_kg']:g} kg"),
+               ("STEP sha256", f"{meta['checksum'][:24]}", "Sheet", "1 / 1")]
+    tb_h = drawing_sheet.pdf_title_block(c, PAGE_W - 12, 12, meta, theme, tb_rows, width=113)
+    hist_h = drawing_sheet.pdf_history(c, PAGE_W - 12 - 113, 12 + tb_h + 3, meta["history"], theme, width=113)
+    y_min = 12 + tb_h + 3 + hist_h + 4
+    RX = PAGE_W - 12 - 113
+
     def table(rows, widths, y_top, title):
+        avail = y_top - 4 - y_min
+        cap = max(3, int(avail // 4.4))
+        if len(rows) > cap:
+            rows = rows[:cap - 1] + [[f"+{len(rows) - cap + 1} more: see the DXF / Excel"] + [""] * (len(rows[0]) - 1)]
         c.setFont("Helvetica-Bold", 8); c.setFillColor(theme["ink"])
-        c.drawString(295 * mm, y_top * mm, title)
+        c.drawString(RX * mm, y_top * mm, title)
         t = Table(rows, colWidths=[w * mm for w in widths], rowHeights=4.4 * mm)
         t.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 6.5), ("BACKGROUND", (0, 0), (-1, 0), theme["head"]),
                                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("GRID", (0, 0), (-1, -1), 0.2, theme["border"]),
                                ("LEFTPADDING", (0, 0), (-1, -1), 1.5), ("RIGHTPADDING", (0, 0), (-1, -1), 1.5),
                                ("TOPPADDING", (0, 0), (-1, -1), 0.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 0.5)]))
         w, h = t.wrapOn(c, 0, 0)
-        t.drawOn(c, 295 * mm, y_top * mm - 1.5 * mm - h)
+        t.drawOn(c, RX * mm, y_top * mm - 1.5 * mm - h)
         return y_top - (h / mm) - 8
     y = PAGE_H - 18
     hole_rows = _group_holes(feats["holes"])
     if hole_rows:
         rows = [["ID", "Ø", "Depth", "Thru", "Ax", "X", "Y", "Z", "Note"]] + [[r["id"], f"{r['dia']:g}", f"{r['depth']:g}", "yes" if r["through"] else "no", r["axis"],
-                f"{r['x']:.2f}", f"{r['y']:.2f}", f"{r['z']:.2f}", f"{r['thread']} tap" if r["thread"] and not r["through"] else ""] for r in hole_rows[:24]]
-        if len(hole_rows) > 24:
-            rows.append([f"+{len(hole_rows) - 24} more in the DXF / Excel", "", "", "", "", "", "", "", ""])
-        y = table(rows, [10, 12, 13, 10, 8, 19, 19, 19, 14], y, "HOLES  (position from datum O, mm)")
-    if feats["openings"]:
+                f"{r['x']:.2f}", f"{r['y']:.2f}", f"{r['z']:.2f}", f"{r['thread']} tap" if r["thread"] and not r["through"] else ""] for r in hole_rows]
+        y = table(rows, [9, 11, 12, 9, 7, 17, 17, 17, 14], y, "HOLES  (position from datum O, mm)")
+    if feats["openings"] and y - 4 > y_min + 14:
         rows = [["ID", "X", "Y", "Length", "Width", "Thru", "Contour"]] + [[o["id"], f"{o['x_mm']:.2f}", f"{o['y_mm']:.2f}", f"{o['length_mm']:.2f}",
-                f"{o['width_mm']:.2f}", "yes" if o.get("through") else "no", f"{o['perimeter_mm']:.1f}"] for o in feats["openings"][:14]]
-        y = table(rows, [11, 22, 22, 22, 22, 11, 19], y, "OPENINGS  (wire cut / profile; contour length mm)")
-    if feats["pockets"]:
+                f"{o['width_mm']:.2f}", "yes" if o.get("through") else "no", f"{o['perimeter_mm']:.1f}"] for o in feats["openings"]]
+        y = table(rows, [10, 20, 20, 20, 20, 10, 13], y, "OPENINGS  (wire cut / profile; contour length mm)")
+    if feats["pockets"] and y - 4 > y_min + 14:
         rows = [["ID", "X", "Y", "Length", "Width", "Depth"]] + [[p["id"], f"{p['x_mm']:.2f}", f"{p['y_mm']:.2f}", f"{p['length_mm']:.2f}",
-                f"{p['width_mm']:.2f}", f"{p['depth_mm']:.2f}"] for p in feats["pockets"][:12]]
-        y = table(rows, [11, 25, 25, 25, 25, 20], y, "POCKETS  (floor depth below the top face, mm)")
+                f"{p['width_mm']:.2f}", f"{p['depth_mm']:.2f}"] for p in feats["pockets"]]
+        y = table(rows, [10, 22, 22, 22, 22, 15], y, "POCKETS  (floor depth below the top face, mm)")
     radii = [f for f in info["features"]["fillets"] if f["radius_mm"] > 0][:8]
-    if radii:
+    if radii and y - 4 > y_min + 14:
         rows = [["R", "Type", "Length"]] + [[f"{f['radius_mm']:g}", "convex" if f["convex"] else "concave", f"{f['length_mm']:g}"] for f in radii]
         y = table(rows, [20, 25, 20], y, "RADII  (largest first)")
-    # notes
-    st = info["stock"]
-    notes = [f"1. All dimensions in mm. Datum O = minimum corner of the part. Third-angle projection. Dimensions are those of the 3D file whose checksum is in the title block.",
-             f"2. General tolerances: {info['tolerance']}.",
-             f"3. Material: {info['steel']}. Hardness: {info['hardness'] or 'as supplied'}. Surface finish Ra {info['finish_ra'] or 3.2} µm unless stated.",
-             f"4. Raw stock {st['size_mm'][0]:g} × {st['size_mm'][1]:g} × {st['size_mm'][2]:g} mm, {st['weight_kg']:g} kg (finished {st['finished_weight_kg']:g} kg).",
-             f"5. Route: {info['route']}.", "6. Break all sharp edges 0.3 × 45° unless stated. No marks on formed or sealing surfaces.",
-             "7. Mark the part number on a non-functional face. Material certificate EN 10204 3.1 with the steel."]
-    c.setFont("Helvetica-Bold", 8); c.setFillColor(theme["ink"]); c.drawString(295 * mm, (y) * mm, "NOTES")
-    py = (y - 3) * mm
+    # bottom-left strip: technical data, general tolerances, notes
+    sy, sh = 12.0, 60.0           # bottom and height of the strip, mm
+    def block(x, title, rows, widths, hdr=True):
+        c.setFont("Helvetica-Bold", 8); c.setFillColor(theme["ink"]); c.drawString(x * mm, (sy + sh) * mm, title)
+        t = Table(rows, colWidths=[w * mm for w in widths], rowHeights=4.6 * mm)
+        sty = [("FONTSIZE", (0, 0), (-1, -1), 6.8), ("GRID", (0, 0), (-1, -1), 0.2, theme["border"]), ("LEFTPADDING", (0, 0), (-1, -1), 1.5),
+               ("RIGHTPADDING", (0, 0), (-1, -1), 1.5), ("TOPPADDING", (0, 0), (-1, -1), 0.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 0.5)]
+        sty += [("BACKGROUND", (0, 0), (-1, 0), theme["head"]), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white)] if hdr else [("BACKGROUND", (0, 0), (0, -1), theme["alt"])]
+        t.setStyle(TableStyle(sty))
+        w_, h_ = t.wrapOn(c, 0, 0)
+        t.drawOn(c, x * mm, (sy + sh) * mm - 1.5 * mm - h_)
+        return h_ / mm
+    ra = data["finish_ra"]
+    block(15, "TECHNICAL DATA", [["Material grade", data["steel"]], ["Hardness", data["hardness"]], ["Heat treatment", data["heat_treatment"]],
+                                 ["Surface treatment", data["surface_treatment"]], ["Surface roughness", f"Ra {ra:g} µm unless stated"],
+                                 ["Gen. tolerance", data["general_tolerance_text"][:42]],
+                                 ["Raw stock", f"{st['size_mm'][0]:g} × {st['size_mm'][1]:g} × {st['size_mm'][2]:g} mm"],
+                                 ["Weight", f"{st['weight_kg']:g} kg raw · {st['finished_weight_kg']:g} kg finished"],
+                                 ["Quantity", f"{comp.get('qty', 1)} per tool"], ["Edges", "Break 0.3 × 45° unless stated"]], [26, 64], hdr=False)
+    block(110, f"TOLERANCES ISO 2768-{data['tolerance_class']} (± mm)",
+          [["Linear size", "±"]] + [[r["range"], r["value"]] for r in data["linear_table"]], [30, 14])
+    block(160, "ANGLES (±, shorter leg mm)", [["Shorter leg", "±"]] + [[r["range"], r["value"]] for r in data["angular_table"]], [28, 16])
+    # notes: the fixed ones, then the reviewer's note points
+    notes = ["1. All dimensions in mm. Datum O = minimum corner of the part. Dimensions are those of the 3D file whose checksum is in the title block.",
+             f"2. Route: {info['route']}.", "3. No marks on formed or sealing surfaces. Mark the part number on a non-functional face.",
+             "4. Material certificate EN 10204 3.1 with the steel."]
     if any(views[k].get("simplified") for k in ("front", "top", "right")):
-        notes.append("Views are simplified (bounding outline): this part is too complex for hidden-line removal in the time allowed. The 3D STEP file and the hole table govern.")
-    for line in notes:
+        notes.append("Views are simplified (bounding outline): too complex for hidden-line removal in the time allowed. The 3D STEP file and the hole table govern.")
+    notes += [f"{5 + i}. {t}" for i, t in enumerate(data["notes"])]
+    NX, NW = 206, 84
+    c.setFont("Helvetica-Bold", 8); c.setFillColor(theme["ink"]); c.drawString(NX * mm, (sy + sh) * mm, "NOTES")
+    py, floor = (sy + sh - 3) * mm, sy * mm
+    for i, line in enumerate(notes):
         p = Paragraph(line, small)
-        w, h = p.wrapOn(c, 118 * mm, 40 * mm)
-        p.drawOn(c, 295 * mm, py - h)
+        w, h = p.wrapOn(c, NW * mm, 40 * mm)
+        if py - h < floor + 4 * mm and i < len(notes) - 1:
+            c.setFont("Helvetica-Oblique", 6.5); c.setFillColor(colors.HexColor("#b91c1c"))
+            c.drawString(NX * mm, py - 3 * mm, f"+ {len(notes) - i} more note point(s): see the drawing data sheet (Excel)")
+            break
+        p.drawOn(c, NX * mm, py - h)
         py -= h + 1 * mm
-    # title block
-    tb = [["Part no.", comp["part_no"], "Rev", comp["rev"]],
-          ["Title", comp["name"], "Qty / tool", str(comp.get("qty", 1))],
-          ["Tool", head["tool"], "Stage", str(comp["stage"]) if comp.get("stage") else "-"],
-          ["Project / part", f"{head['project']} / {head['part_code']} {head['part_name']}", "Design", f"{head['status']} {head['revision_label']}"],
-          ["Material", f"{info['steel']}", "Scale", f"{n}:{d:g}"],
-          ["Size (finished)", f"{L:g} × {W:g} × {H:g} mm", "Date", head["date"]],
-          ["Weight", f"{st['finished_weight_kg']:g} kg", "Sheet", "1 / 1"],
-          ["STEP checksum", f"sha256 {comp.get('sha', '')[:24]}", "Match", "file = drawing"]]
-    t = Table(tb, colWidths=[24 * mm, 78 * mm, 22 * mm, 36 * mm], rowHeights=6.2 * mm)
-    t.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 8), ("GRID", (0, 0), (-1, -1), 0.4, theme["ink"]),
-                           ("BACKGROUND", (0, 0), (0, -1), theme["alt"]), ("BACKGROUND", (2, 0), (2, -1), theme["alt"]),
-                           ("FONTNAME", (1, 0), (1, 0), "Helvetica-Bold"), ("FONTSIZE", (1, 0), (1, 0), 11)]))
-    w, h = t.wrapOn(c, 0, 0)
-    t.drawOn(c, (PAGE_W - 12) * mm - w, 12 * mm)
     c.setFont("Helvetica", 6); c.setFillColor(theme["grey"])
-    c.drawRightString((PAGE_W - 12) * mm, 12 * mm + h + 1.5 * mm, "Design to Cost · concept-level tool drawing generated from the 3D model: the 3D file governs; check before cutting steel"
-                      + (" · EXAMPLE rates/rules" if info.get("is_example") else ""))
+    c.drawString(15 * mm, 9.2 * mm, "Design to Cost · concept-level tool drawing generated from the 3D model: the 3D file governs; check before cutting steel"
+                 + (" · EXAMPLE rates/rules" if info.get("is_example") else ""))
     c.showPage()
     c.save()
     return buf.getvalue()
@@ -219,7 +246,7 @@ def component_pdf(comp: dict, info: dict, shape: cq.Shape, head: dict) -> bytes:
 
 # ------------------------------------------------------------ DXF
 
-def component_dxf(comp: dict, info: dict, shape: cq.Shape, head: dict) -> bytes:
+def component_dxf(comp: dict, info: dict, shape: cq.Shape, head: dict, data: dict | None = None, meta: dict | None = None) -> bytes:
     import ezdxf
     doc = ezdxf.new("R2010")
     for name, color, lt in (("VISIBLE", 7, "CONTINUOUS"), ("HIDDEN", 8, "DASHED"), ("DIM", 3, "CONTINUOUS"), ("HOLES", 1, "CONTINUOUS"),
@@ -256,10 +283,21 @@ def component_dxf(comp: dict, info: dict, shape: cq.Shape, head: dict) -> bytes:
         view = _hole_view(h["axis"])
         u, v = _uv(view, (h["pos"][0] + org[0], h["pos"][1] + org[1], h["pos"][2] + org[2]))
         mark(view, u, v, f"{h['id']} Ø{h['dia']:g}x{h['depth']:g}{' thru' if h['through'] else ''}{' ' + h['thread'] + ' tap' if h.get('thread') and not h['through'] else ''}", h["dia"] / 2)
+    from . import drawing_data, drawing_sheet
+    data = data or drawing_data.effective(info, None)
+    meta = meta or drawing_sheet.sheet_meta(None, [], comp["name"], comp["part_no"], comp["rev"], "1:1 (as drawn)", comp.get("sha", ""), bool(info.get("is_example")))
+    meta = dict(meta, checksum=meta.get("checksum") or comp.get("sha", ""))
+    st = info["stock"]
     y = -30.0
-    notes = [f"{comp['part_no']} rev {comp['rev']}  {comp['name']}  qty {comp.get('qty', 1)}  STEP sha256 {comp.get('sha', '')[:24]}",
-             f"{info['steel']}  {info['hardness']}  stock {info['stock']['size_mm']} mm  {info['stock']['weight_kg']} kg",
-             f"Tolerances: {info['tolerance']}", f"Route: {info['route']}", f"Tool: {head['tool']}  design {head['status']} {head['revision_label']}"]
+    notes = [f"TECHNICAL DATA  {comp['part_no']} rev {comp['rev']}  {comp['name']}  qty {comp.get('qty', 1)}",
+             f"Material grade: {data['steel']}   Hardness: {data['hardness']}   Heat treatment: {data['heat_treatment']}   Surface treatment: {data['surface_treatment']}",
+             f"Surface roughness: Ra {data['finish_ra']:g} um unless stated   General tolerances: {data['general_tolerance_text']}",
+             "Linear (+/- mm): " + "  ".join(f"{r['range']}: {r['value']}" for r in data["linear_table"]),
+             "Angular (+/- by shorter leg, mm): " + "  ".join(f"{r['range']}: {r['value']}" for r in data["angular_table"]),
+             f"Raw stock {st['size_mm']} mm  {st['weight_kg']} kg (finished {st['finished_weight_kg']} kg)",
+             f"Route: {info['route']}", f"Tool: {head['tool']}  design {head['status']} {head['revision_label']}"]
+    for i, t in enumerate(data["notes"], start=1):
+        notes.append(f"NOTE {i}: {t}")
     for t in notes:
         msp.add_text(t, dxfattribs={"height": 3.5, "layer": "TEXT"}).set_placement((0, y))
         y -= 6
@@ -271,6 +309,7 @@ def component_dxf(comp: dict, info: dict, shape: cq.Shape, head: dict) -> bytes:
         msp.add_text(f"{p['id']} {p['length_mm']}x{p['width_mm']} depth {p['depth_mm']} at X{p['x_mm']} Y{p['y_mm']}",
                      dxfattribs={"height": 3, "layer": "TEXT"}).set_placement((0, y))
         y -= 5
+    drawing_sheet.dxf_title_block(doc, msp, 0.0, y - 25, meta, 1.0)
     s = io.StringIO()
     doc.write(s)
     return s.getvalue().encode()
@@ -278,7 +317,7 @@ def component_dxf(comp: dict, info: dict, shape: cq.Shape, head: dict) -> bytes:
 
 # ------------------------------------------------------------ assembly sheet
 
-def assembly_pdf(design: dict, bill: dict, parts: list[dict], head: dict) -> bytes:
+def assembly_pdf(design: dict, bill: dict, parts: list[dict], head: dict, meta: dict | None = None) -> bytes:
     """Exploded 3D picture with item numbers, the bill of materials, bought-out parts and assembly steps. parts = [{shape, group, color,
     item(no. or None)}] in assembly coordinates."""
     from reportlab.lib.pagesizes import A3, landscape
@@ -295,7 +334,10 @@ def assembly_pdf(design: dict, bill: dict, parts: list[dict], head: dict) -> byt
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(A3), leftMargin=14 * mm, rightMargin=14 * mm, topMargin=12 * mm, bottomMargin=12 * mm,
                             title=f"Design to Cost - assembly {head['part_code']}")
-    story = [Paragraph("TOOL ASSEMBLY", ParagraphStyle("k", parent=ss["Normal"], textColor=theme["brand"], fontSize=8)),
+    from . import drawing_sheet
+    meta = meta or drawing_sheet.sheet_meta(design, [], f"Tool assembly {head['part_code']}", f"{head['part_code']}-ASM", head["revision_label"])
+    story = [drawing_sheet.flow_title(meta, theme), Spacer(1, 3 * mm),
+             Paragraph("TOOL ASSEMBLY", ParagraphStyle("k", parent=ss["Normal"], textColor=theme["brand"], fontSize=8)),
              Paragraph(f"{head['tool']} - {head['part_code']} {head['part_name']}", h1),
              Paragraph(f"Design {head['status']} {head['revision_label']} · {head['date']} · tool country {head['country']} · "
                        f"{bill['totals']['made_parts']} made parts, {len(bill['standard'])} bought-out items", note),
@@ -313,6 +355,7 @@ def assembly_pdf(design: dict, bill: dict, parts: list[dict], head: dict) -> byt
     story.append(Paragraph("Assembly steps (in the toolroom)", h2))
     rows = [["Step", "Work", "Hours"]] + [[str(a["step"]), a["text"], f"{a['hours']:g}"] for a in bill["assembly"]]
     story.append(_table(rows, theme, [15 * mm, 300 * mm, 20 * mm]))
+    story += [Paragraph("Revision history", h2), drawing_sheet.flow_history(meta, theme)]
     doc.build(story)
     return buf.getvalue()
 

@@ -279,6 +279,15 @@ TABLES = {
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
     ]},
+    "general_tolerances": {"title": "General tolerances", "unique": ("tol_class", "kind", "from_mm"), "columns": [
+        col("tol_class", "Class (f, m, c, v of ISO 2768)"),
+        col("kind", "linear (± mm, by nominal size) or angular (± minutes, by shorter leg)"),
+        col("from_mm", "From size (mm, over)", "number"),
+        col("to_mm", "To size (mm, up to and including)", "number"),
+        col("value", "± value (mm for linear, arc minutes for angular)", "number"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
     "foundry_materials": {"title": "Foundry materials", "unique": ("material",), "columns": [
         col("material", "Material (Materials sheet, foundry)"),
         col("shrinkage_pct", "Pattern shrinkage (%)", "number"),
@@ -350,8 +359,9 @@ def _check(clean: dict) -> None:
     tool_internals.validate(clean)
     tool_review.validate(clean)
     process_params.validate(clean)
-    from . import design_skills
+    from . import design_skills, drawing_data
     design_skills.validate(clean)
+    drawing_data.validate(clean)
     from . import simulation
     for pt in PART_TYPES:
         env = simulation.sample_env(pt)

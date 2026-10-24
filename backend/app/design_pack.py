@@ -271,6 +271,17 @@ def _mould_video(before: dict, after: dict, tool_meshes: list, m3d: dict, mode: 
 
 # ------------------------------------------------------------ sheet metal
 
+def _layout_files(code: str, d: dict, rev: dict, fp: dict, sl: dict, res: dict, folder: str = "") -> dict:
+    """Blank and strip DXF, A3 strip layout drawing and tool pack, each with the logo / release / revision-history title block."""
+    from . import drawing_data, sheet_layout
+    pc = d["part_code"]
+    m = lambda title, no, scale="": drawing_data.part_meta(d["id"], title, no, rev["rev"], scale)
+    return {f"{folder}{code}_blank.dxf": sheet_layout.blank_dxf(fp, pc, m(f"{pc} blank (flat pattern)", f"{pc}-BLANK", "1:1 (as drawn)")),
+            f"{folder}{code}_strip.dxf": sheet_layout.strip_dxf(fp, sl, pc, m(f"{pc} strip layout", f"{pc}-STRIP", "1:1 (as drawn)")),
+            f"{folder}{code}_strip_layout.pdf": sheet_layout.strip_sheet_pdf(fp, sl, d, rev["rev"], m(f"{pc} strip layout", f"{pc}-STRIP")),
+            f"{folder}{code}_tool_pack.pdf": sheet_layout.pack_pdf(fp, sl, res, d, rev["rev"], m(f"{pc} sheet-metal tool pack", f"{pc}-PACK"))}
+
+
 def sheet_prepare(part_id: int, mode: str | None = None) -> dict:
     """Sheet-metal context with the model corrected (bend radii, minimum holes), flat pattern, strip and the stage design."""
     from . import sheet_layout, sheet_tools
@@ -355,9 +366,7 @@ def _sheet_pack(part_id: int, video: str) -> dict:
         force_n = (design["total_force_t"] if progressive else big["design_force_t"]) * 9806.65
         fea_res = fea.solve(die_block, force_n / (bbd.xlen * bbd.ylen), "top", master_data.parameters("sheet_metal"))
     files[f"{code}_stage_tool_drawings.pdf"] = outputs3d.drawing_pdf(stage_pages)
-    files[f"{code}_blank.dxf"] = sheet_layout.blank_dxf(fp, d["part_code"])
-    files[f"{code}_strip.dxf"] = sheet_layout.strip_dxf(fp, sl, d["part_code"])
-    files[f"{code}_tool_pack.pdf"] = sheet_layout.pack_pdf(fp, sl, res, d, rev["rev"])
+    files.update(_layout_files(code, d, rev, fp, sl, res))
     views = outputs3d.three_views(shape)
     notes = ([f"Corrected: " + "; ".join(f"{c['kind']} x{c['count']} to {c['value_mm']} mm" for c in corr["changes"] if c.get("count"))] if corr["changed"]
              else ["No change needed to the model."]) + [f"Blank {fp['length_mm']:.1f} × {fp['width_mm']:.1f} mm ({fp['method']})"] + [p["message"] for p in res["problems"][:2]]
