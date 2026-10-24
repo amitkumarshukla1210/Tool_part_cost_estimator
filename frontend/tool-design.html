@@ -30,6 +30,7 @@
           <li><a href="/rates">Rates</a></li>
           <li><a href="/master-data">Master data</a></li>
           <li><a href="/capacity">Capacity &amp; tools</a></li>
+          <li><a href="/skills">Skills</a></li>
           <li><a href="/backup">Backup</a></li>
           <li><a href="/help">Help</a></li>
         </ul>
@@ -63,6 +64,8 @@
         <nav class="tabs" id="tabs">
           <button type="button" data-tab="parts" class="on">Parts</button>
           <button type="button" data-tab="bom">BOM &amp; PO</button>
+          <button type="button" data-tab="machine">Machine</button>
+          <button type="button" data-tab="process" id="processBtn">Process</button>
           <button type="button" data-tab="review">Review</button>
           <button type="button" data-tab="compare" id="compareBtn" hidden>Progressive vs stage</button>
           <button type="button" data-tab="checks">Checks</button>
@@ -70,6 +73,8 @@
         </nav>
         <div id="tab-parts" class="tab"></div>
         <div id="tab-bom" class="tab" hidden></div>
+        <div id="tab-machine" class="tab" hidden></div>
+        <div id="tab-process" class="tab" hidden></div>
         <div id="tab-review" class="tab" hidden></div>
         <div id="tab-compare" class="tab" hidden></div>
         <div id="tab-checks" class="tab" hidden></div>
@@ -97,6 +102,21 @@
       </div>
     </section>
   </main>
+  <dialog id="machineDlg" class="card" style="max-width:760px;width:94vw">
+    <form method="dialog" id="machineForm">
+      <h3>Which machine will this tool run on?</h3>
+      <p class="note" id="machineHelp">The tool is designed to suit the machine: the base must pass the tie bars and fit the platen, the closed height must be in the machine's range, the locating ring and stroke must match. Type what you know; leave the rest empty.
+        <b>Skip</b> and the software designs the tool and tells you the machine it needs.</p>
+      <label>Take the size from a machine in your list <select id="machinePick"></select></label>
+      <div class="grid2" id="machineFields"></div>
+      <p class="status" id="machineStatus"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-outline" id="machineCancel">Cancel</button>
+        <button type="button" class="btn btn-outline" id="machineSkip">Skip: recommend the machine</button>
+        <button type="button" class="btn btn-primary" id="machineGo">Design for this machine</button>
+      </div>
+    </form>
+  </dialog>
   <script src="/static/common.js"></script>
   <script type="module" src="/static/tool-design.js"></script>
 </body>

@@ -266,7 +266,7 @@ async function upload(c) {
   status($("upStatus"), "Checking the solid and recalculating…");
   try {
     const r = await api(`/api/tool-designs/${design.id}/components/${c.id}/upload`, { method: "POST", body: fd });
-    status($("upStatus"), `Rev ${r.rev} applied to ${r.applied_to} part(s). Size ${r.size_mm.before.join("×")} → ${r.size_mm.after.join("×")}; ${r.checks.errors} error(s), ${r.checks.warnings} warning(s) in the check.`, r.checks.errors ? "error" : "");
+    status($("upStatus"), `Rev ${r.rev} applied to ${r.applied_to} part(s). Size ${r.size_mm.before.join("×")} → ${r.size_mm.after.join("×")}; ${r.checks.errors} error(s), ${r.checks.warnings} warning(s) in the check.` + (r.learned && r.learned.length ? ` Learned for your next designs: ${r.learned.map((l) => l.text).join("; ")}.` : ""), r.checks.errors ? "error" : "");
     await loadDesign(design.id, c.id, r.issues_for_this_part);
   } catch (err) {
     status($("upStatus"), err.message, "error");
@@ -399,7 +399,8 @@ function render() {
   $("banner").innerHTML = (d.status === "draft" ? `<div class="warn">DRAFT: not released. Correct and check it, then release it before you issue purchase orders.</div>`
     : d.status === "released" ? `<div class="info">Released as drawing revision ${esc(d.rev_label)} by ${esc(d.released_by)} on ${esc((d.released_at || "").slice(0, 10))}. To change a part, start a new revision.</div>`
     : `<div class="info">Superseded by a newer release.</div>`) + (s.example ? `<div class="warn">Uses example rates – not for negotiation</div>` : "") + (s.notes ? `<div class="info">${esc(s.notes)}</div>` : "");
-  partsTab(); bomTab(); reviewTab(); checksTab(); renderMeasure();
+  processLoaded = null;
+  partsTab(); bomTab(); machineTab(); reviewTab(); checksTab(); renderMeasure();
   $("compareBtn").hidden = d.kind !== "sheet_metal";
   if (d.kind === "sheet_metal") compareTab(false);
 }
@@ -430,8 +431,72 @@ async function loadDesign(id, keepSelected = null) {
 }
 
 $("version").addEventListener("change", (e) => e.target.value && loadDesign(Number(e.target.value)));
+// ---------------------------------------------------------------- the machine the tool runs on
+async function askMachine() {
+  // opens the form (prefilled with the saved machine); resolves true to design, false to cancel. Saving happens here.
+  const m = await api(`/api/parts/${partId}/machine`);
+  const spec = m.spec || {};
+  $("machinePick").innerHTML = `<option value="">— type the parameters —</option>` + m.machines.map((x) => `<option value="${esc(x.machine_id)}">${esc(x.name)} (${x.tonnage_t} t${x.length_mm ? `, ${x.length_mm} × ${x.width_mm} mm` : ""})</option>`).join("");
+  $("machinePick").value = spec.machine_id || "";
+  $("machineFields").innerHTML = m.fields.map((f) => `<label>${esc(f.label)} (${esc(f.unit)}) <input type="number" min="0" step="any" data-k="${f.key}" value="${spec[f.key] ?? ""}" /></label>`).join("");
+  $("machinePick").onchange = () => {
+    const x = m.machines.find((y) => y.machine_id === $("machinePick").value);
+    if (!x) return;
+    const set = (k, v) => { const el = document.querySelector(`#machineFields [data-k="${k}"]`); if (el && v) el.value = v; };
+    set("tonnage_t", x.tonnage_t); set("platen_l_mm", x.length_mm); set("platen_w_mm", x.width_mm); set("bolster_l_mm", x.length_mm); set("bolster_w_mm", x.width_mm);
+  };
+  const dlg = $("machineDlg");
+  status($("machineStatus"), "");
+  dlg.showModal();
+  return await new Promise((resolve) => {
+    const done = (v) => { dlg.close(); resolve(v); };
+    $("machineCancel").onclick = () => done(false);
+    $("machineSkip").onclick = async () => { try { await api(`/api/parts/${partId}/machine`, { method: "PUT", body: JSON.stringify({ spec: null }) }); done(true); } catch (e) { status($("machineStatus"), e.message, "error"); } };
+    $("machineGo").onclick = async () => {
+      const spec = { machine_id: $("machinePick").value || undefined };
+      document.querySelectorAll("#machineFields [data-k]").forEach((el) => { if (el.value !== "") spec[el.dataset.k] = el.value; });
+      try { await api(`/api/parts/${partId}/machine`, { method: "PUT", body: JSON.stringify({ spec }) }); done(true); } catch (e) { status($("machineStatus"), e.message, "error"); }
+    };
+  });
+}
+
+let processLoaded = null;
+async function processTab() {
+  const el = $("tab-process");
+  if (processLoaded === design.part_id) return;
+  el.innerHTML = `<p class="note">Working out the settings from the simulation …</p>`;
+  try {
+    const r = await api(`/api/parts/${design.part_id}/process-parameters`);
+    processLoaded = design.part_id;
+    el.innerHTML = `<p class="note">Settings for the best part quality, worked out from ${esc(r.source)}. ${esc(r.note)}</p>
+      <p><a class="link" href="/api/parts/${design.part_id}/process-parameters.xlsx">Excel</a> · <a class="link" href="/api/parts/${design.part_id}/process-parameters.pdf">PDF</a> · <a class="link" href="/api/parts/${design.part_id}/process-parameters.pptx">PowerPoint</a></p>
+      ${r.risks.length ? `<div class="warn"><b>Quality risks</b><ul>${r.risks.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : `<div class="info">No quality risk found by the simulation.</div>`}
+      <table class="grid"><thead><tr><th>Setting</th><th class="num">Value</th><th class="num">Range</th><th>Why</th></tr></thead><tbody>${r.parameters.map((p) => `<tr><td>${esc(p.label)}</td>
+        <td class="calc num"><b>${fmt(p.value, 2)}</b> ${esc(p.unit)}</td><td class="calc num">${p.min == null ? "" : `${fmt(p.min, 2)} – ${fmt(p.max, 2)}`}</td><td class="note">${esc(p.why)}</td></tr>`).join("")}</tbody></table>
+      ${r.is_example ? `<p class="note">The windows and rules behind these numbers are EXAMPLE values until you replace them (Master data → Process windows, Process parameters).</p>` : ""}`;
+  } catch (e) { el.innerHTML = `<p class="note">${esc(e.message)}</p>`; }
+}
+$("processBtn").addEventListener("click", processTab);
+
+function machineTab() {
+  const m = design.summary.machine;
+  const el = $("tab-machine");
+  if (!m) { el.innerHTML = `<p class="note">No machine information for this design.</p>`; return; }
+  const lab = (k) => (m.labels[k] ? `${esc(m.labels[k].label)} (${esc(m.labels[k].unit)})` : esc(k));
+  const near = m.nearest_machine;
+  el.innerHTML = `<p><b>${m.source === "typed" ? "Designed for the machine you typed" : "No machine typed: the tool needs this machine"}</b></p><p class="note">${esc(m.note)}</p>
+    ${m.fit.length ? `<table class="grid"><thead><tr><th>Check</th><th class="num">Tool needs</th><th class="num">Machine has</th><th></th></tr></thead><tbody>${m.fit.map((r) => `<tr><td>${esc(r.item)}<div class="note">${esc(r.note || "")}</div></td>
+      <td class="calc num">${esc(r.need)} ${esc(r.unit)}</td><td class="calc num">${esc(r.have)} ${esc(r.unit)}</td><td>${r.ok ? '<span class="badge ok">ok</span>' : '<span class="badge missing">not ok</span>'}</td></tr>`).join("")}</tbody></table>` : ""}
+    <h4>Machine parameters the finished tool needs</h4>
+    <table class="grid"><tbody>${Object.entries(m.recommended).map(([k, v]) => `<tr><td>${lab(k)}</td><td class="calc num">${v}</td></tr>`).join("")}</tbody></table>
+    ${near ? `<p class="note">Closest machine in your list: <b>${esc(near.name)}</b> (${near.tonnage_t} t).</p>` : `<p class="note">No machine in your list is big enough: add one under Master data → Machines.</p>`}
+    <p><button type="button" class="btn btn-outline small" id="machineAgain">Change the machine and design again</button></p>`;
+  $("machineAgain").onclick = () => $("generate").click();
+}
+
 $("generate").addEventListener("click", async () => {
   if (!partId) return;
+  try { if (!(await askMachine())) return; } catch (err) { status($("status"), err.message, "error"); return; }
   status($("status"), "Generating the tool design: simulation, 3D, drawings… (about a minute)");
   $("generate").disabled = true;
   try {

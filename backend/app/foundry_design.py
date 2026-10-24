@@ -39,7 +39,7 @@ SEED_RULES = [
     ("foundry", "screw_dia_mm", "10", "mm", "Socket head cap screw size"),
     ("foundry", "dowel_dia_mm", "10", "mm", "Dowel pin diameter"),
 ]
-FOUNDRY_ENV = ("part_weight_kg", "part_volume_cm3", "part_surface_cm2", "part_modulus_mm", "riser_modulus_factor", "part_l_mm", "part_w_mm", "part_h_mm")
+FOUNDRY_ENV = ("part_weight_kg", "part_volume_cm3", "part_surface_cm2", "part_modulus_mm", "riser_modulus_factor", "part_l_mm", "part_w_mm", "part_h_mm", "flask_l_mm", "flask_w_mm")
 
 
 def seed() -> dict:
@@ -112,7 +112,7 @@ def build(shape: cq.Shape, axis: str, material: str, facts: dict) -> dict:
     part_h = pb.zlen
     modulus = facts["part_volume_cm3"] * 1000 / max(facts["part_surface_cm2"] * 100, 1.0)
     env = {"part_weight_kg": facts["part_weight_kg"], "part_volume_cm3": facts["part_volume_cm3"], "part_surface_cm2": facts["part_surface_cm2"],
-           "part_modulus_mm": modulus, "riser_modulus_factor": mat["riser_modulus_factor"], "part_l_mm": pb.xlen, "part_w_mm": pb.ylen, "part_h_mm": part_h}
+           "part_modulus_mm": modulus, "riser_modulus_factor": mat["riser_modulus_factor"], "part_l_mm": pb.xlen, "part_w_mm": pb.ylen, "part_h_mm": part_h, "flask_l_mm": 0.0, "flask_w_mm": 0.0}
     v = tool_internals.values("foundry", env)
     big = max(pb.xlen, pb.ylen, pb.zlen) * 3 + 200
     comps = []
@@ -254,6 +254,7 @@ def build(shape: cq.Shape, axis: str, material: str, facts: dict) -> dict:
     add("Flask (reference)", "part", flask.cut(tool_design._box(L, W, 2 * (part_h / 2 + fl) + 2, x=x_lo + L / 2, y=0, z=-(part_h / 2 + fl) - 1).val()), (0.6, 0.6, 0.6), "part")
     notes.append(f"Pattern: shrinkage {mat['shrinkage_pct']:g} %, machining allowance {allowance:g} mm, minimum draft {mat['min_draft_deg']:g}° (draft added to {len(corr['faces_drafted'])} faces). "
                  f"Riser Ø{rd:g} × {rh:g} mm, sprue Ø{sp_d:g} mm; flask at least {L + 2 * fl:.0f} × {W + 2 * fl:.0f} mm.")
+    v = tool_internals.values("foundry", env | {"flask_l_mm": L + 2 * fl, "flask_w_mm": W + 2 * fl})      # again, now that the flask is known (machine recommendation)
     return {"components": comps, "notes": notes, "counts": counts, "rules": {k: round(x, 3) for k, x in v.items()}, "draft": {"before_cm2": corr["before"]["low_draft_cm2"],
             "after_cm2": corr["after"]["low_draft_cm2"]}, "pattern_ok": 1 if (ok or not allowance) else 0, "gating_ok": 1 if gating_ok else 0,
             "shrinkage_pct": mat["shrinkage_pct"], "allowance_mm": allowance, "flask_mm": [round(L + 2 * fl), round(W + 2 * fl)], "cores": len(core_solids)}

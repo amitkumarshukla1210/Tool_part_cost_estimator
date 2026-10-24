@@ -214,6 +214,16 @@ def workbook(design: dict) -> bytes:
             for pos in hh["positions_mm"]:
                 rows.append([m["part_no"], "hole", hh["dia_mm"], hh["depth_mm"], hh["axis"], "yes" if hh["through"] else "no", *pos])
     sheet("Features", ["Part no.", "Type", "Ø (mm)", "Depth (mm)", "Axis", "Through", "X from datum", "Y from datum", "Z from datum"], rows, [16, 8, 8, 10, 6, 8, 12, 12, 12])
+    # Machine: typed or recommended
+    mach = design["summary"].get("machine")
+    if mach:
+        mrows = [["Source", "typed by you" if mach["source"] == "typed" else "recommended by the software (nothing typed)"], ["", ""]]
+        mrows += [[mach["labels"].get(k, {}).get("label", k) + (f" ({mach['labels'][k]['unit']})" if mach["labels"].get(k, {}).get("unit") else ""), v] for k, v in mach["recommended"].items()]
+        if mach.get("nearest_machine"):
+            mrows += [["", ""], ["Closest machine in the machine list", f"{mach['nearest_machine']['name']} ({mach['nearest_machine']['tonnage_t']} t)"]]
+        if mach["fit"]:
+            mrows += [["", ""], ["Check", "Tool needs / machine has / result"]] + [[r["item"], f"{r['need']} / {r['have']} {r['unit']}: {'ok' if r['ok'] else 'NOT OK'}"] for r in mach["fit"]]
+        sheet("Machine", ["Item", "Value"], mrows, [56, 60])
     # Quote comparison
     qrows = []
     for m in made:

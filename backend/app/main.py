@@ -1007,6 +1007,52 @@ def _td(fn, *a, **k):
         raise HTTPException(400, str(exc)) from None
 
 
+def _machine(fn):
+    from . import machine_spec
+    try:
+        return fn(machine_spec)
+    except (ValueError, register.RegisterError) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/machine")
+def part_machine_get(part_id: int):
+    """The machine the part's tool will run on: the typed parameters, the form fields of its machine family and the machines to prefill from."""
+    return _machine(lambda m: m.get(part_id))
+
+
+@app.put("/api/parts/{part_id}/machine")
+def part_machine_put(part_id: int, data: dict):
+    """Save the machine parameters (empty or null = not typed: the software recommends the machine the tool needs)."""
+    return _machine(lambda m: m.save(part_id, data.get("spec") if "spec" in data else data))
+
+
+def _pp(fn):
+    from . import process_params
+    try:
+        return fn(process_params)
+    except (ValueError, register.RegisterError, register.ToolNotApplicable) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/process-parameters")
+def part_process_parameters(part_id: int):
+    """Settings for the best part quality (melt / mould temperature, times, pressures …) from the simulation of the part and the material window."""
+    return _pp(lambda m: m.compute(part_id))
+
+
+@app.get("/api/parts/{part_id}/process-parameters.{fmt}")
+def part_process_parameters_file(part_id: int, fmt: str):
+    from . import report_render
+    if fmt not in ("xlsx", "pdf", "pptx"):
+        raise HTTPException(404, "Unknown format.")
+    rep = _pp(lambda m: m.report(part_id))
+    content = {"xlsx": report_render.to_xlsx, "pdf": report_render.to_pdf, "pptx": report_render.to_pptx}[fmt](rep)
+    media = {"xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "pdf": "application/pdf",
+             "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"}[fmt]
+    return Response(content, media_type=media, headers={"Content-Disposition": f'attachment; filename="process_parameters_part_{part_id}.{fmt}"'})
+
+
 @app.get("/api/parts/{part_id}/tool-designs")
 def tool_designs_list(part_id: int):
     """Production tool designs (versions) of the part: drafts, the released one, superseded ones (roadmap stage 21)."""
@@ -1016,7 +1062,7 @@ def tool_designs_list(part_id: int):
 @app.post("/api/parts/{part_id}/tool-designs")
 def tool_designs_generate(part_id: int, data: dict | None = None):
     """Generate a new draft tool design: 3D components with part numbers, drawings, raw stock, machining and the bill of materials."""
-    return _td(lambda st: st.generate(part_id, str((data or {}).get("note") or ""), (data or {}).get("mode") or None))
+    return _td(lambda st: st.generate(part_id, str((data or {}).get("note") or ""), (data or {}).get("mode") or None, (data or {}).get("use_skills", True) is not False))
 
 
 @app.get("/api/tool-designs/{design_id}")
@@ -1336,6 +1382,35 @@ def parts_page():
 @app.get("/import")
 def import_page():
     return FileResponse(FRONTEND_DIR / "import.html")
+
+
+def _sk(fn):
+    from . import design_skills
+    try:
+        return fn(design_skills)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/skills")
+def skills_list():
+    """What the software has learned from your corrections (a user sees his / her own and the shared ones)."""
+    return _sk(lambda m: m.list_skills())
+
+
+@app.put("/api/skills/{sid}")
+def skills_update(sid: int, data: dict):
+    return _sk(lambda m: m.update_skill(sid, data))
+
+
+@app.delete("/api/skills/{sid}")
+def skills_delete(sid: int):
+    return _sk(lambda m: m.delete_skill(sid))
+
+
+@app.get("/skills")
+def skills_page():
+    return FileResponse(FRONTEND_DIR / "skills.html")
 
 
 @app.get("/api/version")

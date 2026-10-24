@@ -19,7 +19,7 @@ TAP_DRILL = {6: 5.0, 8: 6.8, 10: 8.5, 12: 10.2, 14: 12.0, 16: 14.0, 20: 17.5, 22
 EXAMPLE = "EXAMPLE rule - replace with your toolroom practice"
 MOULD_ENV = ("base_l_mm", "base_w_mm", "plate_a_mm", "plate_b_mm", "clamp_mm", "support_mm", "spacer_mm", "ejector_mm", "pocket_l_mm", "pocket_w_mm",
              "cavities", "part_h_mm", "projected_area_cm2", "pillar_dia_mm", "bush_od_mm", "bom_ejector_pins", "bom_return_pins", "bom_cooling_connectors",
-             "hot_runner", "slides", "lifters")
+             "hot_runner", "slides", "lifters", "clamp_t", "stack_h_mm", "mould_h_mm")
 SEED = [
     ("mould", "ejector_pin_dia_mm", "4 if part_h_mm < 40 else 6 if part_h_mm < 100 else 8", "mm", "Ejector pin diameter"),
     ("mould", "ejector_head_dia_mm", "ejector_pin_dia_mm + 4", "mm", "Ejector pin head diameter"),
@@ -104,12 +104,18 @@ def validate(clean: dict) -> None:
                 env[r["name"]] = 1.0
 
 
+def _skill(group: str, name: str, value: float, env: dict) -> float:
+    """The user's learned skill for this design value (Skill knobs, design_skills.py)."""
+    from . import design_skills
+    return design_skills.adjust(f"rule.{name}", value, env.get("base_l_mm") or env.get("part_l_mm"))
+
+
 def values(group: str, env: dict) -> dict:
     """Rule values of a tool group for a design (rules run in order; each can use the ones before it)."""
     out = dict(env)
     for r in sorted((r for r in mould_db.tables()["detail_rules"] if r["tool_group"] == group), key=lambda r: r["step"]):
         try:
-            out[r["name"]] = float(formula.evaluate(r["formula"], out))
+            out[r["name"]] = _skill(group, r["name"], float(formula.evaluate(r["formula"], out)), out)
         except (formula.FormulaError, ArithmeticError, ValueError) as exc:
             raise ValueError(f"Tool detail rule '{r['name']}' ({r['formula']}): {exc}") from None
     return out

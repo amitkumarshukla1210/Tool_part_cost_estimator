@@ -26,7 +26,7 @@ import cadquery as cq
 import numpy as np
 from sqlalchemy import func, select, update
 
-from . import (corrections, design_pack, fea, file_store, foundry_design, geometry, master_data, mould_db, outputs3d, rates, register, register_setup,
+from . import (corrections, design_pack, design_skills, fea, file_store, foundry_design, geometry, machine_spec, master_data, mould_db, outputs3d, rates, register, register_setup,
                tool_components, tool_design, tool_review)
 from . import projects_db as db
 from .register import RegisterError, ToolNotApplicable
@@ -120,7 +120,7 @@ def _prepare(part_id: int, mode: str | None = None) -> dict:
         for c in m3d["components"]:
             comps.append(dict(c, prefix="M-", stage=None))
         base_line = next((l for l in tool.get("lines", []) if l.get("is_base")), None)
-        summary = {"mould_base": m3d["base"], "cavities": m3d["cavities_total"], "notes": m3d["note"], "parting_z_mm": m3d["parting_z_mm"],
+        summary = {"mould_base": m3d["base"], "base_mm": m3d["base_mm"], "cavities": m3d["cavities_total"], "notes": m3d["note"], "parting_z_mm": m3d["parting_z_mm"],
                    "opening_axis": P["axis"], "tool_cost": round(tool["value"]), "tool_cost_inr": round(tool["value_inr"]),
                    "currency": tool["currency"], "catalogue_base": ({"item": base_line["element"], "price": round(base_line["total"])} if base_line else None),
                    "draft": ({"before_cm2": P["corr"]["before"]["low_draft_cm2"], "after_cm2": P["corr"]["after"]["low_draft_cm2"]} if P["corr"] else None),
@@ -142,6 +142,14 @@ def _prepare(part_id: int, mode: str | None = None) -> dict:
                  "draft_left_cm2": (P["corr"]["after"]["low_draft_cm2"] if P["corr"] else 0), "clamp_t": trial.get("force_t", 0),
                  "machine_t": mach.get("tonnage_t", 0), "tie_bar_fit": int(bool(tie) and min(base) <= 0.95 * tie), "cavities": m3d["cavities_total"]}
         summary["fea"] = {k: v for k, v in fea_res.items() if k != "vtk"}
+        spec = d.get("machine") or None
+        mach_sum = machine_spec.summary(P["part_type"], spec, machine_spec.recommend(P["part_type"], [det["rules"]]),
+                                        {"clamp_t": trial.get("force_t", 0), "base_l_mm": base[0], "base_w_mm": base[1], "mould_h_mm": m3d["mould_h_mm"], "riser_mm": m3d["riser_mm"]})
+        summary["machine"] = mach_sum
+        facts["machine_fit"] = mach_sum["fit_ok"]
+        tie_row = next((r for r in mach_sum["fit"] if r["item"] == "Tie-bar clear distance"), None)
+        if tie_row:
+            facts["tie_bar_fit"] = int(tie_row["ok"])
         summary["facts"] = facts
         fea_vtk = fea_res.get("vtk")
     elif group == "foundry":
@@ -161,9 +169,10 @@ def _prepare(part_id: int, mode: str | None = None) -> dict:
         env = {k: float(x) for k, x in F["rules"].items()} | {"screws_total": float(c3.get("screws", 0)), "dowels_total": float(c3.get("dowels", 0))}
         std = tool_components.standard_lines("foundry", env)
         steps = tool_components.assembly_steps("foundry", env)
-        facts = {"check_errors": 0, "check_warnings": 0, "pattern_ok": F["pattern_ok"], "gating_ok": F["gating_ok"], "cores": F["cores"]}
+        mach_sum = machine_spec.summary("foundry", d.get("machine") or None, machine_spec.recommend("foundry", [F["rules"]]), {})
+        facts = {"check_errors": 0, "check_warnings": 0, "pattern_ok": F["pattern_ok"], "gating_ok": F["gating_ok"], "cores": F["cores"], "machine_fit": mach_sum["fit_ok"]}
         summary = {"notes": " ".join(F["notes"]), "facts": facts, "foundry": {k: F[k] for k in ("shrinkage_pct", "allowance_mm", "flask_mm", "cores", "draft")},
-                   "rules": F["rules"], "example": True, "opening_axis": axis, "currency": "INR"}
+                   "rules": F["rules"], "example": True, "opening_axis": axis, "currency": "INR", "machine": mach_sum}
         P = {"axis": axis}
     else:
         P = design_pack.sheet_prepare(part_id, mode)
@@ -217,12 +226,20 @@ def _prepare(part_id: int, mode: str | None = None) -> dict:
                  "press_fit": int(all(s["press"].get("fits") for s in design["stages"])), "springs_placed": sp_placed,
                  "springs_wanted": sp_wanted or sp_placed, "form_undercuts": sum("undercut" in n for n in design.get("form_notes", [])),
                  "stages": len(design["stages"])}
+        spec = d.get("machine") or None
+        dets_rules = [x["rules"] for x in (design.get("_details") or {}).values()]
+        mach_sum = machine_spec.summary("sheet_metal", spec, machine_spec.recommend("sheet_metal", dets_rules), {
+            "design_force_t": max(s["design_force_t"] for s in design["stages"]),
+            "progressive": progressive, "die_set_l_mm": max(s["values"]["die_set_l_mm"] for s in design["stages"]),
+            "die_set_w_mm": max(s["values"]["die_set_w_mm"] for s in design["stages"]), "shut_height_mm": max(s["values"]["shut_height_mm"] for s in design["stages"]),
+            "shut_height_low_mm": min(s["values"]["shut_height_mm"] for s in design["stages"]), "riser_mm": design.get("riser_mm", 0)})
+        facts["machine_fit"] = mach_sum["fit_ok"]
         fea_vtk = fea_res.get("vtk")
         summary = {"fea": {k: v for k, v in fea_res.items() if k != "vtk"}, "facts": facts,
                    "mode": design["mode"], "stages": len(design["stages"]), "total_force_t": design["total_force_t"],
                    "presses": [s["press"].get("name") for s in design["stages"]], "notes": " ".join(design["warnings"] + design.get("form_notes", []) + [n for d_ in (design.get("_details") or {}).values() for n in d_["notes"]]),
                    "corrections": [c for c in P["corr"]["changes"] if c.get("count")], "steel_cost": design["steel_cost"],
-                   "currency": design["currency"], "example": design["is_example"], "thickness_mm": design["thickness_mm"]}
+                   "currency": design["currency"], "example": design["is_example"], "thickness_mm": design["thickness_mm"], "machine": mach_sum}
     return {"d": d, "group": group, "part_type": proc["part_type"], "code": code, "comps": comps, "std": std, "steps": steps,
             "summary": summary, "country": country, "month": month, "P": P, "vtk": fea_vtk}
 
@@ -242,9 +259,19 @@ def _stage_env(stage: dict) -> dict:
     return env
 
 
-def generate(part_id: int, note: str = "", mode: str | None = None) -> dict:
-    """Build a new draft design version of the part's tool. Returns the design (see get_design)."""
-    pre = _prepare(part_id, mode)
+def generate(part_id: int, note: str = "", mode: str | None = None, use_skills: bool = True) -> dict:
+    """Build a new draft design version of the part's tool. Returns the design (see get_design). The user's skills (design_skills.py) shape it unless use_skills is False."""
+    d0 = register.part_detail(part_id, with_rm=False)
+    proc = register_setup.processes().get(d0["process"]) or {}
+    token = design_skills.begin(_tool_group(proc.get("part_type", "")) if proc.get("part_type") else "mould", proc.get("part_type", ""), use_skills)
+    try:
+        pre = _prepare(part_id, mode)
+    finally:
+        used = design_skills.end(token)
+    pre["summary"]["skills"] = used
+    if used["applied"]:
+        pre["summary"]["notes"] = (pre["summary"].get("notes") or "") + " Your skills used: " + "; ".join(
+            f"{a['target'].split('.')[-1]} {a['from']:g} → {a['to']:g}" for a in used["applied"]) + "."
     code, part_type, country, month = pre["code"], pre["part_type"], pre["country"], pre["month"]
     # part numbers: identical parts share one, per prefix
     counters, numbers, infos = {}, {}, {}
@@ -478,7 +505,8 @@ def upload_component(design_id: int, comp_id: int, content: bytes, filename: str
             raise RegisterError("Only tool parts can be replaced.")
         peers = [dict(r) for r in conn.execute(select(db.tool_components).where((db.tool_components.c.design_id == design_id)
                                                & (db.tool_components.c.part_no == comp["part_no"]))).mappings()]
-        old_ref = _shape_of(_file_row(conn, comp["file_id"])).BoundingBox()
+        old_shape = _shape_of(_file_row(conn, comp["file_id"]))
+        old_ref = old_shape.BoundingBox()
         old_vol = comp["info"]["volume_cm3"]
         rev = _next_rev(comp["rev"])
         changed = []
@@ -497,10 +525,14 @@ def upload_component(design_id: int, comp_id: int, content: bytes, filename: str
     checks = check_design(design_id)
     mine = [i for i in checks["issues"] if comp["part_no"] in i["text"]]
     nb = new.BoundingBox()
+    try:
+        learned = design_skills.learn(d, comp, old_shape, new, (d["summary"].get("base_mm") or [None])[0])
+    except Exception:
+        learned = []                      # learning must never stop a correction
     return {"component": comp["part_no"], "rev": rev, "applied_to": len(changed), "volume_cm3": {"before": old_vol, "after": new_info["volume_cm3"]},
             "size_mm": {"before": comp["info"]["bbox_mm"], "after": new_info["bbox_mm"]},
             "stock": new_info.get("stock"), "material_cost": new_info.get("material_cost"), "machining_cost": new_info.get("machining_cost"),
-            "issues_for_this_part": mine, "checks": {k: checks[k] for k in ("errors", "warnings")}}
+            "issues_for_this_part": mine, "checks": {k: checks[k] for k in ("errors", "warnings")}, "learned": learned}
 
 
 def revert_component(design_id: int, comp_id: int, rev: str) -> dict:

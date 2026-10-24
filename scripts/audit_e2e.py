@@ -166,6 +166,20 @@ def run_case(client, case, pack=True) -> Audit:
         return f"{c['part_no']} re-imports, {shp.Volume() / 1000:.0f} cm³"
     a.step("10 Downloaded STEP opens again as a valid solid", step_valid)
 
+    def machine():
+        m = des["summary"].get("machine")
+        expect(m and m["source"] == "recommended" and m["recommended"] and m["fit_ok"] == -1, "no recommended machine in the design")
+        key = next(k for k in m["recommended"] if "tonnage" in k or "flask" in k)
+        return f"machine not typed: the tool needs {key} = {m['recommended'][key]:g}" + (f"; closest {m['nearest_machine']['name']}" if m.get("nearest_machine") else "")
+    a.step("10b Machine: recommended parameters of the finished tool", machine)
+
+    def process():
+        r = client.get(f"/api/parts/{pid}/process-parameters")
+        expect(r.status_code == 200 and r.json()["parameters"], r.text[:200])
+        j = r.json()
+        return f"{len(j['parameters'])} settings, {len(j['risks'])} quality warning(s)"
+    a.step("10c Process parameters for the best part quality", process)
+
     def mesh():
         m = client.get(f"{base}/mesh").json()
         expect(len(m["components"]) == len(des["components"]), "mesh components differ")

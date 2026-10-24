@@ -45,12 +45,13 @@ def _frames_tri(tri, colors, n, azim0, azim1, caption_fn, bounds, elev=22):
 
 # ------------------------------------------------------------ plastic and die casting
 
-def _mould_kwargs(tool: dict, rev: dict, part_h: float = 0.0, area_cm2: float = 0.0, axis: str | None = None) -> dict:
+def _mould_kwargs(tool: dict, rev: dict, part_h: float = 0.0, area_cm2: float = 0.0, axis: str | None = None, machine: dict | None = None) -> dict:
     qty = {l["element"]: l["quantity"] for l in tool.get("lines", []) if l.get("category") == "bought_out"}
     g = rev["geometry"]
     ax = axis or g.get("pull_direction", "z")
     pick = lambda *words: int(next((q for k, q in qty.items() if all(w in k.lower() for w in words)), 0))
-    return {"part_h": part_h or g["bbox_axes_mm"].get(ax, 0), "part_area_cm2": area_cm2 or g["projected_area_mm2"].get(ax, 0) / 100,
+    return {"machine": machine, "clamp_t": (tool.get("trial") or {}).get("force_t") or 0.0,
+            "part_h": part_h or g["bbox_axes_mm"].get(ax, 0), "part_area_cm2": area_cm2 or g["projected_area_mm2"].get(ax, 0) / 100,
             "bom": {"ejector_pins": pick("ejector"), "return_pins": pick("return pin") or 4, "cooling_connectors": pick("cooling"),
                     "hot_runner": pick("hot runner nozzle") > 0, "slides": pick("slide mechanism"), "lifters": pick("lifter")}}
 
@@ -66,7 +67,7 @@ def mould_prepare(part_id: int, production: bool = False) -> dict:
         z = corrections.to_z(shape, axis).BoundingBox()
         tool = register._tool_compute(part_id)
         parting = (z.zmin + z.zmax) / 2
-        m3d = tool_design.mould_3d(shape, axis, parting, tool, regions=None, production=production, **_mould_kwargs(tool, rev, axis=axis))
+        m3d = tool_design.mould_3d(shape, axis, parting, tool, regions=None, production=production, **_mould_kwargs(tool, rev, axis=axis, machine=d.get("machine")))
         return {"d": d, "rev": rev, "part_type": part_type, "shape": shape, "fixed": shape, "axis": axis, "corr": None, "tool": tool,
                 "m3d": m3d, "before": None, "after": None, "concept_res": {}, "facts": {}, "min_draft": None}
     d, rev, part_type, verts, tris, concept_res, facts = register._concept_inputs(part_id)
@@ -87,7 +88,7 @@ def mould_prepare(part_id: int, production: bool = False) -> dict:
     after = simulation.run(v2, t2, part_type, facts2, m2.projected_area_mm2)
     tool = register._tool_compute(part_id)
     m3d = tool_design.mould_3d(fixed, axis, corr["parting_z_mm"], tool, regions=concept_res.get("regions"), production=production,
-                               **_mould_kwargs(tool, rev, m2.bbox_axes_mm[axis], m2.projected_area_mm2[axis] / 100))
+                               **_mould_kwargs(tool, rev, m2.bbox_axes_mm[axis], m2.projected_area_mm2[axis] / 100, machine=d.get("machine")))
     return {"d": d, "rev": rev, "part_type": part_type, "shape": shape, "fixed": fixed, "axis": axis, "corr": corr, "tool": tool, "m3d": m3d,
             "before": before, "after": after, "concept_res": concept_res, "facts": facts, "min_draft": min_draft, "m2": m2, "v2": v2, "t2": t2,
             "verts": verts, "tris": tris, "density": density}
@@ -170,6 +171,11 @@ def _mould_pack(part_id: int, video: str) -> dict:
          "table": {"headers": ["Tool BOM line", "Group", "Cost"], "rows": [[l["element"], l.get("cost_group", ""), round(l.get("total", l.get("cost", 0)))] for l in tool["lines"]]},
          "images": [("Mould concept, open", img_tool)]},
     ]
+    try:                                    # settings for the best part quality, from the simulation and the material window
+        from . import process_params
+        sections.append(process_params.section(process_params.compute(part_id)))
+    except Exception:
+        pass
     report = {"title": f"{d['part_code']} - {d['name']}", "subtitle": f"Design pack · rev {rev['rev']} · {d['material']} · {d['process']}",
               "example": bool(tool.get("example", {}).get("any")), "kpis": kpis, "sections": sections}
     sections.append(_fea_section(fea_res, f"cavity pressure {bar:g} bar on the B side insert, fixed on its back"))
@@ -295,7 +301,7 @@ def sheet_prepare(part_id: int, mode: str | None = None) -> dict:
     fp = sheet_layout.flat_pattern(shape, geometry_used, blank, t)
     sl = sheet_layout.strip_layout(fp, t, len(res["operations"]))
     country = (d["tool_country"] or d["country"] or register_setup.settings()["default_country"]).upper()
-    design = tool_design.sheet_design(fp, sl, res, geometry_used, country, d["costing_month"] or rates.current_month())
+    design = tool_design.sheet_design(fp, sl, res, geometry_used, country, d["costing_month"] or rates.current_month(), d.get("machine"))
     return {"d": d, "rev": rev, "shape": shape, "shape0": shape0, "blank": blank, "res": res, "res0": res0, "t": t, "corr": corr,
             "geometry": geometry_used, "fp": fp, "sl": sl, "design": design, "country": country}
 
@@ -391,6 +397,11 @@ def _sheet_pack(part_id: int, video: str) -> dict:
     kpis.append(("Die block FEA (Gmsh + CalculiX)", _fea_line(fea_res)))
     if fea_res.get("vtk"):
         files[f"{code}_fea_result.vtk"] = fea_res.pop("vtk")
+    try:                                    # settings for the best part quality, from the simulation and the material window
+        from . import process_params
+        sections.append(process_params.section(process_params.compute(part_id)))
+    except Exception:
+        pass
     report = {"title": f"{d['part_code']} - {d['name']}", "subtitle": f"Design pack · rev {rev['rev']} · {d['material']} · sheet metal {design['mode'].replace('_', ' ')}",
               "example": design["is_example"], "kpis": kpis, "sections": sections}
     if video != "none":

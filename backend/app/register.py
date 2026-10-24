@@ -1596,7 +1596,7 @@ def _tool_compute(part_id: int, country: str | None = None) -> dict:
     country = (country or d["tool_country"] or d["country"] or register_setup.settings()["default_country"]).upper()
     as_of = d["costing_month"] or rates.current_month()
     inp = tool_cost.ToolInput(
-        part_type=part_type, cavities=typed.get("cavities") or cap["cavities_per_tool"],
+        part_type=part_type, machine=d.get("machine") or None, cavities=typed.get("cavities") or cap["cavities_per_tool"],
         part_length_mm=across[0], part_width_mm=across[1], part_height_mm=g["bbox_axes_mm"][pull],
         projected_area_cm2=g["projected_area_mm2"][pull] / 100, part_weight_g=t.value("weight"),
         part_volume_cm3=g["volume_cm3"], part_surface_cm2=g["surface_area_mm2"] / 100,
@@ -1671,7 +1671,7 @@ def _concept_inputs(part_id: int):
              "projected_area_cm2": g["projected_area_mm2"][axis] / 100, "volume_cm3": g["volume_cm3"],
              "cavities": cavities, "slides": typed.get("slides_per_cavity", res["slides"]),
              "lifters": typed.get("lifters_per_cavity", res["lifters"]), "undercut_area_cm2": res["undercut_area_cm2"],
-             "inserts": d["insert_count"]}
+             "inserts": d["insert_count"], "material": d["material"]}
     return d, rev, part_type, verts, tris, res, facts
 
 

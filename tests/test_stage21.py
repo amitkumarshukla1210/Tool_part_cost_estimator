@@ -213,7 +213,7 @@ def test_purchase_pack_workbook_pos_and_supplier_zip():
     pid, d = mould_design("PC-6")
     base = f"/api/tool-designs/{d['id']}"
     wb = load_workbook(io.BytesIO(client.get(f"{base}/files/xlsx").content))
-    assert wb.sheetnames == ["Cover", "BOM", "PO-1 Raw material", "PO-2 Machining", "Machining detail", "PO-3 Bought-out", "Assembly", "Inspection", "Features", "Quote comparison", "Cost summary"]
+    assert wb.sheetnames == ["Cover", "BOM", "PO-1 Raw material", "PO-2 Machining", "Machining detail", "PO-3 Bought-out", "Assembly", "Inspection", "Features", "Machine", "Quote comparison", "Cost summary"]
     ws = wb["PO-1 Raw material"]
     rows = [r for r in ws.iter_rows(values_only=True) if r[1] and str(r[1]).startswith("PC-6-M-")]
     assert len(rows) == 9 and all(r[3] and r[4] and r[9] for r in rows)

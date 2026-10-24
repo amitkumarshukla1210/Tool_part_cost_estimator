@@ -19,7 +19,7 @@ from . import projects_db as db
 EXAMPLE = "EXAMPLE - replace with your toolroom's release checklist"
 FACTS = ("check_errors", "check_warnings", "fea_ok", "fea_deflection_mm", "fea_limit_mm", "pins_placed", "pins_wanted", "cool_placed", "cool_wanted",
          "slides", "lifters", "undercut_unresolved", "draft_left_cm2", "tie_bar_fit", "clamp_t", "machine_t", "press_fit", "springs_placed",
-         "springs_wanted", "form_undercuts", "pattern_ok", "gating_ok", "cores", "plates_thickened", "stages", "hot_runner", "cavities")
+         "springs_wanted", "form_undercuts", "pattern_ok", "gating_ok", "cores", "plates_thickened", "stages", "hot_runner", "cavities", "machine_fit")
 SEED = [
     ("mould", "All solids are valid and no two parts overlap", "check_errors == 0", "The overlap / validity check found errors: see the Checks tab.", 1),
     ("mould", "Overlap warnings reviewed", "check_warnings == 0", "The overlap check has warnings: look at each and say why it is acceptable.", 0),
@@ -51,6 +51,11 @@ SEED = [
     ("foundry", "Toolmaker / foundry: parting line, core prints and cores accepted", "", "", 1),
     ("foundry", "Toolmaker / foundry: gating, riser and chill layout accepted for the alloy", "", "", 1),
     ("foundry", "Toolmaker: every drawing matches its 3D file (STEP checksum on the drawing)", "", "", 1),
+    ("mould", "The tool suits the machine you typed (tie bars, platen, mould height, opening, tonnage)", "machine_fit != 0", "Part of the typed machine does not suit the tool: see the Machine tab for the numbers.", 1),
+    ("mould", "Production: the machine (typed or recommended) is available for this tool", "", "", 1),
+    ("sheet_metal", "The press you typed suits the die (tonnage, bolster, shut height, stroke)", "machine_fit != 0", "Part of the typed press does not suit the die: see the Machine tab for the numbers.", 1),
+    ("sheet_metal", "Production: the press (typed or recommended) is available for this die", "", "", 1),
+    ("foundry", "The pattern set suits the flask you typed", "machine_fit != 0", "The typed flask is too small for the match plate or too low: see the Machine tab.", 0),
 ]
 
 

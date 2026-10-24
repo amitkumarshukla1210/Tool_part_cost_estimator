@@ -241,6 +241,44 @@ TABLES = {
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
     ]},
+    "process_windows": {"title": "Process windows", "unique": ("material",), "columns": [
+        col("material", "Material"),
+        col("melt_c", "Melt / metal / pour / preform temperature (°C)", "number"),
+        col("melt_min_c", "Lowest (°C)", "number"),
+        col("melt_max_c", "Highest (°C)", "number"),
+        col("mould_c", "Mould / die / water temperature (°C)", "number"),
+        col("mould_min_c", "Lowest (°C)", "number"),
+        col("mould_max_c", "Highest (°C)", "number"),
+        col("eject_c", "Part temperature at ejection (°C)", "number"),
+        col("dry_c", "Drying temperature (°C, 0 = none)", "number"),
+        col("dry_h", "Drying time (h)", "number"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "process_parameters": {"title": "Process parameters", "unique": ("part_type", "name"), "columns": [
+        col("part_type", "Part type", "part_type", PART_TYPES),
+        col("step", "Order", "number"),
+        col("name", "Name"),
+        col("formula", "Value (formula)", "formula"),
+        col("min_formula", "Lowest (formula)", "formula", required=False),
+        col("max_formula", "Highest (formula)", "formula", required=False),
+        col("unit", "Unit", required=False),
+        col("label", "Setting (or the warning text of a risk row)"),
+        col("why", "Why", required=False),
+        col("kind", "Kind (parameter or risk)"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "skill_knobs": {"title": "Skill knobs", "unique": ("tool_group", "component", "measure"), "columns": [
+        col("tool_group", "Tool group", "tool_group", ("mould", "sheet_metal", "foundry")),
+        col("component", "Component the user changes (name starts with)"),
+        col("measure", "What is measured (zlen = thickness, cool_dia / cool_count = cooling holes)"),
+        col("target", "What the software then does differently (base.* catalogue value, rule.* Tool detail rule, stage.* Stage tool rule)"),
+        col("mode", "factor or set"),
+        col("min_change_pct", "Ignore changes smaller than (%)", "number"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
     "foundry_materials": {"title": "Foundry materials", "unique": ("material",), "columns": [
         col("material", "Material (Materials sheet, foundry)"),
         col("shrinkage_pct", "Pattern shrinkage (%)", "number"),
@@ -306,11 +344,14 @@ def _check(clean: dict) -> None:
             raise MouldDbError(f"Strip rules ({r['name']}): {exc}") from None
         except ArithmeticError:
             senv[r["name"]] = 1.0
-    from . import tool_components, tool_design, tool_internals, tool_review
+    from . import process_params, tool_components, tool_design, tool_internals, tool_review
     tool_design.validate(clean)
     tool_components.validate(clean)
     tool_internals.validate(clean)
     tool_review.validate(clean)
+    process_params.validate(clean)
+    from . import design_skills
+    design_skills.validate(clean)
     from . import simulation
     for pt in PART_TYPES:
         env = simulation.sample_env(pt)

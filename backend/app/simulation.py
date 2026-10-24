@@ -27,12 +27,15 @@ SIM_VARS = concept.CONCEPT_VARS | {
     "flow_length_mm": "Flow length estimate = part_l + part_h (gate on one edge) (mm)",
     "shot_weight_g": "Shot weight = part weight (body only, inserts excluded) × cavities (g)",
     "inserts_per_shot": "Moulded-in inserts × cavities",
+    "melt_c_material": "Melt temperature of the material (Process windows), 0 if the material has no row (°C)",
+    "mould_c_material": "Mould temperature of the material (Process windows), 0 if none (°C)",
+    "eject_c_material": "Ejection temperature of the material (Process windows), 0 if none (°C)",
 }
 
 
 def sample_env(part_type: str) -> dict:
     """Variables a Simulation rule can use, with sample values (to check the rules)."""
-    env = {k: 1.0 for k in SIM_VARS}
+    env = {k: 1.0 for k in SIM_VARS} | {"melt_c_material": 230.0, "mould_c_material": 50.0, "eject_c_material": 90.0}
     env |= {k: float(v) for k, v in master_data.parameters(part_type).items() if isinstance(v, (int, float))}
     if part_type == "plastic":
         env |= {k: float(r["value"]) for k, r in register_setup.insert_rules().items()}
@@ -135,6 +138,9 @@ def run(vertices, triangles, part_type: str, facts: dict, projected_area_mm2: di
     wall = facts.get("wall_mm") or (pct(50) if len(meas) else 0)
     env = sample_env(part_type) | {k: 0.0 for k in SIM_VARS}
     env |= {k: float(x) for k, x in facts.items() if k in SIM_VARS}
+    from . import process_params
+    win = process_params.window(facts.get("material") or "")
+    env |= {"melt_c_material": win.get("melt_c", 0.0), "mould_c_material": win.get("mould_c", 0.0), "eject_c_material": win.get("eject_c", 0.0)}
     env |= {"wall_mm": wall, "max_wall_mm": pct(95) if len(meas) else wall,
             "min_wall_mm": pct(5) if len(meas) else wall,
             "flow_length_mm": facts["part_l"] + facts["part_h"],

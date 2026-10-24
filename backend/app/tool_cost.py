@@ -400,8 +400,12 @@ class _Run:
             self.miss("trial:machine", "Try-out machine", f"Master data → Parameters has no 'trial_machine_process' for {part_type}.", "t")
             mhr_node = "trial:machine"
         else:
-            fits = sorted((m for m in self.machines.values() if m["process"] == process and (m["tonnage_t"] or 0) >= force),
+            typed = self.inp.machine or {}
+            want = max(force, float(typed.get("tonnage_t") or 0))       # the typed machine's size counts: the try-out is on a machine of that size
+            fits = sorted((m for m in self.machines.values() if m["process"] == process and (m["tonnage_t"] or 0) >= want),
                           key=lambda m: m["tonnage_t"])
+            if typed.get("machine_id") in self.machines and (self.machines[typed["machine_id"]]["tonnage_t"] or 0) >= force:
+                fits = [self.machines[typed["machine_id"]]]
             if not fits:
                 biggest = max((m["tonnage_t"] or 0 for m in self.machines.values() if m["process"] == process), default=0)
                 self.miss("trial:machine", "Try-out machine",

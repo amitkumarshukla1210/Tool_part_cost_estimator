@@ -803,6 +803,28 @@ Use *Examples only* in the Rate library to work through them.
 
 ---
 
+## Machine, process parameters and design skills (roadmap stage 27)
+
+**1. The machine the tool runs on.** On the tool-design page *Generate new design* first asks: *Which machine will this tool run on?* Type what you know (clamp tonnage, platen or bolster size,
+tie-bar clear distance, smallest and largest mould or shut height, opening stroke, ejector stroke, locating ring; for a press tonnage, bolster, shut height range, stroke, cushion; for
+foundry the flask) or take the size from a machine of your list. The tool is **designed for that machine**: the mould base must pass between the tie bars and fit the platen and the mould height
+range (a smaller base is chosen, or the message says why none fits), a **riser plate** is added when the mould or die is lower than the machine takes, the locating ring has your diameter, the press of
+a sheet-metal die is your press. The **Machine** tab and the review show every check (tool needs / machine has / ok). **Skip** and the software designs the tool and tells you the machine
+it needs (tonnage, platen, tie bars, mould height range, opening and ejector stroke, press bolster and shut height, flask) and the closest machine in your list. The margins are
+*Tool detail rules* rows `rec_…`. The Excel purchase pack has a *Machine* sheet. API: `GET / PUT /api/parts/{id}/machine`.
+
+**2. Process parameters for the best part quality.** The **Process** tab (also Excel, PDF, PowerPoint, and a section of the design pack) gives the settings worked out from the **simulation**
+of the part and the **material window**: injection moulding (melt and mould temperature, fill time and rate, injection, hold pressure and time, cooling time, back pressure, clamp force, drying), die casting
+(metal and die temperature, slow and fast shot speed, intensification pressure, dwell, spray), sheet metal (press tonnage, blank-holder force, press speed, die clearance, springback
+overbend, draw speed), foundry (pouring temperature and time, solidification, shake-out), EPS (steam pressure, steaming and cooling time) and blow moulding (preform temperature, blow pressures, cooling).
+Each setting has a range and the reason; thin walls, sink-risk sections, flow length, low draft, undercuts and draw ratio become **quality warnings with the remedy**. Material windows
+and the rules are Master data → *Process windows* and *Process parameters* (EXAMPLE values until you replace them). The simulation now also uses the material's melt, mould and ejection temperature. API: `GET /api/parts/{id}/process-parameters`.
+
+**3. Design skills: the software learns from you.** Replace a tool part by your corrected STEP file (a thicker plate, other cooling holes) and the software keeps the change as a *skill*
+(*Skills* in the menu): plates become × the learned factor, cooling gets the diameter and number you drew. The next design of the same tool group and part type (a tool of 0.6 to 1.67
+times the size) uses it and says so ("Your skills used …"); a second correction averages with the first. Switch a skill off, change it, delete it, or (head of department, admin) share it with everybody; a design can
+be made without skills (`use_skills: false`). Which parts and measures teach the software is Master data → *Skill knobs*.
+
 ## Several users at the same time: roles and data access (roadmap stage 26)
 
 Run the tool as a web server for a team (`Start_Server.bat`, or `DTC_MODE=server`): every page needs a login. The first start creates the admin (user ID `admin`, the password you type

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design to Cost — Part Cost Estimator · My design skills</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/register.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img src="/theme/logo.png" alt="Design to Cost logo" />
+        <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/dashboard">Dashboard</a></li>
+          <li><a href="/parts">Parts</a></li>
+          <li><a href="/import">Import</a></li>
+          <li><a href="/bom-extract">Harness &amp; PCB</a></li>
+          <li><a href="/">Estimate</a></li>
+          <li><a href="/rates">Rates</a></li>
+          <li><a href="/master-data">Master data</a></li>
+          <li><a href="/capacity">Capacity &amp; tools</a></li>
+          <li><a href="/skills" class="active" aria-current="page">Skills</a></li>
+          <li><a href="/backup">Backup</a></li>
+          <li><a href="/help">Help</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section class="bg-grey page-head"><div class="container">
+      <div class="section-head"><p class="kicker">The software learns from you</p><h2>My design skills</h2>
+        <p>When you correct a tool part (a thicker plate, other cooling holes …) by uploading an edited STEP file on the tool-design page, the software keeps what you changed and uses it in the
+           next tool design of the same kind. Switch a skill off, change it, share it with everybody (head of department / admin) or delete it here.</p></div>
+      <p class="status" id="status"></p>
+    </div></section>
+    <section class="page-body"><div class="container"><div class="card"><div class="table-wrap"><table class="cost-table" id="skills"></table></div></div></div></section>
+  </main>
+  <footer><div class="container"><p class="footnote">© Design to Cost</p></div></footer>
+  <script src="/static/common.js"></script>
+  <script src="/static/auth.js"></script>
+  <script>
+    const { $, esc, fmt, api, status } = window.DTC;
+    const NICE = { "base.a_plate_mm": "A plate thickness", "base.b_plate_mm": "B plate thickness", "base.support_plate_mm": "Support plate thickness", "base.clamp_plates_mm": "Clamp plate thickness",
+      "base.spacer_block_mm": "Spacer block height", "base.ejector_plates_mm": "Ejector plate thickness", "rule.cool_dia_mm": "Cooling hole diameter", "rule.cool_channels": "Cooling channels per insert",
+      "stage.die_block_t_mm": "Die block thickness", "stage.stripper_t_mm": "Stripper plate thickness", "stage.punch_plate_t_mm": "Punch plate thickness", "stage.backing_t_mm": "Backing plate thickness",
+      "stage.shoe_t_mm": "Die shoe thickness", "rule.match_plate_t_mm": "Match plate thickness" };
+    async function load() {
+      const me = await api("/api/auth/me");
+      const canShare = me.mode === "local" || (me.user && me.user.role !== "user");
+      const rows = await api("/api/skills");
+      $("skills").innerHTML = `<thead><tr><th>Group</th><th>Part type</th><th>What changes</th><th>Learned from</th><th class="num">Value</th><th class="num">Corrections</th><th>Used for</th><th>On</th><th></th></tr></thead><tbody>` +
+        (rows.length ? rows.map((r) => `<tr data-id="${r.id}"><td>${esc(r.tool_group.replace("_", " "))}</td><td>${esc((r.part_type || "all").replace("_", " "))}</td><td>${esc(NICE[r.target] || r.target)}</td>
+          <td class="note">${esc(r.note || r.component)}</td><td class="num"><input data-f="value" type="number" step="any" value="${r.value}" style="width:90px" /> ${r.mode === "factor" ? "× the rule" : "(set)"}</td>
+          <td class="calc num">${r.evidence}</td><td>${canShare ? `<select data-f="scope"><option value="personal" ${r.scope === "personal" ? "selected" : ""}>my designs</option><option value="shared" ${r.scope === "shared" ? "selected" : ""}>everybody's designs</option></select>` : esc(r.scope === "shared" ? "everybody's designs" : "my designs")}</td>
+          <td><input type="checkbox" data-f="active" ${r.active ? "checked" : ""} /></td><td><button class="btn btn-outline btn-small" data-save>Save</button> <button class="btn btn-outline btn-danger btn-small" data-del>Delete</button></td></tr>`).join("")
+        : `<tr><td colspan="9" class="empty">No skill yet. Open a tool design, replace a part by your corrected STEP file, and the software learns from it.</td></tr>`) + "</tbody>";
+    }
+    $("skills").addEventListener("click", async (e) => {
+      const tr = e.target.closest("tr");
+      if (!tr || !tr.dataset.id) return;
+      try {
+        if (e.target.matches("[data-del]")) {
+          if (!confirm("Delete this skill? Next designs will use the standard rules again.")) return;
+          await api(`/api/skills/${tr.dataset.id}`, { method: "DELETE" });
+        } else if (e.target.matches("[data-save]")) {
+          const data = {};
+          tr.querySelectorAll("[data-f]").forEach((el) => { data[el.dataset.f] = el.type === "checkbox" ? el.checked : el.value; });
+          await api(`/api/skills/${tr.dataset.id}`, { method: "PUT", body: JSON.stringify(data) });
+          status($("status"), "Saved.", "ok");
+        } else return;
+        load();
+      } catch (err) { status($("status"), err.message, "error"); }
+    });
+    load();
+  </script>
+</body>
+</html>

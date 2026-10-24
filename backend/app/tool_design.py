@@ -20,7 +20,7 @@ import math
 import cadquery as cq
 from shapely.geometry import Polygon
 
-from . import corrections, costing_setup, formula, master_data, mould_db, rates
+from . import corrections, costing_setup, design_skills, formula, master_data, mould_db, rates
 
 STAGE_VARS = ("t", "shear_mpa", "tensile_mpa", "yield_mpa", "force_t", "work_l", "work_w", "work_h", "blank_l", "blank_w",
               "stations", "pitch_mm", "strip_width_mm", "bend_radius", "draw_dia", "draw_depth", "hole_count", "bends",
@@ -116,7 +116,7 @@ def rule_values(op: str, base: dict) -> tuple[dict, list[dict]]:
     rows = [r for r in mould_db.tables()["stage_rules"] if r["op"] in ("all", op)]
     for r in sorted(rows, key=lambda r: (r["op"] != "all", r["step"])):
         try:
-            env[r["name"]] = float(formula.evaluate(r["formula"], env))
+            env[r["name"]] = design_skills.adjust(f"stage.{r['name']}", float(formula.evaluate(r["formula"], env)))
         except (ArithmeticError, ValueError, formula.FormulaError) as exc:
             raise DesignError(f"Stage tool rule '{r['name']}' ({r['formula']}): {exc}") from None
         steps.append({"name": r["name"], "label": r["label"], "formula": r["formula"], "unit": r["unit"],
@@ -126,8 +126,26 @@ def rule_values(op: str, base: dict) -> tuple[dict, list[dict]]:
 
 # ------------------------------------------------------------ press and steel
 
-def press_fit(force_t: float, die_l: float, die_w: float) -> dict:
-    """Smallest press whose tonnage takes the force and whose bolster takes the die set (either way round)."""
+def press_fit(force_t: float, die_l: float, die_w: float, spec: dict | None = None) -> dict:
+    """Smallest press whose tonnage takes the force and whose bolster takes the die set (either way round). With a typed press (spec) that press is
+    the answer: it fits or it does not, with the reason."""
+    if spec and (spec.get("tonnage_t") or (spec.get("bolster_l_mm") and spec.get("bolster_w_mm"))):
+        from . import machine_spec
+        ton = spec.get("tonnage_t")
+        bol = [spec.get("bolster_l_mm"), spec.get("bolster_w_mm")]
+        reasons = []
+        if ton and ton < force_t:
+            reasons.append(f"your press takes {ton:g} t, the stage needs {force_t:.0f} t")
+        if bol[0] and bol[1]:
+            bs, bL = sorted(bol)
+            ds, dL = sorted((die_l, die_w))
+            if ds > bs or dL > bL:
+                reasons.append(f"the {die_l:.0f} × {die_w:.0f} mm die set does not fit your {bol[0]:.0f} × {bol[1]:.0f} mm bolster")
+        cat = machine_spec.catalog("sheet_metal")
+        ref = next((m for m in cat if m["machine_id"] == spec.get("machine_id")), None) or next((m for m in cat if (m["tonnage_t"] or 0) >= (ton or force_t)), None)
+        return {"machine_id": ref["machine_id"] if ref else None, "name": (ref["name"] if spec.get("machine_id") and ref else f"Your press {ton:g} t" if ton else "Your press"),
+                "tonnage_t": ton or (ref["tonnage_t"] if ref else None), "bolster_mm": bol, "fits": not reasons, "typed": True,
+                "reason": "; ".join(reasons)}
     process = master_data.parameters("sheet_metal").get("press_machine_process")
     ms = sorted((m for m in costing_setup.tables()["machines"] if m["process"] == process), key=lambda m: m["tonnage_t"])
     short, tall = sorted((die_l, die_w))
@@ -189,7 +207,7 @@ def _sequence(res: dict, fp: dict, material_row: dict) -> list[dict]:
     return stages
 
 
-def sheet_design(fp: dict, sl: dict, res: dict, geometry: dict, country: str = "IN", month: str | None = None) -> dict:
+def sheet_design(fp: dict, sl: dict, res: dict, geometry: dict, country: str = "IN", month: str | None = None, machine: dict | None = None) -> dict:
     """Stage-wise tool design of a sheet-metal part. `fp` flat pattern, `sl` strip layout, `res` sheet_tools.run result."""
     month = month or rates.current_month()
     feat = res["features"]
@@ -210,12 +228,13 @@ def sheet_design(fp: dict, sl: dict, res: dict, geometry: dict, country: str = "
         base |= {"stations": sv["stations"], "pitch_mm": sv["pitch_mm"], "strip_width_mm": sv["strip_width_mm"],
                  "work_l": sv["stations"] * sv["pitch_mm"], "work_w": sv["strip_width_mm"]}
     total_force = sum(s["force_t"] for s in stages)
+    base_vars = {k: float(x) for k, x in base.items() if isinstance(x, (int, float))}
     out_stages, warnings = [], []
     for s in stages:
         force = (total_force if progressive else s["force_t"])
         vals, steps = rule_values(s["code"], base | {"force_t": force, "stage_n": s["n"]})
         l, w, t = vals["die_set_l_mm"], vals["die_set_w_mm"], base["t"]
-        press = press_fit(force * safety, l, w)
+        press = press_fit(force * safety, l, w, machine)
         comps = [
             _component("Lower shoe", PLATE_STEEL, l, w, vals["shoe_t_mm"], 1, country, month),
             _component("Die block / buttons", DIE_STEEL, l - 2 * vals["margin_mm"] * 0.4, w - 2 * vals["margin_mm"] * 0.4,
@@ -266,7 +285,7 @@ def sheet_design(fp: dict, sl: dict, res: dict, geometry: dict, country: str = "
               "shut_height_mm": s["values"]["shut_height_mm"], "press": s["press"]} for s in out_stages])
     total_weight = sum(s["weight_kg"] for s in (out_stages[:1] if progressive else out_stages))
     return {"mode": res["mode"], "material": res["material"], "thickness_mm": base["t"], "pitch_mm": sv.get("pitch_mm", 0), "country": country, "month": month,
-            "stages": out_stages, "die_sets": sets, "rotate": bool(progressive and sl.get("best", {}).get("feed", "").endswith("width")), "warnings": warnings, "total_force_t": round(total_force, 1),
+            "machine": machine, "base_vars": base_vars, "stages": out_stages, "die_sets": sets, "rotate": bool(progressive and sl.get("best", {}).get("feed", "").endswith("width")), "warnings": warnings, "total_force_t": round(total_force, 1),
             "tool_weight_kg": round(total_weight, 1),
             "steel_cost": round(sum(s["steel_cost"] for s in (out_stages[:1] if progressive else out_stages))),
             "currency": rates.lookup("tool_material", DIE_STEEL, country, month)["currency"] if _steel(DIE_STEEL, country, month)[1] else "",
@@ -574,6 +593,13 @@ def _assemble(design: dict, stages: list[dict], offsets: list[float], fp: dict, 
         parts.append((f"Guide bush {i}", "upper", _tube(bush_od, pil + 0.04, shoe, px, py, z_pp + pun + back), (0.70, 0.55, 0.20), "guide_bush", True))
     for st, w in works:
         parts.append((f"Workpiece after {st['name'].lower()}", "work", w, (0.95, 0.80, 0.25), "work", False))
+    lo = ((design.get("machine") or {}).get("shut_height_min_mm"))
+    if lo and not open_state and v["shut_height_mm"] < lo:
+        # the die is lower than the press takes: parallels (one riser plate) under the lower shoe bring it to the smallest shut height
+        riser = math.ceil((lo - v["shut_height_mm"]) / 5) * 5
+        parts.append(("Shut-height riser (parallels)", "lower", _box(sl_, sw_, riser, z=-riser), (0.55, 0.57, 0.60), "clamp_plate", False))
+        design.setdefault("form_notes", []).append(f"Shut height {v['shut_height_mm']:.0f} mm is below the {lo:g} mm of your press: a {riser:g} mm riser (parallels) is added under the lower shoe.")
+        design["riser_mm"] = max(design.get("riser_mm", 0), riser)
     out = []
     for n, g, w, c, cls, std in parts:
         shp = w.val() if hasattr(w, "val") else w
@@ -584,7 +610,7 @@ def _assemble(design: dict, stages: list[dict], offsets: list[float], fp: dict, 
             pass                                   # an empty result of a boolean: nothing to show
     if details and not open_state:
         from . import tool_internals
-        env = {k: float(x) for k, x in stages[0]["values"].items()}
+        env = dict(design.get("base_vars") or {}) | {k: float(x) for k, x in stages[0]["values"].items()}
         env |= {k: float(x) for k, x in master_data.parameters("sheet_metal").items() if isinstance(x, (int, float))}
         env["force_t"] = sum(st["force_t"] for st in stages) if design.get("mode") == "progressive" else stages[0]["force_t"]
         env["t"] = t
@@ -631,7 +657,8 @@ def _tube(od: float, idia: float, h: float, x: float, y: float, z: float):
 
 
 def mould_3d(shape: cq.Shape, axis: str, parting_z: float, tool: dict, open_gap: float = 60.0, regions: list | None = None,
-             production: bool = False, bom: dict | None = None, part_h: float = 0.0, part_area_cm2: float = 0.0) -> dict:
+             production: bool = False, bom: dict | None = None, part_h: float = 0.0, part_area_cm2: float = 0.0,
+             machine: dict | None = None, clamp_t: float = 0.0) -> dict:
     """3D of a mould / die: plates with pillar and bush holes, guide pillars and bushes, sprue bush, locating ring, and the core and
     cavity inserts cut from the part along the parting plane.
 
@@ -653,6 +680,10 @@ def mould_3d(shape: cq.Shape, axis: str, parting_z: float, tool: dict, open_gap:
     L, W = base["length_mm"], base["width_mm"]
     a, b_, clamp, support, spacer, ej = (base["a_plate_mm"], base["b_plate_mm"], base["clamp_plates_mm"], base["support_plate_mm"],
                                          base["spacer_block_mm"], base["ejector_plates_mm"])
+    # the user's skills: plates as thick as he / she makes them (catalogue value × learned factor, in 5 mm steps)
+    a, b_, clamp, support, spacer, ej = (round(design_skills.adjust(f"base.{k}", v, L) / 5) * 5 if v else v for k, v in
+                                         (("a_plate_mm", a), ("b_plate_mm", b_), ("clamp_plates_mm", clamp), ("support_plate_mm", support),
+                                          ("spacer_block_mm", spacer), ("ejector_plates_mm", ej)))
     pocket_l, pocket_w = layout["pocket_l"], layout["pocket_w"]
     if cavs < n:
         pocket_l, pocket_w = (max(p[0] for p in pos) - min(p[0] for p in pos)) + layout["each_l"], (max(p[1] for p in pos) - min(p[1] for p in pos)) + layout["each_w"]
@@ -679,7 +710,9 @@ def mould_3d(shape: cq.Shape, axis: str, parting_z: float, tool: dict, open_gap:
     pil = max(20.0, round(min(L, W) / 25.0))
     bush_od = pil + 16
     pil_xy = [(sx * (L / 2 - bush_od / 2 - 6), sy * (W / 2 - bush_od / 2 - 6)) for sx, sy in ((1, 1), (-1, -1), (1, -1), (-1, 1))]
-    sprue_d, ring_d = 28.0, 100.0
+    from . import machine_spec
+    sprue_d = 28.0
+    ring_d = float((machine or {}).get("locating_ring_dia_mm") or machine_spec.rule_value("mould", "rec_locating_ring_dia_mm"))      # the typed machine's ring, else the rule
     hot = bool(production and (bom or {}).get("hot_runner"))
     # parting plane at z=0. B side below, A side above.
     bplate = _box(L, W, b_).cut(_box(pocket_l, pocket_w, b_)).translate((0, 0, -b_))
@@ -785,6 +818,17 @@ def mould_3d(shape: cq.Shape, axis: str, parting_z: float, tool: dict, open_gap:
         notes.append(f"Only {cavs} of {n} cavities are modelled (limit {MAX_PRODUCTION_CAVITIES}); the BOM quantities cover all of them.")
     if note:
         notes.append(note)
+    plate_c = [c for c in comps if c["cls"] in ("base_plate", "clamp_plate", "support_plate", "spacer_block")]
+    mould_h = (max(c["shape"].BoundingBox().zmax for c in plate_c) - min(c["shape"].BoundingBox().zmin for c in plate_c)) if plate_c else 0.0
+    riser = 0.0
+    lo = (machine or {}).get("min_mould_h_mm")
+    if production and lo and plate_c and mould_h < lo:
+        # the mould is lower than the machine takes: a riser plate under the bottom clamp plate brings it to the smallest height
+        riser = math.ceil((lo - mould_h) / 5) * 5
+        zmin = min(c["shape"].BoundingBox().zmin for c in plate_c)
+        add("Height riser plate", "lower", _box(L, W, riser, z=zmin - riser), (0.55, 0.57, 0.60), "clamp_plate")
+        mould_h += riser
+        notes.append(f"Mould height {mould_h - riser:.0f} mm is below the {lo:g} mm the machine takes: a {riser:g} mm height riser plate is added under the bottom clamp plate.")
     details = None
     if production and placed is not None:
         from . import tool_internals
@@ -793,7 +837,8 @@ def mould_3d(shape: cq.Shape, axis: str, parting_z: float, tool: dict, open_gap:
                "ejector_mm": ej, "pocket_l_mm": pocket_l, "pocket_w_mm": pocket_w, "cavities": float(n), "part_h_mm": part_h or bb.zlen,
                "projected_area_cm2": part_area_cm2, "pillar_dia_mm": pil, "bush_od_mm": bush_od, "bom_ejector_pins": b.get("ejector_pins", 0),
                "bom_return_pins": b.get("return_pins", 4), "bom_cooling_connectors": b.get("cooling_connectors", 0),
-               "hot_runner": 1.0 if b.get("hot_runner") else 0.0, "slides": b.get("slides", 0), "lifters": b.get("lifters", 0)}
+               "hot_runner": 1.0 if b.get("hot_runner") else 0.0, "slides": b.get("slides", 0), "lifters": b.get("lifters", 0),
+               "clamp_t": clamp_t, "stack_h_mm": base.get("stack_height_mm", mould_h), "mould_h_mm": mould_h}
         env |= {k: float(x) for k, x in master_data.parameters(tool.get("part_type", "plastic")).items() if isinstance(x, (int, float))}
         v = tool_internals.values("mould", env)
         ctx = {"L": L, "W": W, "a": a, "b": b_, "pocket_l": pocket_l, "pocket_w": pocket_w, "pil_xy": pil_xy, "bush_od": bush_od, "placed": placed,
@@ -804,4 +849,5 @@ def mould_3d(shape: cq.Shape, axis: str, parting_z: float, tool: dict, open_gap:
         details["rules"] = {k: round(x, 3) for k, x in v.items() if k in {r["name"] for r in mould_db.tables()["detail_rules"] if r["tool_group"] == "mould"}}
     return {"components": comps, "details": details, "cavities_shown": cavs, "cavities_total": n, "base": base["size_code"],
             "parting_z_mm": parting_z, "note": " ".join(notes), "base_mm": [L, W], "open_gap_mm": gap,
-            "plate_a_mm": a, "plate_b_mm": b_, "pillar_dia_mm": pil, "bush_od_mm": bush_od, "sprue_dia_mm": sprue_d}
+            "plate_a_mm": a, "plate_b_mm": b_, "pillar_dia_mm": pil, "bush_od_mm": bush_od, "sprue_dia_mm": sprue_d,
+            "mould_h_mm": mould_h, "riser_mm": riser, "ring_dia_mm": ring_d, "stack_h_mm": base.get("stack_height_mm", mould_h)}

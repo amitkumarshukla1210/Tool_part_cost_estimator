@@ -12,7 +12,7 @@ database, so the result changes when the database is edited, without code change
 from __future__ import annotations
 
 import math
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -33,6 +33,7 @@ class MouldInput(BaseModel):
     slides_per_cavity: int = Field(0, ge=0, le=20)
     lifters_per_cavity: int = Field(0, ge=0, le=20)
     inserts_per_cavity: int = Field(0, ge=0, le=50)
+    machine: Optional[dict] = None          # the machine the tool will run on (machine_spec): the base must suit it
 
 
 def cavity_layouts(n: int, item_l: float, item_w: float, gap: float) -> list[dict]:
@@ -50,11 +51,11 @@ def cavity_layouts(n: int, item_l: float, item_w: float, gap: float) -> list[dic
     return layouts
 
 
-def select_base(part_type: str, pocket_l: float, pocket_w: float) -> tuple[dict, bool]:
-    """Smallest mould base whose insert pocket takes the inserts (either way round)."""
+def select_base(part_type: str, pocket_l: float, pocket_w: float, suits=None) -> tuple[dict, bool]:
+    """Smallest mould base whose insert pocket takes the inserts (either way round) and that suits the typed machine (suits(base) → bool)."""
     fits = []
     for base in mould_db.tables()["mould_bases"]:
-        if base["part_type"] != part_type:
+        if base["part_type"] != part_type or (suits and not suits(base)):
             continue
         bl, bw = base["max_insert_length_mm"], base["max_insert_width_mm"]
         straight = pocket_l <= bl and pocket_w <= bw
@@ -64,7 +65,8 @@ def select_base(part_type: str, pocket_l: float, pocket_w: float) -> tuple[dict,
     if not fits:
         raise ValueError(
             f"No {part_type} mould base in the database takes an insert pocket of "
-            f"{pocket_l:.0f} × {pocket_w:.0f} mm. Add a larger size under Mould bases, or use fewer cavities."
+            f"{pocket_l:.0f} × {pocket_w:.0f} mm" + (" that also passes the tie bars, fits the platen and the mould height of the typed machine. Use fewer cavities, a bigger machine, "
+                                                      "or add a base under Mould bases" if suits else ". Add a larger size under Mould bases, or use fewer cavities.")
         )
     _, _, base, turned = min(fits, key=lambda f: (f[0], f[1]))
     return base, turned
@@ -72,6 +74,8 @@ def select_base(part_type: str, pocket_l: float, pocket_w: float) -> tuple[dict,
 
 def size(inp: MouldInput) -> dict:
     """Cavity layout, insert size and the smallest standard mould base (the BOM is priced in tool_cost.py)."""
+    from . import machine_spec
+    suits = machine_spec.base_constraint(inp.machine)
     rules = mould_db.sizing_rules(inp.part_type)
     missing = [k for k in SIZING_KEYS if k not in rules]
     if missing:
@@ -86,14 +90,14 @@ def size(inp: MouldInput) -> dict:
     options = []
     for lay in cavity_layouts(inp.cavities, each_l, each_w, gap):
         try:
-            base, turned = select_base(inp.part_type, lay["pocket_l"], lay["pocket_w"])
+            base, turned = select_base(inp.part_type, lay["pocket_l"], lay["pocket_w"], suits)
         except ValueError:
             continue
         aspect = max(lay["pocket_l"], lay["pocket_w"]) / min(lay["pocket_l"], lay["pocket_w"])
         options.append(((base["length_mm"] * base["width_mm"], base["cost"], lay["empty"], aspect), lay, base, turned))
     if not options:
         smallest = min(cavity_layouts(inp.cavities, each_l, each_w, gap), key=lambda l: max(l["pocket_l"], l["pocket_w"]))
-        select_base(inp.part_type, smallest["pocket_l"], smallest["pocket_w"])  # raises with a clear message
+        select_base(inp.part_type, smallest["pocket_l"], smallest["pocket_w"], suits)  # raises with a clear message
     _, layout, base, turned = min(options, key=lambda o: o[0])
 
     warnings = []

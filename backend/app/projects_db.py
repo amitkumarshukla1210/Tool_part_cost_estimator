@@ -75,6 +75,7 @@ parts = Table(
     Column("process", String(60), default=""),
     Column("sourcing", String(40), default=""),
     Column("owner", String(80)),                       # user name of the creator; decides who sees a part that has no tool group (assembly, bought-out)
+    Column("machine", JSON),                           # the machine the tool will run on (typed parameters); NULL = not typed, the software recommends one
     Column("status", String(60), default=""),
     Column("annual_volume", Integer),
     Column("programme_life_years", Float),
@@ -298,6 +299,27 @@ tool_component_revs = Table(
     Column("created_by", String(100), default=""),
     Column("created_at", DateTime, default=now),
     Index("ix_tool_component_revs_component", "component_id"),
+)
+
+design_skills = Table(
+    "design_skills", meta,
+    Column("id", Integer, primary_key=True),
+    Column("tool_group", String(20), nullable=False),  # mould, sheet_metal, foundry
+    Column("part_type", String(20), default=""),       # plastic, die_casting …; empty = every part type of the group
+    Column("target", String(80), nullable=False),      # base.a_plate_mm, rule.cool_dia_mm, stage.die_block_t_mm …
+    Column("component", String(120), default=""),      # the part the user changed
+    Column("mode", String(10), nullable=False),        # factor (× the rule value) or set (this value)
+    Column("value", Float, nullable=False),
+    Column("evidence", Integer, default=1),            # corrections it was learned from
+    Column("size_ref", Float),                         # size of the tool when learned: applies to tools of 0.6 to 1.67 times that size
+    Column("scope", String(10), default="personal"),   # personal (the owner's designs) or shared (everybody's, set by head / admin)
+    Column("owner", String(80)),
+    Column("active", Boolean, default=True),
+    Column("source_design_id", Integer),
+    Column("note", String(300), default=""),
+    Column("created_at", DateTime, default=now),
+    Column("updated_at", DateTime, default=now, onupdate=now),
+    Index("ix_skill_target", "tool_group", "target"),
 )
 
 piece_costs = Table(
