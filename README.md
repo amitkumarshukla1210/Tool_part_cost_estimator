@@ -678,11 +678,70 @@ python update.py                         # backup, then git pull
 3. **If you cloned the project with git** (recommended): `python update.py`. It backs up, fetches, and pulls. If you changed `master_data/` and the new version leaves it alone, yours is kept. If **both** changed
    it, `update.py` stops without changing anything and tells you why: choose `--keep-mine` (your master data stays; the new example rows are missing) or `--take-new` (the new master data is used; yours is in the backup), or send the backup
    to have the new rows merged into your file. Then `pip install -r requirements.txt` and restart the app.
-4. **If you downloaded a ZIP**: run `python backup.py`, unzip the new version over the folder, run `python backup.py --restore latest --only data,storage`, and put your `master_data/` back with
-   `python backup.py --restore latest --only master_data` when you have edited it (new example rows then need a merge: send me the backup).
+4. **If you use ZIP downloads on Windows**: use the update kit below (`DTC_Update.bat`). It does the backup, the new version and the master-data merge for you.
 5. Check one known part (compare with its last cost) before you rely on the new version.
 
 There is no limit on the number of corrections; each one is a new pull request. With PostgreSQL (server mode) back up the database with `pg_dump` as well.
+
+## Install and update on Windows (ZIP download, local http://127.0.0.1:8000)
+
+The `windows/` folder holds an update kit: `dtc_manager.py` and five double-click files. They live in the folder **above**
+the app (the *base folder*, e.g. `D:\DTC\`). Your data is kept **outside** the app folder, so the app folder can be
+deleted and replaced by every new version without losing anything.
+
+```
+D:\DTC\                           base folder (any name)
+  Tool_part_cost_estimator\       the app            replaced by every update (old one moved to DTC_Old\)
+  DTC_Data\                       YOUR DATA          never replaced
+     master_data\                   rates, machines, formulas (costing_db.sqlite, master_data.xlsx)
+     data\                          projects, parts, cost versions (projects.sqlite)
+     storage\                       CAD files and thumbnails
+     logs\                          one report per update (what was merged)
+  DTC_Backups\                    backup ZIPs        (+ a copy to OneDrive / a pen drive: backup_copy_to)
+  DTC_Downloads\                  new version ZIPs
+  DTC_Old\                        the last 3 app versions, for DTC_Rollback.bat
+  venv\                           Python libraries   kept, so CadQuery is not downloaded again each time
+  dtc_settings.ini                port, GitHub, backup copy folder, ...
+  dtc_manager.py  DTC_Start.bat  DTC_Update.bat  DTC_Backup.bat  DTC_Restore.bat  DTC_Rollback.bat
+```
+
+| Double-click | What it does |
+|---|---|
+| `DTC_Start.bat` | Backup if the last one is older than a day, then the app on **http://127.0.0.1:8000** (the browser opens). Keep the window open; close it to stop the app. |
+| `DTC_Update.bat` | 1) checks the app is stopped, 2) **backup**, 3) new version: **download from GitHub** or **a ZIP you downloaded**, 4) installs the libraries and test-starts the new version: if that fails, nothing is changed, 5) old app folder → `DTC_Old\`, new one in place, 6) **merges the new master data into yours** (below), 7) writes a report to `DTC_Data\logs\`. |
+| `DTC_Backup.bat` | Backup now (`DTC_Backups\dtc-backup-<time>.zip`, plus the copy folder if set). |
+| `DTC_Restore.bat` | Lists the backups; pick one and choose: everything, only projects + CAD files, or only master data. What is there now is backed up first. Backups made by `backup.py` work too. |
+| `DTC_Rollback.bat` | Back to the version before the last update **with the data of that moment** (data changed after the update stays in the safety backup). |
+
+**First time (moving from your current installation).** Your current app folder keeps working until the end of step 4.
+1. Stop the running app (close its window).
+2. Download the new version: GitHub → **Code → Download ZIP**. Save it in the base folder (the folder that holds your current `Tool_part_cost_estimator…` folder) or in your Downloads folder.
+3. Open the ZIP, go into its `windows` folder and copy `dtc_manager.py` and the five `DTC_*.bat` files into the base folder.
+4. Double-click `DTC_Update.bat`, answer **2** (the ZIP). It finds your old app folder (also a double-unzipped `…-main\…-main`), backs up its data
+   (`DTC_Backups\dtc-before-migration-*.zip`, never deleted), copies `master_data`, `data`, `storage` and your old `backups` into `DTC_Data` / `DTC_Backups`,
+   installs the new version and moves the old folder to `DTC_Old\`. You do not delete anything by hand.
+5. Double-click `DTC_Start.bat`. Check one known part against its last cost. Your old start file is no longer needed.
+
+**Every next update.** Double-click `DTC_Update.bat` → **1** (download from GitHub) or **2** (a ZIP you downloaded) → `DTC_Start.bat`. The kit updates itself from the new ZIP.
+
+**Your master data is merged, not overwritten** (`backend/app/upgrade_tools.py`): new tables, columns and rows of the new version are added;
+rows you never changed take the new version's values; **rows you changed stay yours** (the report lists any of them the new version also changed);
+your rate versions are never changed (only rate rows you do not have are added). "Never changed" means the row is identical to a row some released
+version shipped: `backend/app/shipped_rows.json` holds a fingerprint of every row ever shipped (developers: after changing `master_data/`, run
+`python -m backend.app.upgrade_tools fingerprints`; a test fails until you do).
+
+**Backup plan.** Automatic: before every update, before every restore and once a day at start. By hand: `DTC_Backup.bat`. The 30 newest are kept
+(`keep_backups`). Set `backup_copy_to` in `dtc_settings.ini` to a OneDrive / Google Drive / network folder so every backup also leaves the laptop.
+To move to a new laptop: copy the base folder, or set up the kit there and restore the newest backup with `DTC_Restore.bat`.
+
+**Settings (`dtc_settings.ini`, created on first use).** `port` (8000), `github_repo` and `branch` (main), `github_token` (only if the repository is
+private: a fine-grained token for this repository with *Contents: read-only*; otherwise download the ZIP in the browser and choose 2), `backup_copy_to`,
+`keep_backups`, `auto_backup_days`, `storage_folder` (empty = `DTC_Data\storage`), `python` (the Python that creates `venv\`; CadQuery needs 3.10–3.12,
+the kit prefers 3.12 → 3.11 → 3.10 through the `py` launcher).
+
+The app finds the data through environment variables the kit sets (`COSTING_DB_PATH`, `MASTER_DATA_PATH`, `DATABASE_URL`, `DTC_STORAGE_FOLDER`,
+`DTC_BACKUP_FOLDER`), so `backup.py` inside the app backs up `DTC_Data` as well. Start the app only with `DTC_Start.bat`: started any other way it
+would use the example data inside the app folder.
 
 ## Full roadmap
 
