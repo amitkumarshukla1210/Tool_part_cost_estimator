@@ -803,29 +803,41 @@ Use *Examples only* in the Rate library to work through them.
 
 ---
 
-## Update, correct and back up (read this before every update)
+## Versions, upgrade by ZIP, backup and restore (read this before every update)
 
-**Where your work lives.** Your projects, parts and costs are in `data/` and your CAD files in `storage/`; both are **never** in GitHub. Your rates, machines, formulas and other master data are in
-`master_data/` **and are in GitHub**, so a new download would replace your edits with the example values. Always back up first.
+**Versions.** The file `VERSION` (V0, V1, V2 …) is the version; the footer of the pages and `/api/version` show it. On GitHub every version is a folder
+`releases/V0/`, `releases/V1/` … with `DesignToCost-Vn.zip`, its `SHA256.txt` and `RELEASE_NOTES.md`; `releases/LATEST` names the newest. (GitHub's green **Code → Download ZIP** of the
+branch works as well.) The ZIP is built with `python scripts/make_release.py`.
+
+**Where your work lives.** Projects, parts and costs: `data/`. CAD files: `storage/`. Rates, machines, formulas and other master data: `master_data/`. These are your data: an upgrade never
+replaces them and they are in every backup (`backups/`).
+
+**Upgrade with one click (Windows).** 1) Download the new ZIP from GitHub and keep it on your laptop. 2) Close the tool window. 3) Put the ZIP in the folder `upgrades` (or leave it in Downloads) and
+double-click **Upgrade_Tool.bat**. It makes a backup, puts the new files over the old ones (files that no longer exist in the new version are removed), keeps `data/`, `storage/` and your
+`master_data/`, installs new libraries, adds the rows a new version introduces (new tables, machines, rules, parameters: never changing yours), starts the app once as a self-test, and **puts the old
+version back if anything fails**. Then start the tool with **Start_Tool.bat**. Linux / macOS: `./upgrade_tool.sh [file.zip]`. The same thing: `python upgrade.py [file.zip] [--force]`.
+A hosted copy is upgraded the same way: unzip the new version on the server, stop the service, run `python upgrade.py file.zip`, start the service.
+
+**Backup and restore.** *Backup* in the menu (`/backup`): **Back up now**, download, upload a copy from your laptop, **Restore** (a safety backup of what is there now is made first). Without the
+browser: `Backup_Tool.bat` and `Restore_Tool.bat`, or:
 
 ```
 python backup.py                         # zips master_data/, data/ and the CAD storage folder into backups/dtc-backup-<time>.zip (keep a copy elsewhere too)
 python backup.py --restore latest        # puts the newest backup back (what is there now is zipped first as dtc-before-restore-<time>.zip)
 python backup.py --restore latest --only data,storage     # only part of it: master_data, data, storage
-python update.py                         # backup, then git pull
+python update.py                         # for a git clone: backup, then git pull
 ```
+In server mode the Backup page needs the role admin. With PostgreSQL back up the database with `pg_dump` as well.
 
-**The correction workflow.**
-1. Report the problem (page, what you did, what you expected, what you saw; the exact error text or a screenshot).
-2. The fix arrives as a pull request on GitHub with the tests that were run; after you merge it, update your PC.
-3. **If you cloned the project with git** (recommended): `python update.py`. It backs up, fetches, and pulls. If you changed `master_data/` and the new version leaves it alone, yours is kept. If **both** changed
-   it, `update.py` stops without changing anything and tells you why: choose `--keep-mine` (your master data stays; the new example rows are missing) or `--take-new` (the new master data is used; yours is in the backup), or send the backup
-   to have the new rows merged into your file. Then `pip install -r requirements.txt` and restart the app.
-4. **If you downloaded a ZIP**: run `python backup.py`, unzip the new version over the folder, run `python backup.py --restore latest --only data,storage`, and put your `master_data/` back with
-   `python backup.py --restore latest --only master_data` when you have edited it (new example rows then need a merge: send me the backup).
-5. Check one known part (compare with its last cost) before you rely on the new version.
+**Move from the hosted copy to your laptop (http://127.0.0.1:8000/).**
+1. On the hosted copy open *Backup*, press **Back up now**, **Download** the ZIP, keep it.
+2. Delete the hosted copy.
+3. On your laptop: download the ZIP of the version from GitHub, unzip it into a folder (for example `C:\DesignToCost`), install Python 3.11 or 3.12 (tick *Add python.exe to PATH*), and double-click **Install_Tool.bat** (creates `.venv`, installs the libraries once).
+4. Double-click **Start_Tool.bat**: the browser opens http://127.0.0.1:8000/ .
+5. Open *Backup* → **Upload a backup from my laptop** → choose the ZIP from step 1 → **Restore**. Your projects, CAD files and master data are back.
 
-There is no limit on the number of corrections; each one is a new pull request. With PostgreSQL (server mode) back up the database with `pg_dump` as well.
+**The correction workflow.** Report the problem (page, what you did, what you expected, what you saw, the error text); the fix is a new version (V1, V2 …) with the tests that were run; upgrade as above;
+check one known part (compare with its last cost) before you rely on the new version.
 
 ## Full roadmap
 

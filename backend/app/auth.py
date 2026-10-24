@@ -28,7 +28,7 @@ COOKIE = "dtc_session"
 SESSION_HOURS = 12
 MIN_PASSWORD = 10
 PUBLIC_PREFIXES = ("/login", "/static", "/theme", "/api/auth/login", "/api/server/health", "/favicon")
-ADMIN_PREFIXES = ("/api/users",)
+ADMIN_PREFIXES = ("/api/users", "/api/backups")
 
 _user: contextvars.ContextVar = contextvars.ContextVar("dtc_user", default=None)
 

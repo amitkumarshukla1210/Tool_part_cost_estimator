@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design to Cost — Part Cost Estimator · Backup and upgrade</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/register.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img src="/theme/logo.png" alt="Design to Cost logo" />
+        <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/dashboard">Dashboard</a></li>
+          <li><a href="/parts">Parts</a></li>
+          <li><a href="/import">Import</a></li>
+          <li><a href="/bom-extract">Harness &amp; PCB</a></li>
+          <li><a href="/">Estimate</a></li>
+          <li><a href="/rates">Rates</a></li>
+          <li><a href="/master-data">Master data</a></li>
+          <li><a href="/capacity">Capacity &amp; tools</a></li>
+          <li><a href="/backup" class="active" aria-current="page">Backup</a></li>
+          <li><a href="/help">Help</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section class="bg-grey page-head">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Safety</p>
+          <h2>Backup, restore and upgrade</h2>
+          <p>Version <b id="version">…</b>. A backup holds your projects and parts (data), your CAD files (storage) and your rates, machines and formulas (master data).</p>
+        </div>
+        <div class="card toolbar">
+          <button type="button" class="btn btn-primary" id="make">Back up now</button>
+          <label class="btn btn-outline" for="upFile">Upload a backup from my laptop</label>
+          <input type="file" id="upFile" accept=".zip" hidden />
+          <span class="spacer"></span>
+          <span id="status" class="status"></span>
+        </div>
+      </div>
+    </section>
+    <section class="page-body">
+      <div class="container">
+        <div class="card">
+          <h3 class="block-title">Backups on this computer</h3>
+          <table class="grid" id="list"></table>
+          <p class="note">Download a copy and keep it outside this computer too. Restoring first makes a safety backup of what is there now.</p>
+        </div>
+        <div class="card">
+          <h3 class="block-title">Upgrade to a newer version (V1, V2 …)</h3>
+          <ol>
+            <li>On GitHub download the ZIP of the new version (green <b>Code</b> button → Download ZIP, or the file in <code>releases/V1/</code>) and save it on your laptop.</li>
+            <li>Close the tool window, put the ZIP in the folder <code>upgrades</code> (next to <code>Start_Tool.bat</code>) and double-click <b>Upgrade_Tool.bat</b>.</li>
+            <li>It backs up everything, puts the new files over the old ones, keeps your projects, CAD files and master data, adds the new master-data rows and checks itself. If anything fails it puts the old version back.</li>
+            <li>Start the tool again with <b>Start_Tool.bat</b>.</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer><div class="container"><p class="footnote">© Design to Cost</p></div></footer>
+  <script src="/static/common.js"></script>
+  <script src="/static/backup.js"></script>
+</body>
+</html>

@@ -5,6 +5,8 @@
     python backup.py --restore FILE --only data,storage
     python update.py                       backup, then git pull; master_data/ edited by you is never overwritten silently
     python update.py --keep-mine | --take-new     what to do when you AND the new version both changed master_data/
+    python upgrade.py [FILE.zip]           upgrade from a downloaded ZIP of a newer version (GitHub "Download ZIP" or releases/Vn/): backup, new code over
+                                           the old, your data/, storage/ and master_data/ kept, new master-data rows added, self-test, undo on failure
 
 Project data lives in data/ (SQLite) and the storage folder; with PostgreSQL (server mode) use pg_dump for the database.
 """
@@ -98,6 +100,165 @@ def restore(archive: Path, root: Path = ROOT, only: tuple[str, ...] = PARTS) -> 
     return {"restored": done, "safety_backup": str(safety)}
 
 
+# ---------- list, upload and restore by name (the Backup page) ----------
+
+def list_backups(root: Path = ROOT) -> list[dict]:
+    d = root / BACKUPS
+    out = []
+    for f in sorted(d.glob("*.zip"), reverse=True) if d.exists() else []:
+        try:
+            with zipfile.ZipFile(f) as z:
+                m = json.loads(z.read("manifest.json")) if "manifest.json" in z.namelist() else {}
+        except zipfile.BadZipFile:
+            continue
+        out.append({"name": f.name, "bytes": f.stat().st_size, "created": m.get("created") or datetime.fromtimestamp(f.stat().st_mtime).isoformat(timespec="seconds"),
+                    "files": {k: v.get("files") for k, v in (m.get("parts") or {}).items()}})
+    return out
+
+
+def backup_path(name: str, root: Path = ROOT) -> Path:
+    p = (root / BACKUPS / Path(name).name)
+    if not p.exists() or p.suffix != ".zip":
+        raise BackupError(f"Backup '{name}' not found.")
+    return p
+
+
+def add_upload(content: bytes, filename: str, root: Path = ROOT) -> Path:
+    """Keep a backup ZIP from outside (your laptop copy) in the backups folder after checking that it is one of ours."""
+    import io
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as z:
+            names = z.namelist()
+            if "manifest.json" not in names or not any(n.split("/")[0] in PARTS for n in names):
+                raise BackupError("This ZIP is not a Design to Cost backup (no manifest.json, master_data/, data/ or storage/).")
+    except zipfile.BadZipFile:
+        raise BackupError("This file is not a ZIP.") from None
+    out_dir = root / BACKUPS
+    out_dir.mkdir(exist_ok=True)
+    target = out_dir / (Path(filename).stem[:60].replace(" ", "_") + "-uploaded-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".zip")
+    target.write_bytes(content)
+    return target
+
+
+# ---------- upgrade from a ZIP of a newer version ----------
+
+NEVER_TOUCHED = ("data", "storage", BACKUPS, ".venv", "venv", ".git", "upgrades")
+MANIFEST = ".installed_files.json"
+
+
+def _port_busy(port: int = 8000) -> bool:
+    import socket
+    with socket.socket() as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _zip_layout(z: zipfile.ZipFile) -> tuple[str, str]:
+    """(prefix of the project inside the ZIP, its VERSION). GitHub's Download ZIP has one top folder."""
+    marker = next((n for n in z.namelist() if n.endswith("backend/app/main.py")), None)
+    if not marker:
+        raise BackupError("This ZIP is not a Design to Cost version (no backend/app/main.py inside).")
+    prefix = marker[: -len("backend/app/main.py")]
+    version = z.read(prefix + "VERSION").decode().strip() if prefix + "VERSION" in z.namelist() else ""
+    if not version:
+        raise BackupError("This ZIP has no VERSION file: it is not a numbered release (V0, V1 …).")
+    return prefix, version
+
+
+def find_zip(root: Path = ROOT) -> Path:
+    """The newest ZIP in ./upgrades, else the newest Downloads ZIP that looks like this project."""
+    cands = list((root / "upgrades").glob("*.zip")) if (root / "upgrades").exists() else []
+    if not cands:
+        dl = Path.home() / "Downloads"
+        cands = [f for f in dl.glob("*.zip") if any(k in f.name.lower() for k in ("tool_part_cost_estimator", "designtocost", "design_to_cost"))] if dl.exists() else []
+    if not cands:
+        raise BackupError("No ZIP given and none found. Put the downloaded ZIP in the folder 'upgrades' (next to this file) or run: python upgrade.py path\\to\\file.zip")
+    return max(cands, key=lambda f: f.stat().st_mtime)
+
+
+def _code_files(root: Path) -> list[str]:
+    out = []
+    for f in root.rglob("*"):
+        rel = f.relative_to(root).as_posix()
+        if f.is_file() and rel.split("/")[0] not in NEVER_TOUCHED + ("master_data",) and "__pycache__" not in rel and not rel.startswith("."):
+            out.append(rel)
+    return out
+
+
+def _restore_code(code_zip: Path, root: Path, new_files: set[str]) -> None:
+    old = set()
+    with zipfile.ZipFile(code_zip) as z:
+        for n in z.namelist():
+            old.add(n)
+            dest = root / n
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(z.read(n))
+    for rel in new_files - old:
+        (root / rel).unlink(missing_ok=True)
+
+
+def upgrade_from_zip(zip_path: Path, root: Path = ROOT, force: bool = False, ignore_running: bool = False, pip: bool = True) -> dict:
+    """Put a newer version over this installation. Your data/, storage/ and master_data/ are kept; new rows are added by the migration; on any failure the
+    old code and your data are put back."""
+    from .version import current, number
+    if not Path(zip_path).exists():
+        raise BackupError(f"File not found: {zip_path}")
+    if not ignore_running and _port_busy():
+        raise BackupError("The tool is running (http://127.0.0.1:8000 answers). Close its window first, then run the upgrade again.")
+    with zipfile.ZipFile(zip_path) as z:
+        prefix, new_v = _zip_layout(z)
+        old_v = current(root)
+        if number(new_v) <= number(old_v) and not force:
+            raise BackupError(f"This ZIP is version {new_v}; you already have {old_v}. Download the newer ZIP (or use --force to reinstall the same version).")
+        safety = make_backup(root, f"dtc-before-upgrade-{old_v}-to-{new_v}")
+        old_files = _code_files(root)
+        code_zip = root / BACKUPS / f"dtc-code-{old_v}-before-{new_v}.zip"
+        with zipfile.ZipFile(code_zip, "w", zipfile.ZIP_DEFLATED) as cz:
+            for rel in old_files:
+                cz.write(root / rel, rel)
+        new_files: set[str] = set()
+        kept_master = []
+        try:
+            for n in z.namelist():
+                if not n.startswith(prefix) or n.endswith("/"):
+                    continue
+                rel = n[len(prefix):]
+                top = rel.split("/")[0]
+                if not rel or top in NEVER_TOUCHED or "__pycache__" in rel or rel.startswith("releases/"):
+                    continue
+                dest = root / rel
+                if top == "master_data":
+                    if dest.exists():
+                        kept_master.append(rel)           # your rates, machines and formulas stay; new rows come from the migration
+                        continue
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(z.read(n))
+                if top != "master_data":
+                    new_files.add(rel)
+            manifest = root / MANIFEST
+            previous = set(json.loads(manifest.read_text())) if manifest.exists() else set(old_files)
+            removed = sorted(f for f in previous - new_files if (root / f).exists() and f.split("/")[0] not in ("master_data",))
+            for f in removed:
+                (root / f).unlink(missing_ok=True)
+            manifest.write_text(json.dumps(sorted(new_files)))
+            steps = {}
+            if pip and (root / "requirements.txt").exists():
+                r = subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"], cwd=root, capture_output=True, text=True)
+                if r.returncode != 0:
+                    raise BackupError("pip install failed: " + (r.stderr or r.stdout)[-400:])
+                steps["pip"] = "requirements installed"
+            r = subprocess.run([sys.executable, "-m", "backend.app.migrate"], cwd=root, capture_output=True, text=True)
+            if r.returncode != 0:
+                raise BackupError("The migration failed: " + (r.stderr or r.stdout)[-500:])
+            steps["migrate"] = "ok"
+        except Exception as exc:
+            _restore_code(code_zip, root, new_files)
+            restore(safety, root)
+            raise BackupError(f"Upgrade to {new_v} failed and was undone (old code and data are back): {exc}") from None
+    return {"from": old_v, "to": new_v, "backup": str(safety), "code_backup": str(code_zip), "files_updated": len(new_files), "files_removed": len(removed),
+            "master_data_kept": kept_master, "steps": steps, "next": "Start the tool again (Start_Tool) and check one known part"}
+
+
 # ---------- update ----------
 
 def _git(root: Path, *args: str, check: bool = True) -> str:
@@ -140,7 +301,11 @@ def update(root: Path = ROOT, mode: str = "ask") -> dict:
 
 def main(argv=None, root: Path = ROOT, prog: str = "backup") -> int:
     ap = argparse.ArgumentParser(prog=prog)
-    if prog == "update":
+    if prog == "upgrade":
+        ap.add_argument("zipfile", nargs="?", help="ZIP of the new version (default: newest in ./upgrades or Downloads)")
+        ap.add_argument("--force", action="store_true", help="reinstall the same or an older version")
+        ap.add_argument("--ignore-running", action="store_true")
+    elif prog == "update":
         g = ap.add_mutually_exclusive_group()
         g.add_argument("--keep-mine", action="store_true")
         g.add_argument("--take-new", action="store_true")
@@ -149,7 +314,10 @@ def main(argv=None, root: Path = ROOT, prog: str = "backup") -> int:
         ap.add_argument("--only", default=",".join(PARTS), help="comma list of master_data,data,storage")
     a = ap.parse_args(argv)
     try:
-        if prog == "update":
+        if prog == "upgrade":
+            res = upgrade_from_zip(Path(a.zipfile) if a.zipfile else find_zip(root), root, a.force, a.ignore_running)
+            print(json.dumps(res, indent=2))
+        elif prog == "update":
             res = update(root, "keep-mine" if a.keep_mine else "take-new" if a.take_new else "ask")
             print(json.dumps(res, indent=2))
         elif a.restore:

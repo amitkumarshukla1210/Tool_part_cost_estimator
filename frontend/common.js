@@ -35,3 +35,8 @@ window.DTC = (function () {
 
   return { $, esc, fmt, inr, api, registerMeta, options, status, thumb };
 })();
+
+// version in the footer of every page
+fetch("/api/version").then((r) => (r.ok ? r.json() : null)).then((v) => {
+  if (v) document.querySelectorAll(".footnote").forEach((el) => { if (!el.textContent.includes(v.version)) el.textContent += ` · Version ${v.version}`; });
+}).catch(() => {});

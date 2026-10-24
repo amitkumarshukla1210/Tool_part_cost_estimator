@@ -1338,6 +1338,66 @@ def import_page():
     return FileResponse(FRONTEND_DIR / "import.html")
 
 
+@app.get("/api/version")
+def api_version():
+    from . import version
+    return {"version": version.current()}
+
+
+def _bk(fn):
+    from . import backup_tools
+    try:
+        return fn(backup_tools)
+    except backup_tools.BackupError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+def _entry(bt, path):
+    return next(b for b in bt.list_backups(bt.ROOT) if b["name"] == path.name)
+
+
+@app.get("/api/backups")
+def backups_list():
+    """The backups in the backups folder (newest first)."""
+    return _bk(lambda bt: bt.list_backups(bt.ROOT))
+
+
+@app.post("/api/backups")
+def backups_make(data: dict | None = None):
+    """Zip master_data/, data/ and the CAD storage folder into the backups folder."""
+    return _bk(lambda bt: _entry(bt, bt.make_backup(bt.ROOT)))
+
+
+@app.get("/api/backups/{name}")
+def backups_download(name: str):
+    return _bk(lambda bt: FileResponse(bt.backup_path(name, bt.ROOT), media_type="application/zip", filename=name))
+
+
+@app.post("/api/backups/upload")
+async def backups_upload(file: UploadFile = File(...)):
+    """Keep a backup ZIP from your laptop in the backups folder (then restore it by name)."""
+    content = await file.read()
+    return _bk(lambda bt: _entry(bt, bt.add_upload(content, file.filename or "backup.zip", bt.ROOT)))
+
+
+@app.post("/api/backups/restore")
+def backups_restore(data: dict):
+    """Put a backup back (what is there now is zipped first). only: any of master_data, data, storage (default all)."""
+    def go(bt):
+        only = tuple(data.get("only") or bt.PARTS)
+        res = bt.restore(bt.backup_path(str(data.get("name") or ""), bt.ROOT), bt.ROOT, only)
+        projects_db._engine.cache_clear()          # the project database file was replaced: reconnect
+        from . import deletion
+        deletion._clear_caches()
+        return res | {"note": "Restored. Reload the page; if anything looks old, restart the tool."}
+    return _bk(go)
+
+
+@app.get("/backup")
+def backup_page():
+    return FileResponse(FRONTEND_DIR / "backup.html")
+
+
 @app.get("/help")
 def help_page():
     return FileResponse(FRONTEND_DIR / "help.html")
