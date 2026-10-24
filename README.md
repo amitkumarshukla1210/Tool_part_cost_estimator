@@ -822,6 +822,14 @@ every change of the technical data is logged). It is on the **tool part drawings
 PDF, strip DXF, blank DXF, tool pack PDF; the release is that of the part's released sheet-metal tool design). The DXF carries the logo as vectors. *Sheet-layout files:*
 `GET /api/parts/{id}/sheet-layout/strip.pdf`.
 
+**4. Every dimension carries its tolerance (mm or µm).** On the tool part drawing (PDF and DXF) the overall length, width and height show their tolerance
+(`160.00 ±0.5`), every hole its size tolerance (`H7 +0.015/0`, a tapped hole its thread class `M14-6H`) and a position tolerance, every pocket and
+wire-cut opening its size and position tolerance. The defaults come from Master data → *Feature tolerances* (overall: general ISO 2768 by size; blind plain holes and pockets:
+the fit named in the class tolerance text, e.g. H7; through holes: general; openings ±0.01; positions of fitted features ±0.01) and the limits of a fit from *Fit tolerances*
+(ISO 286: H6, H7, H8, h6, h7, g6, f7, k6, m6 by size range; EXAMPLE values, check against your copy of the standard). Choose **mm or µm** per part (`H7 +15/0 µm`).
+Change the tolerance of any dimension in the form (*Dimension tolerances*) or in the Excel sheet *Dimension tolerances*: `general`, `class`, a fit (`H7`, `g6` …), `±0.02`,
+`+0.02/-0.01` or a thread class (`6H`); each change goes into the revision history.
+
 ## Machine, process parameters and design skills (roadmap stage 27)
 
 **1. The machine the tool runs on.** On the tool-design page *Generate new design* first asks: *Which machine will this tool run on?* Type what you know (clamp tonnage, platen or bolster size,

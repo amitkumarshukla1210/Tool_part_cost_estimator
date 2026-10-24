@@ -1,5 +1,6 @@
 """Stage 28: technical data on the tool drawings (review, change, download / upload) and the title block with logo, release data and revision history."""
 import io
+import re
 import zipfile
 
 from fastapi.testclient import TestClient
@@ -86,7 +87,7 @@ def test_excel_download_upload_roundtrip_and_validation():
     x = client.get(f"/api/tool-designs/{did}/drawing-data.xlsx")
     assert x.status_code == 200
     wb = load_workbook(io.BytesIO(x.content))
-    assert wb.sheetnames == ["Drawing data", "How to use", "Tolerance tables", "Revision history"]
+    assert wb.sheetnames == ["Drawing data", "Dimension tolerances", "How to use", "Tolerance tables", "Revision history"]
     ws = wb["Drawing data"]
     top = next(r for r in range(1, 10) if ws.cell(r, 1).value == "Part no.")                      # logo rows sit above the header
     assert [c_.value for c_ in ws[top]][:6] == ["Part no.", "Name", "Qty per tool", "Revision", "Material grade", "Hardness"]
@@ -151,3 +152,55 @@ def test_strip_layout_drawings_carry_the_title_block():
     z = zipfile.ZipFile(io.BytesIO(client.get(f"/api/parts/{pid}/design-pack.zip").content)) if client.get(f"/api/parts/{pid}/design-pack.zip").status_code == 200 else None
     if z:
         assert any(n.endswith("_strip_layout.pdf") for n in z.namelist())
+
+
+def test_fit_limits_and_tolerance_text():
+    r = drawing_data.resolve
+    assert drawing_data.fmt_tol(r("H7", 8, "m", "")) == "H7 +0.015/0"
+    assert drawing_data.fmt_tol(r("g6", 20, "m", ""), "µm") == "g6 -7/-20 µm"
+    assert drawing_data.fmt_tol(r("general", 250, "m", "")) == "±0.5"
+    assert drawing_data.fmt_tol(r("class", 12, "f", "ISO 2768-f; fits H7")) == "H7 +0.018/0"
+    assert drawing_data.fmt_tol(r("class", 10, "m", "ISO 2768-m; parallelism 0.05")) == "±0.2"         # no fit named: general
+    assert drawing_data.fmt_tol(r("+0.02/-0.01", 5, "m", ""), "µm") == "+20/-10 µm" and drawing_data.check_spec("0.05") == "±0.05"
+    bad = mould_db.tables()
+    bad["fit_tolerances"].append({"fit": "Z9", "from_mm": 0, "to_mm": 3, "upper_um": "-5", "lower_um": "+5", "is_example": 1, "notes": ""})
+    try:
+        mould_db.write(bad)
+        raise AssertionError("upper below lower accepted")
+    except mould_db.MouldDbError as exc:
+        assert "upper must not be below lower" in str(exc)
+
+
+def test_every_dimension_has_a_tolerance_and_it_can_be_changed():
+    d = design(mould("DD-4"))
+    did = d["id"]
+    data = client.get(f"/api/tool-designs/{did}/drawing-data").json()
+    p = next(x for x in data["parts"] if any(re.fullmatch(r"H\d+", r["key"]) for r in x["dimensions"]))
+    dims = {r["key"]: r for r in p["dimensions"]}
+    assert {"L", "W", "H"} <= set(dims) and all(r["tolerance"] for r in p["dimensions"])
+    hole = next(k for k in dims if re.fullmatch(r"H\d+", k))
+    r = client.put(f"/api/tool-designs/{did}/drawing-data", json={"items": [{"part_no": p["part_no"], "fields": {"tolerance_unit": "µm", "features": {hole: "H7", "L": "±0.05"}}}]})
+    assert r.status_code == 200, r.text
+    assert "tolerance " + hole in r.json()["changed"][0]["summary"]
+    p2 = next(x for x in client.get(f"/api/tool-designs/{did}/drawing-data").json()["parts"] if x["part_no"] == p["part_no"])
+    d2 = {r["key"]: r for r in p2["dimensions"]}
+    assert d2[hole]["tolerance"].startswith("H7 +") and d2[hole]["tolerance"].endswith("µm") and d2["L"]["tolerance"] == "±50 µm" and d2["L"]["changed"]
+    text = pdf_text(client.get(f"/api/tool-designs/{did}/components/{p2['component_id']}/drawing.pdf").content)
+    assert "±50 µm" in text and "H7 +" in text and "Tolerances in µm" in text
+    dxf = client.get(f"/api/tool-designs/{did}/components/{p2['component_id']}/drawing.dxf").content.decode()
+    assert "H7 +" in dxf and "±50 um" in dxf
+    assert client.put(f"/api/tool-designs/{did}/drawing-data", json={"items": [{"part_no": p["part_no"], "fields": {"features": {hole: "X99"}}}]}).status_code == 400
+    assert client.put(f"/api/tool-designs/{did}/drawing-data", json={"items": [{"part_no": p["part_no"], "fields": {"features": {"Q1": "H7"}}}]}).status_code == 400
+    # Excel: the dimension sheet round-trips
+    wb = load_workbook(io.BytesIO(client.get(f"/api/tool-designs/{did}/drawing-data.xlsx").content))
+    ws = wb["Dimension tolerances"]
+    row = next(i for i in range(2, ws.max_row + 1) if ws.cell(i, 1).value == p["part_no"] and ws.cell(i, 2).value == "W")
+    ws.cell(row, 5).value = "+0.1/-0.05"
+    for w_ in wb.worksheets:
+        w_._images = []
+    buf = io.BytesIO(); wb.save(buf)
+    up = client.post(f"/api/tool-designs/{did}/drawing-data/upload", files={"file": ("d.xlsx", buf.getvalue())})
+    assert up.status_code == 200, up.text
+    p3 = next(x for x in client.get(f"/api/tool-designs/{did}/drawing-data").json()["parts"] if x["part_no"] == p["part_no"])
+    d3 = {r["key"]: r for r in p3["dimensions"]}
+    assert d3["W"]["tolerance"] == "+100/-50 µm" and d3["L"]["tolerance"] == "±50 µm" and d3[hole]["tolerance"].startswith("H7")   # earlier changes kept

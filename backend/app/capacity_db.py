@@ -343,4 +343,4 @@ if __name__ == "__main__":
     from . import drawing_data, fea, foundry_design, sheet_compare, tool_components, tool_design, tool_internals, tool_review
     print(json.dumps({"machines_and_bases": extend(), "stage_rules": tool_design.seed(), "fea_parameters": fea.seed(),
                       "components": tool_components.seed(), "details": tool_internals.seed(), "review": tool_review.seed(),
-                      "foundry": foundry_design.seed(), "sheet_compare": sheet_compare.seed(), "drawing_data": drawing_data.seed()}, indent=1))
+                      "foundry": foundry_design.seed(), "sheet_compare": sheet_compare.seed(), "drawing_data": drawing_data.seed() + drawing_data.seed_tolerances()}, indent=1))

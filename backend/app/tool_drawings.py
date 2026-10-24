@@ -81,6 +81,10 @@ def component_pdf(comp: dict, info: dict, shape: cq.Shape, head: dict, data: dic
     n, d = _scale_for(L, W, H)
     s = n / d
     feats = feature_items(info)
+    from . import drawing_data, drawing_sheet
+    data = data or drawing_data.effective(info, None)
+    ft = data.get("feature_tol") or drawing_data.feature_tolerances(info, data["tolerance_class"], {}, data.get("tolerance_unit", "mm"))
+    dim_key = {"top": ("L", "W"), "front": ("L", "H"), "right": ("W", "H")}
     ss = getSampleStyleSheet()
     small = ParagraphStyle("s", parent=ss["Normal"], fontSize=7, leading=8.5)
     bb = shape.BoundingBox()
@@ -123,10 +127,10 @@ def component_pdf(comp: dict, info: dict, shape: cq.Shape, head: dict, data: dic
         c.setStrokeColor(theme["brand"]); c.setFillColor(theme["brand"]); c.setLineWidth(0.3); c.setFont("Helvetica", 7)
         c.line(ax, ay - 6 * mm, bx, ay - 6 * mm)
         c.line(ax, ay - 8 * mm, ax, ay - 4 * mm); c.line(bx, ay - 8 * mm, bx, ay - 4 * mm)
-        c.drawCentredString((ax + bx) / 2, ay - 9.5 * mm, f"{(x1 - x0):.2f}")
+        c.drawCentredString((ax + bx) / 2, ay - 9.5 * mm, f"{(x1 - x0):.2f} {ft['overall'][dim_key[name][0]]['text']}")
         c.line(ax - 6 * mm, ay, ax - 6 * mm, by)
         c.line(ax - 8 * mm, ay, ax - 4 * mm, ay); c.line(ax - 8 * mm, by, ax - 4 * mm, by)
-        c.saveState(); c.translate(ax - 7.5 * mm, (ay + by) / 2); c.rotate(90); c.drawCentredString(0, 0, f"{(y1 - y0):.2f}"); c.restoreState()
+        c.saveState(); c.translate(ax - 7.5 * mm, (ay + by) / 2); c.rotate(90); c.drawCentredString(0, 0, f"{(y1 - y0):.2f} {ft['overall'][dim_key[name][1]]['text']}"); c.restoreState()
         c.setFont("Helvetica-Bold", 8); c.drawString(ax, by + 3 * mm, {"top": "TOP", "front": "FRONT", "right": "RIGHT"}[name])
         # datum marker O at the minimum corner of the view
         c.setStrokeColor(colors.HexColor("#b91c1c")); c.setFillColor(colors.HexColor("#b91c1c"))
@@ -147,8 +151,6 @@ def component_pdf(comp: dict, info: dict, shape: cq.Shape, head: dict, data: dic
     for p_ in feats["pockets"]:
         balloon("top", p_["x_mm"] + org[0] + p_["length_mm"] / 2, p_["y_mm"] + org[1] + p_["width_mm"] / 2, p_["id"], orange)
     # right column: the tables, above the revision history and the title block
-    from . import drawing_data, drawing_sheet
-    data = data or drawing_data.effective(info, None)
     meta = meta or drawing_sheet.sheet_meta(None, [], comp["name"], comp["part_no"], comp["rev"], f"{n}:{d:g}", comp.get("sha", ""), bool(info.get("is_example")))
     meta = dict(meta, scale=f"{n}:{d:g}", checksum=meta.get("checksum") or comp.get("sha", ""))
     st = info["stock"]
@@ -179,18 +181,25 @@ def component_pdf(comp: dict, info: dict, shape: cq.Shape, head: dict, data: dic
         return y_top - (h / mm) - 8
     y = PAGE_H - 18
     hole_rows = _group_holes(feats["holes"])
+    unit = ft["unit"]
     if hole_rows:
-        rows = [["ID", "Ø", "Depth", "Thru", "Ax", "X", "Y", "Z", "Note"]] + [[r["id"], f"{r['dia']:g}", f"{r['depth']:g}", "yes" if r["through"] else "no", r["axis"],
-                f"{r['x']:.2f}", f"{r['y']:.2f}", f"{r['z']:.2f}", f"{r['thread']} tap" if r["thread"] and not r["through"] else ""] for r in hole_rows]
-        y = table(rows, [9, 11, 12, 9, 7, 17, 17, 17, 14], y, "HOLES  (position from datum O, mm)")
+        rows = [["ID", "Ø", "Ø tolerance", "Depth", "Thru", "Ax", "X", "Y", "Z", "Pos ±"]]
+        for r in hole_rows:
+            t = ft["holes"][r["id"]]
+            size = (f"{r['thread']}-{t['size']['text']}" if t["rule"] == "hole_thread" and r["thread"] else t["size"]["text"])
+            rows.append([r["id"], f"{r['dia']:g}", size[:20], f"{r['depth']:g}", "yes" if r["through"] else "no", r["axis"],
+                         f"{r['x']:.2f}", f"{r['y']:.2f}", f"{r['z']:.2f}", t["pos"]["text"].replace(" µm", "")])
+        y = table(rows, [8, 9, 24, 10, 8, 6, 13, 13, 13, 9], y, f"HOLES  (position from datum O; tolerances in {unit})")
     if feats["openings"] and y - 4 > y_min + 14:
-        rows = [["ID", "X", "Y", "Length", "Width", "Thru", "Contour"]] + [[o["id"], f"{o['x_mm']:.2f}", f"{o['y_mm']:.2f}", f"{o['length_mm']:.2f}",
-                f"{o['width_mm']:.2f}", "yes" if o.get("through") else "no", f"{o['perimeter_mm']:.1f}"] for o in feats["openings"]]
-        y = table(rows, [10, 20, 20, 20, 20, 10, 13], y, "OPENINGS  (wire cut / profile; contour length mm)")
+        rows = [["ID", "X", "Y", "Length", "Width", "Size tol.", "Pos ±", "Contour"]] + [[o["id"], f"{o['x_mm']:.2f}", f"{o['y_mm']:.2f}", f"{o['length_mm']:.2f}",
+                f"{o['width_mm']:.2f}", ft["openings"][o["id"]]["size"]["text"].replace(" µm", ""), ft["openings"][o["id"]]["pos"]["text"].replace(" µm", ""),
+                f"{o['perimeter_mm']:.1f}"] for o in feats["openings"]]
+        y = table(rows, [8, 15, 15, 15, 15, 18, 13, 13], y, f"OPENINGS  (wire cut / profile; tolerances in {unit})")
     if feats["pockets"] and y - 4 > y_min + 14:
-        rows = [["ID", "X", "Y", "Length", "Width", "Depth"]] + [[p["id"], f"{p['x_mm']:.2f}", f"{p['y_mm']:.2f}", f"{p['length_mm']:.2f}",
-                f"{p['width_mm']:.2f}", f"{p['depth_mm']:.2f}"] for p in feats["pockets"]]
-        y = table(rows, [10, 22, 22, 22, 22, 15], y, "POCKETS  (floor depth below the top face, mm)")
+        rows = [["ID", "X", "Y", "Length", "Width", "Depth", "Size tol.", "Pos ±"]] + [[p["id"], f"{p['x_mm']:.2f}", f"{p['y_mm']:.2f}", f"{p['length_mm']:.2f}",
+                f"{p['width_mm']:.2f}", f"{p['depth_mm']:.2f}", ft["pockets"][p["id"]]["size"]["text"].replace(" µm", ""), ft["pockets"][p["id"]]["pos"]["text"].replace(" µm", "")]
+                for p in feats["pockets"]]
+        y = table(rows, [8, 15, 15, 15, 15, 13, 19, 12], y, f"POCKETS  (depth below the top face; tolerances in {unit})")
     radii = [f for f in info["features"]["fillets"] if f["radius_mm"] > 0][:8]
     if radii and y - 4 > y_min + 14:
         rows = [["R", "Type", "Length"]] + [[f"{f['radius_mm']:g}", "convex" if f["convex"] else "concave", f"{f['length_mm']:g}"] for f in radii]
@@ -219,11 +228,12 @@ def component_pdf(comp: dict, info: dict, shape: cq.Shape, head: dict, data: dic
     block(160, "ANGLES (±, shorter leg mm)", [["Shorter leg", "±"]] + [[r["range"], r["value"]] for r in data["angular_table"]], [28, 16])
     # notes: the fixed ones, then the reviewer's note points
     notes = ["1. All dimensions in mm. Datum O = minimum corner of the part. Dimensions are those of the 3D file whose checksum is in the title block.",
-             f"2. Route: {info['route']}.", "3. No marks on formed or sealing surfaces. Mark the part number on a non-functional face.",
-             "4. Material certificate EN 10204 3.1 with the steel."]
+             f"2. Tolerances in {unit}: each dimension carries its own; a dimension without one is to {data['general_tolerance_text'].split(' · ')[0]} (table). Fits to ISO 286 (H7 = hole, g6 = shaft).",
+             f"3. Route: {info['route']}.", "4. No marks on formed or sealing surfaces. Mark the part number on a non-functional face.",
+             "5. Material certificate EN 10204 3.1 with the steel."]
     if any(views[k].get("simplified") for k in ("front", "top", "right")):
         notes.append("Views are simplified (bounding outline): too complex for hidden-line removal in the time allowed. The 3D STEP file and the hole table govern.")
-    notes += [f"{5 + i}. {t}" for i, t in enumerate(data["notes"])]
+    notes += [f"{6 + i}. {t}" for i, t in enumerate(data["notes"])]
     NX, NW = 206, 84
     c.setFont("Helvetica-Bold", 8); c.setFillColor(theme["ink"]); c.drawString(NX * mm, (sy + sh) * mm, "NOTES")
     py, floor = (sy + sh - 3) * mm, sy * mm
@@ -258,6 +268,10 @@ def component_dxf(comp: dict, info: dict, shape: cq.Shape, head: dict, data: dic
     gap = max(L, W, H) * 0.3
     origin = {"front": (0.0, 0.0), "top": (0.0, H + gap), "right": (L + gap, 0.0)}
     feats = feature_items(info)
+    from . import drawing_data
+    data = data or drawing_data.effective(info, None)
+    ft = data.get("feature_tol") or drawing_data.feature_tolerances(info, data["tolerance_class"], {}, data.get("tolerance_unit", "mm"))
+    dim_key = {"top": ("L", "W"), "front": ("L", "H"), "right": ("W", "H")}
     bb = shape.BoundingBox()
     org = (bb.xmin, bb.ymin, bb.zmin)
     for name, (ox, oy) in origin.items():
@@ -267,8 +281,9 @@ def component_dxf(comp: dict, info: dict, shape: cq.Shape, head: dict, data: dic
             for pl in v[key]:
                 msp.add_lwpolyline([(x - x0 + ox, y - y0 + oy) for x, y in pl], dxfattribs={"layer": layer})
         w, h = x1 - x0, y1 - y0
-        msp.add_linear_dim(base=(ox, oy - 12), p1=(ox, oy), p2=(ox + w, oy), dimstyle="EZDXF", dxfattribs={"layer": "DIM"}).render()
-        msp.add_linear_dim(base=(ox - 12, oy), p1=(ox, oy), p2=(ox, oy + h), angle=90, dimstyle="EZDXF", dxfattribs={"layer": "DIM"}).render()
+        tl, tw = (ft["overall"][k]["text"].replace("µm", "um") for k in dim_key[name])
+        msp.add_linear_dim(base=(ox, oy - 12), p1=(ox, oy), p2=(ox + w, oy), text=f"<> {tl}", dimstyle="EZDXF", dxfattribs={"layer": "DIM"}).render()
+        msp.add_linear_dim(base=(ox - 12, oy), p1=(ox, oy), p2=(ox, oy + h), angle=90, text=f"<> {tw}", dimstyle="EZDXF", dxfattribs={"layer": "DIM"}).render()
         msp.add_text(name.upper(), dxfattribs={"height": 5, "layer": "TEXT"}).set_placement((ox, oy + h + 6))
         msp.add_circle((ox, oy), 1.5, dxfattribs={"layer": "HOLES"})
         msp.add_text("O", dxfattribs={"height": 3, "layer": "HOLES"}).set_placement((ox + 2, oy + 2))
@@ -282,16 +297,18 @@ def component_dxf(comp: dict, info: dict, shape: cq.Shape, head: dict, data: dic
     for h in feats["holes"]:
         view = _hole_view(h["axis"])
         u, v = _uv(view, (h["pos"][0] + org[0], h["pos"][1] + org[1], h["pos"][2] + org[2]))
-        mark(view, u, v, f"{h['id']} Ø{h['dia']:g}x{h['depth']:g}{' thru' if h['through'] else ''}{' ' + h['thread'] + ' tap' if h.get('thread') and not h['through'] else ''}", h["dia"] / 2)
-    from . import drawing_data, drawing_sheet
-    data = data or drawing_data.effective(info, None)
+        t = ft["holes"][h["id"]]
+        tol = t["size"]["text"].replace("µm", "um")
+        mark(view, u, v, f"{h['id']} Ø{h['dia']:g} {tol}x{h['depth']:g}{' thru' if h['through'] else ''}{' ' + h['thread'] + ' tap' if h.get('thread') and not h['through'] else ''}"
+             f" pos {t['pos']['text'].replace('µm', 'um')}", h["dia"] / 2)
+    from . import drawing_sheet
     meta = meta or drawing_sheet.sheet_meta(None, [], comp["name"], comp["part_no"], comp["rev"], "1:1 (as drawn)", comp.get("sha", ""), bool(info.get("is_example")))
     meta = dict(meta, checksum=meta.get("checksum") or comp.get("sha", ""))
     st = info["stock"]
     y = -30.0
     notes = [f"TECHNICAL DATA  {comp['part_no']} rev {comp['rev']}  {comp['name']}  qty {comp.get('qty', 1)}",
              f"Material grade: {data['steel']}   Hardness: {data['hardness']}   Heat treatment: {data['heat_treatment']}   Surface treatment: {data['surface_treatment']}",
-             f"Surface roughness: Ra {data['finish_ra']:g} um unless stated   General tolerances: {data['general_tolerance_text']}",
+             f"Surface roughness: Ra {data['finish_ra']:g} um unless stated   General tolerances: {data['general_tolerance_text']}   Tolerances in {ft['unit'].replace('µm', 'um')}",
              "Linear (+/- mm): " + "  ".join(f"{r['range']}: {r['value']}" for r in data["linear_table"]),
              "Angular (+/- by shorter leg, mm): " + "  ".join(f"{r['range']}: {r['value']}" for r in data["angular_table"]),
              f"Raw stock {st['size_mm']} mm  {st['weight_kg']} kg (finished {st['finished_weight_kg']} kg)",
@@ -302,11 +319,13 @@ def component_dxf(comp: dict, info: dict, shape: cq.Shape, head: dict, data: dic
         msp.add_text(t, dxfattribs={"height": 3.5, "layer": "TEXT"}).set_placement((0, y))
         y -= 6
     for o in feats["openings"]:
-        msp.add_text(f"{o['id']} {o['length_mm']}x{o['width_mm']} at X{o['x_mm']} Y{o['y_mm']} contour {o['perimeter_mm']}mm",
+        msp.add_text(f"{o['id']} {o['length_mm']}x{o['width_mm']} {ft['openings'][o['id']]['size']['text'].replace('µm', 'um')} at X{o['x_mm']} Y{o['y_mm']} "
+                     f"pos {ft['openings'][o['id']]['pos']['text'].replace('µm', 'um')} contour {o['perimeter_mm']}mm",
                      dxfattribs={"height": 3, "layer": "TEXT"}).set_placement((0, y))
         y -= 5
     for p in feats["pockets"]:
-        msp.add_text(f"{p['id']} {p['length_mm']}x{p['width_mm']} depth {p['depth_mm']} at X{p['x_mm']} Y{p['y_mm']}",
+        msp.add_text(f"{p['id']} {p['length_mm']}x{p['width_mm']} {ft['pockets'][p['id']]['size']['text'].replace('µm', 'um')} depth {p['depth_mm']} at X{p['x_mm']} Y{p['y_mm']} "
+                     f"pos {ft['pockets'][p['id']]['pos']['text'].replace('µm', 'um')}",
                      dxfattribs={"height": 3, "layer": "TEXT"}).set_placement((0, y))
         y -= 5
     drawing_sheet.dxf_title_block(doc, msp, 0.0, y - 25, meta, 1.0)

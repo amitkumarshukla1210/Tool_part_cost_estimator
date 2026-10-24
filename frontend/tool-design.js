@@ -249,7 +249,7 @@ async function detail(id) {
 }
 
 const TD_LABEL = { steel: "Material grade", hardness: "Hardness", heat_treatment: "Heat treatment", surface_treatment: "Surface treatment", tolerance_class: "General tolerance class",
-  finish_ra: "Surface roughness Ra (µm)", tolerance: "Tolerance text" };
+  finish_ra: "Surface roughness Ra (µm)", tolerance: "Tolerance text", tolerance_unit: "Tolerances shown in" };
 
 async function techData(c, draft) {
   const el = $("techData");
@@ -260,6 +260,7 @@ async function techData(c, draft) {
   const ef = p.effective, df = p.defaults, dis = draft ? "" : "disabled";
   const field = (k) => {
     const inp = k === "steel" ? `<select data-k="${k}" ${dis} style="width:100%">${data.steels.map((s) => `<option ${s === ef[k] ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>`
+      : k === "tolerance_unit" ? `<select data-k="${k}" ${dis} style="width:100%">${["mm", "µm"].map((s) => `<option ${s === ef[k] ? "selected" : ""}>${s}</option>`).join("")}</select>`
       : k === "tolerance_class" ? `<select data-k="${k}" ${dis} style="width:100%">${["f", "m", "c", "v"].map((s) => `<option ${s === ef[k] ? "selected" : ""}>${s}</option>`).join("")}</select>`
       : `<input data-k="${k}" value="${esc(ef[k])}" ${dis} style="width:100%" />`;
     return `<tr><td style="width:34%">${TD_LABEL[k]}</td><td>${inp}<div class="note">default: ${esc(df[k])}</div></td></tr>`;
@@ -267,12 +268,21 @@ async function techData(c, draft) {
   el.className = "";
   el.innerHTML = `<table class="cost-table"><tbody>${Object.keys(TD_LABEL).map(field).join("")}
     <tr><td>Extra note points<br><span class="note">one per line, printed on the drawing (PDF and DXF)</span></td><td><textarea id="tdNotes" rows="4" style="width:100%" ${dis}>${esc((ef.notes || []).join("\n"))}</textarea></td></tr></tbody></table>
+    <h4>Dimension tolerances</h4>
+    <p class="note">Every dimension of the drawing with its tolerance. Type a new one to change it: general (ISO 2768), class (the fit in the class text), a fit (H7, g6, k6 …),
+      ±0.02 or +0.02/-0.01 (mm), or a thread class (6H). Empty = as drawn. Fit limits are Master data → Fit tolerances; the defaults per feature are Master data → Feature tolerances.</p>
+    <div style="max-height:320px;overflow:auto"><table class="cost-table"><thead><tr><th>Dim.</th><th>What</th><th>On the drawing</th><th>Change to</th></tr></thead><tbody>
+    ${(p.dimensions || []).map((r) => `<tr><td>${esc(r.key)}</td><td>${esc(r.what)}</td><td>${esc(r.tolerance)}${r.changed ? ' <span class="badge edited">changed</span>' : ""}</td>
+      <td><input data-f="${esc(r.key)}" value="${esc((ef.feature_overrides || {})[r.key] || "")}" placeholder="as drawn" ${dis} style="width:100%" /></td></tr>`).join("")}</tbody></table></div>
     ${draft ? `<button class="btn btn-primary small" id="tdSave" type="button">Save technical data</button> <span class="status" id="tdStatus"></span>
       <p class="note">Saved changes go into the drawing, the bill of materials, the purchase orders and the revision history on the drawing. A new steel grade re-weighs and re-prices the stock.</p>`
       : `<p class="note">This design is ${esc(design.status)}: its drawings are fixed. Start a new revision to change the data.</p>`}`;
   $("tdSave")?.addEventListener("click", async () => {
     const fields = {};
     el.querySelectorAll("[data-k]").forEach((i) => { if (String(i.value) !== String(df[i.dataset.k])) fields[i.dataset.k] = i.value; });
+    const features = {};
+    el.querySelectorAll("[data-f]").forEach((i) => { if (i.value.trim()) features[i.dataset.f] = i.value.trim(); });
+    if (Object.keys(features).length) fields.features = features;
     const notes = $("tdNotes").value.split("\n").map((x) => x.trim()).filter(Boolean);
     try {
       const r = await api(`/api/tool-designs/${design.id}/drawing-data`, { method: "PUT", body: JSON.stringify({ items: [{ part_no: c.part_no, fields, notes }] }) });

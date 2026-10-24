@@ -19,9 +19,10 @@ from . import auth, mould_db
 from . import projects_db as db
 
 CLASSES = ("f", "m", "c", "v")
-FIELDS = ("steel", "hardness", "heat_treatment", "surface_treatment", "tolerance_class", "finish_ra", "tolerance")
+FIELDS = ("steel", "hardness", "heat_treatment", "surface_treatment", "tolerance_class", "finish_ra", "tolerance", "tolerance_unit")
 LABELS = {"steel": "Material grade", "hardness": "Hardness", "heat_treatment": "Heat treatment", "surface_treatment": "Surface treatment",
-          "tolerance_class": "General tolerance class (f, m, c, v)", "finish_ra": "Surface roughness Ra (µm)", "tolerance": "Tolerance text (fits, forming surface …)"}
+          "tolerance_class": "General tolerance class (f, m, c, v)", "finish_ra": "Surface roughness Ra (µm)", "tolerance": "Tolerance text (fits, forming surface …)",
+          "tolerance_unit": "Tolerances shown in (mm or µm)"}
 MAX_NOTES, MAX_NOTE = 12, 300
 EXAMPLE = "EXAMPLE - ISO 2768-1 values as remembered: check them against your copy of the standard"
 LINEAR = ((0.5, 3), (3, 6), (6, 30), (30, 120), (120, 400), (400, 1000), (1000, 2000), (2000, 4000))
@@ -57,6 +58,25 @@ def validate(clean: dict) -> None:
             raise mould_db.MouldDbError(f"General tolerances row {i}: kind must be linear or angular.")
         if r["to_mm"] <= r["from_mm"] or r["value"] <= 0:
             raise mould_db.MouldDbError(f"General tolerances row {i}: 'to' must be above 'from' and the value above 0.")
+    _validate_fits(clean)
+
+
+def _validate_fits(clean: dict) -> None:
+    for i, r in enumerate(clean.get("fit_tolerances", []), start=2):
+        try:
+            u, lo = float(r["upper_um"]), float(r["lower_um"])
+        except ValueError:
+            raise mould_db.MouldDbError(f"Fit tolerances row {i}: deviations must be numbers in µm (with sign).") from None
+        if u < lo or r["to_mm"] <= r["from_mm"]:
+            raise mould_db.MouldDbError(f"Fit tolerances row {i}: upper must not be below lower, 'to' above 'from'.")
+    for i, r in enumerate(clean.get("feature_tolerances", []), start=2):
+        if r["feature"] not in SEED_FEATURES:
+            raise mould_db.MouldDbError(f"Feature tolerances row {i}: feature must be one of {', '.join(SEED_FEATURES)}.")
+        try:
+            check_spec(r["spec"])
+        except auth.AuthError as exc:
+            if "not in Master data" not in str(exc):
+                raise mould_db.MouldDbError(f"Feature tolerances row {i}: {exc}") from None
 
 
 def tolerance_class(text: str, override: str | None = None) -> str:
@@ -99,12 +119,12 @@ def surface_treatment_of(info: dict) -> str:
 
 def defaults(info: dict) -> dict:
     return {"steel": info["steel"], "hardness": info["hardness"] or "as supplied", "heat_treatment": heat_treatment_of(info), "surface_treatment": surface_treatment_of(info),
-            "tolerance_class": tolerance_class(info["tolerance"]), "finish_ra": info["finish_ra"] or 3.2, "tolerance": info["tolerance"]}
+            "tolerance_class": tolerance_class(info["tolerance"]), "finish_ra": info["finish_ra"] or 3.2, "tolerance": info["tolerance"], "tolerance_unit": "mm"}
 
 
 def effective(info: dict, over: dict | None) -> dict:
     """The technical data the drawing prints: class defaults, over-typed by the user, with the tolerance tables of the class."""
-    f = defaults(info) | {k: v for k, v in ((over or {}).get("fields") or {}).items() if v not in (None, "")}
+    f = defaults(info) | {k: v for k, v in ((over or {}).get("fields") or {}).items() if v not in (None, "") and k != "features"}
     cls = tolerance_class(f["tolerance"], f["tolerance_class"])
     f["tolerance_class"] = cls
     small = sorted(info["bbox_mm"])[0]
@@ -114,6 +134,9 @@ def effective(info: dict, over: dict | None) -> dict:
     f["angular_table"] = [{"range": (f"up to {r['to']:g}" if r["from"] == 0 else f"over {r['from']:g}" if r["to"] >= 100000 else f"{r['from']:g} – {r['to']:g}"), "value": fmt_angle(r["value"])} for r in ang]
     f["general_tolerance_text"] = f"ISO 2768-{cls}" + (f" · {f['tolerance']}" if f["tolerance"] and "2768" not in f["tolerance"] else (f" · {f['tolerance'].split(';', 1)[1].strip()}" if ";" in f["tolerance"] else ""))
     f["notes"] = list((over or {}).get("notes") or [])
+    f["feature_overrides"] = dict(((over or {}).get("fields") or {}).get("features") or {})
+    if info.get("features") is not None:
+        f["feature_tol"] = feature_tolerances(info, cls, f["feature_overrides"], f["tolerance_unit"])
     return f
 
 
@@ -155,9 +178,25 @@ def _clean(fields: dict | None, notes) -> tuple[dict, list]:
     out = {}
     steels = {r["code"] for r in mould_db.tables()["tool_materials"]}
     for k, v in (fields or {}).items():
-        if k not in FIELDS:
+        if k not in FIELDS and k != "features":
             raise auth.AuthError(f"'{k}' is not a drawing data field ({', '.join(FIELDS)}).", 400)
+        if k == "features":
+            feats = {}
+            for key, spec in (v or {}).items():
+                if not re.fullmatch(r"(L|W|H|[HOP]\d+(@pos)?)", str(key)):
+                    raise auth.AuthError(f"'{key}' is not a dimension of the drawing (L, W, H, H1, H1@pos, O1, P1 …).", 400)
+                if spec not in (None, ""):
+                    feats[str(key)] = check_spec(spec)
+            if feats:
+                out["features"] = feats
+            continue
         if v in (None, ""):
+            continue
+        if k == "tolerance_unit":
+            v = "µm" if str(v).strip().lower() in ("µm", "um", "micron", "microns", "μm") else "mm" if str(v).strip().lower() == "mm" else None
+            if v is None:
+                raise auth.AuthError("Tolerances are shown in mm or µm.", 400)
+            out[k] = v
             continue
         if k == "steel" and v not in steels:
             raise auth.AuthError(f"Material grade '{v}' is not in Master data → Tool materials: add it there first (the purchase order prices it from there).", 400)
@@ -182,7 +221,10 @@ def _clean(fields: dict | None, notes) -> tuple[dict, list]:
 
 
 def _summary(old: dict, fields: dict, notes: list) -> str:
-    bits = [f"{LABELS[k].split(' (')[0].lower()} {old.get('fields', {}).get(k, 'default')} → {v}" for k, v in fields.items() if old.get("fields", {}).get(k) != v]
+    bits = [f"{LABELS[k].split(' (')[0].lower()} {old.get('fields', {}).get(k, 'default')} → {v}" for k, v in fields.items() if k != "features" and old.get("fields", {}).get(k) != v]
+    of, nf = old.get("fields", {}).get("features") or {}, fields.get("features") or {}
+    bits += [f"tolerance {k} {of.get(k, 'default')} → {nf.get(k, 'default')}" for k in sorted(set(of) | set(nf)) if of.get(k) != nf.get(k)]
+    bits += [f"{LABELS[k].split(' (')[0].lower()} back to default" for k in old.get("fields", {}) if k != "features" and k not in fields]
     if (old.get("notes") or []) != notes:
         bits.append(f"note points {len(old.get('notes') or [])} → {len(notes)}")
     return "Technical data changed: " + "; ".join(bits)
@@ -257,7 +299,7 @@ def workbook(design_id: int, rows: list[dict], history_rows: list[dict]) -> byte
     ws = wb.active
     ws.title = "Drawing data"
     head = ["Part no.", "Name", "Qty per tool", "Revision", "Material grade", "Hardness", "Heat treatment", "Surface treatment", "General tolerance class (f, m, c, v)",
-            "Surface roughness Ra (µm)", "Tolerance text", "Extra note points (one per line)", "Last edited by"]
+            "Surface roughness Ra (µm)", "Tolerance text", "Extra note points (one per line)", "Last edited by", "Tolerances shown in (mm / µm)"]
     ws.append(head)
     for c in ws[1]:
         c.font, c.fill = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="0F172A")
@@ -265,20 +307,34 @@ def workbook(design_id: int, rows: list[dict], history_rows: list[dict]) -> byte
     for r in rows:
         e = r["eff"]
         ws.append([r["part_no"], r["name"], r["qty"], r["rev"], e["steel"], e["hardness"], e["heat_treatment"], e["surface_treatment"], e["tolerance_class"], e["finish_ra"], e["tolerance"],
-                   "\n".join(e["notes"]), r.get("edited_by") or ""])
-    for i, w in enumerate((18, 28, 8, 8, 24, 24, 24, 24, 16, 12, 44, 60, 18), start=1):
+                   "\n".join(e["notes"]), r.get("edited_by") or "", e.get("tolerance_unit", "mm")])
+    for i, w in enumerate((18, 28, 8, 8, 24, 24, 24, 24, 16, 12, 44, 60, 18, 14), start=1):
         ws.column_dimensions[ws.cell(1, i).column_letter].width = w
     for row in ws.iter_rows(min_row=2):
         for c in row:
             c.alignment = Alignment(wrap_text=True, vertical="top")
-        for c in row[4:12]:
+        for c in list(row[4:12]) + [row[13]]:
             c.fill = PatternFill("solid", fgColor="FEF9C3")        # the cells you may change
     ws.freeze_panes = "C2"
+    ds = wb.create_sheet("Dimension tolerances")
+    ds.append(["Part no.", "Dimension", "What", "Tolerance on the drawing", "Your tolerance (empty = as drawn)"])
+    for c in ds[1]:
+        c.font, c.fill = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="0F172A")
+    for r in rows:
+        ov = r["eff"].get("feature_overrides") or {}
+        for f in r.get("dimensions") or []:
+            ds.append([r["part_no"], f["key"], f["what"], f["tolerance"], ov.get(f["key"], "")])
+            ds.cell(ds.max_row, 5).fill = PatternFill("solid", fgColor="FEF9C3")
+    for col_, w in zip("ABCDE", (18, 12, 30, 28, 34)):
+        ds.column_dimensions[col_].width = w
+    ds.freeze_panes = "A2"
     ins = wb.create_sheet("How to use")
     for line in ["Drawing data sheet of the tool design", "",
                  "1. Review the yellow columns: material grade, hardness, heat and surface treatment, general tolerance class, surface roughness, tolerance text, extra note points.",
                  "2. Change what must change. Material grade must be a grade of Master data → Tool materials (the purchase order prices it). Class is f, m, c or v.",
                  "3. Upload this file on the tool-design page (BOM & PO → Drawing data → Upload). The drawings (PDF and DXF), the bill of materials and the purchase orders follow.",
+                 "3b. Sheet 'Dimension tolerances': every dimension of every drawing with its tolerance. Type a new one in the yellow column: general (ISO 2768), class,"
+                 " a fit (H7, g6, k6 …), ±0.02, +0.02/-0.01 (mm) or a thread class (6H). Empty = as drawn. Column N of 'Drawing data' shows them in mm or µm.",
                  "4. Only a draft can be changed. A released design is never edited: start a new revision.",
                  "5. Every change is kept in the revision history printed on the drawing. Do not change the grey columns, the part numbers or the sheet names."]:
         ins.append([line])
@@ -311,14 +367,24 @@ def read_workbook(content: bytes) -> dict[str, dict]:
     if top is None:
         raise auth.AuthError("The header row ('Part no.', 'Name', …) of the downloaded sheet is missing from 'Drawing data'.", 400)
     rows = rows[top:]
-    cols = {"steel": 4, "hardness": 5, "heat_treatment": 6, "surface_treatment": 7, "tolerance_class": 8, "finish_ra": 9, "tolerance": 10}
+    cols = {"steel": 4, "hardness": 5, "heat_treatment": 6, "surface_treatment": 7, "tolerance_class": 8, "finish_ra": 9, "tolerance": 10, "tolerance_unit": 13}
     out = {}
     for r in rows[1:]:
         if not r or not r[0]:
             continue
-        r = list(r) + [None] * 13
+        r = list(r) + [None] * 14
         out[str(r[0]).strip()] = {"fields": {k: r[i] for k, i in cols.items() if r[i] not in (None, "")},
                                   "notes": [x for x in str(r[11] or "").splitlines() if x.strip()]}
+    if "Dimension tolerances" in wb.sheetnames:
+        drows = list(wb["Dimension tolerances"].iter_rows(values_only=True))
+        top = next((i for i, r in enumerate(drows[:12]) if r and str(r[0] or "").strip() == "Part no."), None)
+        for r in (drows[top + 1:] if top is not None else []):
+            if not r or not r[0] or len(r) < 5 or r[4] in (None, ""):
+                continue
+            part = str(r[0]).strip()
+            if part not in out:
+                raise auth.AuthError(f"Dimension tolerances: part {part} is not on the sheet 'Drawing data'.", 400)
+            out[part]["fields"].setdefault("features", {})[str(r[1]).strip()] = str(r[4]).strip()
     return out
 
 
@@ -343,3 +409,173 @@ def part_meta(part_id: int, title: str, number: str, rev: str, scale: str = "") 
     for r in rows:
         r.pop("_at")
     return drawing_sheet.sheet_meta(d, rows, title, number, rev, scale)
+
+
+# ---------- dimension tolerances: every dimension of the drawing gets one (general, fit, ± value or thread class) ----------
+
+FIT_RANGES = ((0, 3), (3, 6), (6, 10), (10, 18), (18, 30), (30, 50), (50, 80), (80, 120), (120, 180), (180, 250), (250, 315), (315, 400), (400, 500))
+_IT = {6: (6, 8, 9, 11, 13, 16, 19, 22, 25, 29, 32, 36, 40), 7: (10, 12, 15, 18, 21, 25, 30, 35, 40, 46, 52, 57, 63), 8: (14, 18, 22, 27, 33, 39, 46, 54, 63, 72, 81, 89, 97)}
+_FD = {"g": (-2, -4, -5, -6, -7, -9, -10, -12, -14, -15, -17, -18, -20), "f": (-6, -10, -13, -16, -20, -25, -30, -36, -43, -50, -56, -62, -68),
+       "k": (0, 1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 4, 5), "m": (2, 4, 6, 7, 8, 9, 11, 13, 15, 17, 20, 21, 23)}
+FIT_EXAMPLE = "EXAMPLE - ISO 286-2 values as remembered: check them against your copy of the standard"
+SEED_FEATURES = {"overall": ("general", "Overall length, width, height: ISO 2768 class of the part, by size"),
+                 "hole_thread": ("6H", "Tapped holes: thread tolerance class"),
+                 "hole_fitted": ("class", "Blind plain holes (pin, dowel, seat bores): the fit named in the class tolerance text, else general"),
+                 "hole_clearance": ("general", "Through plain holes (screw clearance, water): general tolerance; type H7 for a fitted through bore"),
+                 "pocket": ("class", "Pockets (insert seats): the fit named in the class tolerance text, else general"),
+                 "opening": ("±0.01", "Wire-cut openings (die openings, punch seats)"),
+                 "position_fitted": ("±0.01", "Position of fitted holes, pockets and openings from datum O"),
+                 "position": ("general", "Position of the other holes from datum O: ISO 2768 by the coordinate")}
+UNITS = ("mm", "µm")
+
+
+def _fit_seed() -> list[dict]:
+    rows = []
+    for i, (lo, hi) in enumerate(FIT_RANGES):
+        it6, it7, it8 = _IT[6][i], _IT[7][i], _IT[8][i]
+        fits = {"H6": (it6, 0), "H7": (it7, 0), "H8": (it8, 0), "h6": (0, -it6), "h7": (0, -it7), "g6": (_FD["g"][i], _FD["g"][i] - it6),
+                "f7": (_FD["f"][i], _FD["f"][i] - it7), "k6": (_FD["k"][i] + it6, _FD["k"][i]), "m6": (_FD["m"][i] + it6, _FD["m"][i])}
+        rows += [{"fit": f, "from_mm": lo, "to_mm": hi, "upper_um": f"{u:+d}" if u else "0", "lower_um": f"{l:+d}" if l else "0", "is_example": 1, "notes": FIT_EXAMPLE} for f, (u, l) in fits.items()]
+    return rows
+
+
+def seed_tolerances() -> int:
+    d = mould_db.tables()
+    have = {(r["fit"], r["from_mm"]) for r in d["fit_tolerances"]}
+    new = [r for r in _fit_seed() if (r["fit"], r["from_mm"]) not in have]
+    d["fit_tolerances"] += new
+    feats = {r["feature"] for r in d["feature_tolerances"]}
+    add = [{"feature": k, "spec": v, "is_example": 1, "notes": n} for k, (v, n) in SEED_FEATURES.items() if k not in feats]
+    d["feature_tolerances"] += add
+    if new or add:
+        mould_db.write(d)
+    return len(new) + len(add)
+
+
+def fit_limits(fit: str, size: float) -> tuple[float, float] | None:
+    """(upper, lower) deviation in mm of an ISO 286 tolerance class at a size, from Master data → Fit tolerances."""
+    for r in mould_db.tables()["fit_tolerances"]:
+        if r["fit"] == fit and r["from_mm"] < size <= r["to_mm"] or (r["fit"] == fit and size <= 3 and r["from_mm"] == 0 and size > 0):
+            return float(r["upper_um"]) / 1000, float(r["lower_um"]) / 1000
+    return None
+
+
+def general_linear(cls: str, size: float) -> float | None:
+    rows = tolerance_table(cls, "linear")
+    for r in rows:
+        if r["from"] < size <= r["to"]:
+            return r["value"]
+    if rows and size <= rows[0]["from"]:
+        return rows[0]["value"]
+    return rows[-1]["value"] if rows else None
+
+
+def class_fit(text: str) -> str | None:
+    m = re.search(r"\b([A-Z]\d{1,2})\b", text or "")
+    return m.group(1) if m else None
+
+
+SPEC_RE = re.compile(r"^(general|class|[A-Za-z]{1,2}\d{1,2}|±\s*\d*\.?\d+|\+-\s*\d*\.?\d+|[+-]?\d*\.?\d+\s*/\s*[+-]?\d*\.?\d+|\d[A-Ha-h])$")
+
+
+def check_spec(spec: str) -> str:
+    s = str(spec).strip().replace("+/-", "±").replace("+-", "±").replace(" ", "")
+    if re.fullmatch(r"\d*\.?\d+", s):
+        s = "±" + s                                   # a bare number is a ± value
+    if not SPEC_RE.match(s):
+        raise auth.AuthError(f"Tolerance '{spec}' is not understood: write general, class, a fit (H7, g6), ±0.02, +0.02/-0.01 or a thread class (6H).", 400)
+    if re.fullmatch(r"[A-Za-z]{1,2}\d{1,2}", s) and s not in {r["fit"] for r in mould_db.tables()["fit_tolerances"]}:
+        raise auth.AuthError(f"Fit {s} is not in Master data → Fit tolerances.", 400)
+    return s
+
+
+def resolve(spec: str, size: float, cls: str, class_text: str) -> dict:
+    """{spec, kind (general/fit/sym/asym/thread), upper, lower (mm)} of a tolerance at a nominal size."""
+    s = str(spec).strip().replace("+/-", "±").replace("+-", "±")
+    if s == "class":
+        s = class_fit(class_text) or "general"
+    if s == "general":
+        v = general_linear(cls, size)
+        return {"spec": f"ISO 2768-{cls}", "kind": "general", "upper": v, "lower": -v if v is not None else None}
+    if re.fullmatch(r"\d[A-Ha-h]", s):
+        return {"spec": s, "kind": "thread", "upper": None, "lower": None}
+    if re.fullmatch(r"[A-Za-z]{1,2}\d{1,2}", s):
+        lim = fit_limits(s, size)
+        return {"spec": s, "kind": "fit", "upper": lim[0] if lim else None, "lower": lim[1] if lim else None}
+    if s.startswith("±"):
+        v = float(s[1:])
+        return {"spec": s, "kind": "sym", "upper": v, "lower": -v}
+    if "/" in s:
+        a, b = (float(x) for x in s.split("/"))
+        return {"spec": s, "kind": "asym", "upper": max(a, b), "lower": min(a, b)}
+    return {"spec": s, "kind": "text", "upper": None, "lower": None}
+
+
+def _num(v: float, unit: str) -> str:
+    if unit == "µm":
+        n = round(v * 1000)
+        return "0" if n == 0 else f"{n:+d}"
+    return "0" if abs(v) < 1e-9 else f"{v:+.3f}".rstrip("0").rstrip(".")
+
+
+def fmt_tol(t: dict, unit: str = "mm") -> str:
+    """Text printed after a dimension: ±0.2, H7 +0.015/0, +15/0 µm …"""
+    u = " µm" if unit == "µm" else ""
+    if t["kind"] == "thread":
+        return t["spec"]
+    if t["upper"] is None:
+        return t["spec"]
+    if abs(t["upper"] + t["lower"]) < 1e-9:
+        body = f"±{abs(round(t['upper'] * 1000)) if unit == 'µm' else _num(t['upper'], 'mm').lstrip('+')}{u}"
+    else:
+        body = f"{_num(t['upper'], unit)}/{_num(t['lower'], unit)}{u}"
+    return f"{t['spec']} {body}" if t["kind"] == "fit" else body
+
+
+def feature_tolerances(info: dict, cls: str, overrides: dict | None, unit: str = "mm") -> dict:
+    """Tolerance of every dimension of the part drawing.
+    {"overall": {"L"/"W"/"H": {...}}, "holes": {"H1": {"size": t, "pos": t, "rule": ...}}, "openings": {"O1": {...}}, "pockets": {"P1": {...}}}; each t has text."""
+    from . import tool_drawings
+    rules = {r["feature"]: r["spec"] for r in mould_db.tables()["feature_tolerances"]} or {k: v for k, (v, _) in SEED_FEATURES.items()}
+    rule = lambda k: rules.get(k) or SEED_FEATURES[k][0]
+    ov = overrides or {}
+    text = info.get("tolerance") or ""
+
+    def t(spec, size, key):
+        spec = ov.get(key) or spec
+        r = resolve(spec, size, cls, text)
+        r["text"], r["key"], r["changed"] = fmt_tol(r, unit), key, key in ov
+        return r
+    feats = tool_drawings.feature_items(info)
+    out = {"unit": unit, "overall": {}, "holes": {}, "openings": {}, "pockets": {}}
+    for k, size in zip("LWH", info["bbox_mm"]):
+        out["overall"][k] = t(rule("overall"), size, k)
+    for h in feats["holes"]:
+        kind = "hole_thread" if h.get("thread") and not h["through"] else ("hole_clearance" if h["through"] else "hole_fitted")
+        size = t(rule(kind), h["dia"], h["id"])
+        fitted = size["kind"] in ("fit", "sym", "asym") and (size["upper"] or 0) - (size["lower"] or 0) <= 0.05
+        far = max(abs(x) for x in h["pos"]) or 1.0
+        pos = t(rule("position_fitted" if fitted else "position"), far, h["id"] + "@pos")
+        out["holes"][h["id"]] = {"size": size, "pos": pos, "rule": kind, "nominal": h["dia"], "thread": h.get("thread", "")}
+    for o in feats["openings"]:
+        out["openings"][o["id"]] = {"size": t(rule("opening"), max(o["length_mm"], o["width_mm"]), o["id"]),
+                                    "pos": t(rule("position_fitted"), max(o["x_mm"], o["y_mm"]) or 1.0, o["id"] + "@pos")}
+    for p in feats["pockets"]:
+        out["pockets"][p["id"]] = {"size": t(rule("pocket"), max(p["length_mm"], p["width_mm"]), p["id"]),
+                                   "pos": t(rule("position_fitted"), max(p["x_mm"], p["y_mm"]) or 1.0, p["id"] + "@pos")}
+    return out
+
+
+def feature_rows(ft: dict) -> list[dict]:
+    """Flat list for the form and the Excel sheet: [{key, what, nominal, tolerance, changed}]."""
+    rows = [{"key": k, "what": {"L": "Overall length", "W": "Overall width", "H": "Overall height"}[k], "nominal": None, "tolerance": v["text"], "changed": v["changed"]}
+            for k, v in ft["overall"].items()]
+    for k, h in ft["holes"].items():
+        rows.append({"key": k, "what": f"Hole Ø{h['nominal']:g}" + (f" {h['thread']} tap" if h["thread"] and h["rule"] == "hole_thread" else ""), "nominal": h["nominal"],
+                     "tolerance": h["size"]["text"], "changed": h["size"]["changed"]})
+        rows.append({"key": k + "@pos", "what": f"Hole {k} position", "nominal": None, "tolerance": h["pos"]["text"], "changed": h["pos"]["changed"]})
+    for grp, name in (("openings", "Opening"), ("pockets", "Pocket")):
+        for k, x in ft[grp].items():
+            rows.append({"key": k, "what": f"{name} {k} size", "nominal": None, "tolerance": x["size"]["text"], "changed": x["size"]["changed"]})
+            rows.append({"key": k + "@pos", "what": f"{name} {k} position", "nominal": None, "tolerance": x["pos"]["text"], "changed": x["pos"]["changed"]})
+    return rows

@@ -692,8 +692,10 @@ def drawing_data_get(design_id: int) -> dict:
         o = over.get(c["part_no"])
         info = drawing_data.apply(c["info"], o, d["country"], d["as_of"])
         qty = sum(1 for x in comps if x["part_no"] == c["part_no"])
+        ef = drawing_data.effective(info, o)
         parts.append({"part_no": c["part_no"], "name": c["name"].split(":")[0], "qty": qty, "rev": c["rev"], "component_id": c["id"],
-                      "defaults": drawing_data.defaults(c["info"]), "effective": {k: v for k, v in drawing_data.effective(info, o).items() if k in drawing_data.FIELDS or k == "notes"},
+                      "defaults": drawing_data.defaults(c["info"]), "effective": {k: v for k, v in ef.items() if k in drawing_data.FIELDS or k in ("notes", "feature_overrides")},
+                      "dimensions": drawing_data.feature_rows(ef["feature_tol"]) if ef.get("feature_tol") else [],
                       "changed": bool(o and (o["fields"] or o["notes"])), "edited_by": (o or {}).get("edited_by"), "edited_at": (o or {}).get("edited_at"),
                       "stock_kg": info["stock"]["weight_kg"], "material_cost": info["material_cost"]})
     return {"design_id": design_id, "status": d["status"], "editable": d["status"] == "draft", "fields": drawing_data.LABELS, "parts": parts,
@@ -734,7 +736,8 @@ def drawing_data_xlsx(design_id: int) -> tuple[bytes, str]:
         for h in drawing_data.history(conn, design_id, None):
             hist.append(dict(h, part_no="(tool assembly)"))
         over = drawing_data.stored(conn, design_id)
-    rows = [{"part_no": p["part_no"], "name": p["name"], "qty": p["qty"], "rev": p["rev"], "eff": p["effective"], "edited_by": p["edited_by"]} for p in data["parts"]]
+    rows = [{"part_no": p["part_no"], "name": p["name"], "qty": p["qty"], "rev": p["rev"], "eff": p["effective"], "edited_by": p["edited_by"], "dimensions": p["dimensions"]}
+            for p in data["parts"]]
     code = _safe(d["summary"].get("part_code", f"design{design_id}"))
     return drawing_data.workbook(design_id, rows, hist), f"{code}_v{d['version']}_rev{d['rev_label']}_drawing_data.xlsx"
 
@@ -757,7 +760,9 @@ def drawing_data_upload(design_id: int, content: bytes) -> dict:
                 except (TypeError, ValueError):
                     return False
             return str(v).strip() == str(defaults.get(k)).strip()
-        fields = {k: v for k, v in row["fields"].items() if not same(k, v)}
+        fields = {k: v for k, v in row["fields"].items() if k != "features" and not same(k, v)}
+        if row["fields"].get("features"):
+            fields["features"] = row["fields"]["features"]
         items.append({"part_no": part_no, "fields": fields, "notes": row["notes"]})
     out = drawing_data_save(design_id, items)
     out["parts_in_sheet"] = len(items)

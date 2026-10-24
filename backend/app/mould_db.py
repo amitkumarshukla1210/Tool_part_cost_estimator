@@ -288,6 +288,21 @@ TABLES = {
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
     ]},
+    "fit_tolerances": {"title": "Fit tolerances (ISO 286)", "unique": ("fit", "from_mm"), "columns": [
+        col("fit", "Tolerance class (H7, H6, g6, h6, k6, m6 …)"),
+        col("from_mm", "From size (mm, over)", "number"),
+        col("to_mm", "To size (mm, up to and including)", "number"),
+        col("upper_um", "Upper deviation (µm, with sign: +15, -7, 0)"),
+        col("lower_um", "Lower deviation (µm, with sign)"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "feature_tolerances": {"title": "Feature tolerances", "unique": ("feature",), "columns": [
+        col("feature", "Feature (overall, hole_thread, hole_fitted, hole_clearance, pocket, opening, position_fitted, position)"),
+        col("spec", "Tolerance: general (ISO 2768 by size), class (fit named in the class tolerance text), a fit (H7), ±0.02, +0.02/-0.01 or a thread class (6H)"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
     "foundry_materials": {"title": "Foundry materials", "unique": ("material",), "columns": [
         col("material", "Material (Materials sheet, foundry)"),
         col("shrinkage_pct", "Pattern shrinkage (%)", "number"),
