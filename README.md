@@ -675,7 +675,7 @@ python update.py                         # backup, then git pull
 **The correction workflow.**
 1. Report the problem (page, what you did, what you expected, what you saw; the exact error text or a screenshot).
 2. The fix arrives as a pull request on GitHub with the tests that were run; after you merge it, update your PC.
-3. **If you cloned the project with git** (recommended): `python update.py`. It backs up, fetches, and pulls. If you changed `master_data/` and the new version leaves it alone, yours is kept. If **both** changed
+3. **If you cloned the project with git** (recommended): double-click `UPDATE.bat` (Windows; stop the running server first), or run `python update.py`. It backs up, fetches, and pulls. If you changed `master_data/` and the new version leaves it alone, yours is kept. If **both** changed
    it, `update.py` stops without changing anything and tells you why: choose `--keep-mine` (your master data stays; the new example rows are missing) or `--take-new` (the new master data is used; yours is in the backup), or send the backup
    to have the new rows merged into your file. Then `pip install -r requirements.txt` and restart the app.
 4. **If you downloaded a ZIP**: run `python backup.py`, unzip the new version over the folder, run `python backup.py --restore latest --only data,storage`, and put your `master_data/` back with
