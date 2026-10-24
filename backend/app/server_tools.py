@@ -1,6 +1,6 @@
 """Server-mode tools (roadmap stage 17), run from the command line:
 
-    python -m backend.app.server_tools create-user NAME --role admin|approver|engineer|viewer [--password ...]
+    python -m backend.app.server_tools create-user NAME --role user|head|admin [--groups plastic,die_casting,...] [--password ...]
     python -m backend.app.server_tools migrate-projects --from sqlite:///data/projects.sqlite --to postgresql+psycopg://user:pw@host/dtc
     python -m backend.app.server_tools check
 
@@ -55,7 +55,8 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     u = sub.add_parser("create-user")
     u.add_argument("username")
-    u.add_argument("--role", default="engineer", choices=auth.ROLES)
+    u.add_argument("--role", default="user", choices=auth.ROLES)
+    u.add_argument("--groups", default="", help="role user: comma list of " + ", ".join(auth.GROUPS))
     u.add_argument("--name", default="")
     u.add_argument("--password")
     m = sub.add_parser("migrate-projects")
@@ -66,7 +67,7 @@ def main(argv=None) -> int:
     try:
         if a.cmd == "create-user":
             pw = a.password or getpass.getpass("Password: ")
-            print(auth.create_user(a.username, pw, a.role, a.name))
+            print(auth.create_user(a.username, pw, a.role, a.name, [g for g in a.groups.split(",") if g]))
         elif a.cmd == "migrate-projects":
             for k, v in migrate(a.src, a.dst).items():
                 print(f"{k}: {v}")

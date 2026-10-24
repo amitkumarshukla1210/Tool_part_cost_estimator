@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from sqlalchemy import delete, func, or_, select, update
 
-from . import file_store, register
+from . import file_store, register, scope
 from . import projects_db as db
 
 
@@ -149,6 +149,7 @@ def delete_project(project_id: int) -> dict:
         pr = conn.execute(select(db.projects).where(db.projects.c.id == project_id)).mappings().first()
         if not pr:
             raise DeleteError(f"Project {project_id} does not exist.")
+        scope.check_project_deletable(conn, project_id)
         parts = [r[0] for r in conn.execute(select(db.parts.c.id).where(db.parts.c.project_id == project_id))]
         paths, n_parts = [], len(parts)
         for pid in parts:

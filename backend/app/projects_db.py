@@ -36,6 +36,7 @@ projects = Table(
     Column("capex_budget_inr", Float),
     Column("sop_date", String(10), default=""),        # start of production, YYYY-MM-DD: the CAPEX timeline hangs on it
     Column("created_by", String(100), default=""),
+    Column("owner", String(80)),                       # user name of the creator (multi-user mode); NULL = created before users existed
     Column("created_at", DateTime, default=now),
     Column("updated_at", DateTime, default=now, onupdate=now),
 )
@@ -73,6 +74,7 @@ parts = Table(
     Column("material", String(200), default=""),
     Column("process", String(60), default=""),
     Column("sourcing", String(40), default=""),
+    Column("owner", String(80)),                       # user name of the creator; decides who sees a part that has no tool group (assembly, bought-out)
     Column("status", String(60), default=""),
     Column("annual_volume", Integer),
     Column("programme_life_years", Float),
@@ -351,6 +353,7 @@ bom_extracts = Table(
     Column("status", String(20), default="draft"),     # draft, reviewed
     Column("reviewed_by", String(100), default=""),
     Column("created_by", String(100), default=""),
+    Column("owner", String(80)),
     Column("created_at", DateTime, default=now),
 )
 
@@ -369,7 +372,8 @@ users = Table(
     Column("username", String(80), nullable=False, unique=True),
     Column("name", String(200), default=""),
     Column("password_hash", String(300), nullable=False),
-    Column("role", String(20), nullable=False),        # viewer, engineer, approver, admin
+    Column("role", String(20), nullable=False),        # user, head, admin
+    Column("groups", JSON),                            # role user: the tool groups (part types) whose data the user works on; head and admin see all
     Column("active", Boolean, default=True),
     Column("created_at", DateTime, default=now),
     Column("last_login", DateTime),

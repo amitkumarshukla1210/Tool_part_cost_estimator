@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design to Cost — Part Cost Estimator · My account</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/register.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img src="/theme/logo.png" alt="Design to Cost logo" />
+        <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/dashboard">Dashboard</a></li>
+          <li><a href="/parts">Parts</a></li>
+          <li><a href="/import">Import</a></li>
+          <li><a href="/bom-extract">Harness &amp; PCB</a></li>
+          <li><a href="/">Estimate</a></li>
+          <li><a href="/rates">Rates</a></li>
+          <li><a href="/master-data">Master data</a></li>
+          <li><a href="/capacity">Capacity &amp; tools</a></li>
+          <li><a href="/backup">Backup</a></li>
+          <li><a href="/help">Help</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section class="bg-grey page-head"><div class="container">
+      <div class="section-head"><p class="kicker">Account</p><h2>My account</h2><p id="who"></p></div>
+      <form class="card grid2" id="pwForm"><h3 class="span2">Change my password</h3>
+        <label>Old password <input type="password" name="old" autocomplete="current-password" required /></label>
+        <label>New password (at least 10 characters) <input type="password" name="new" minlength="10" autocomplete="new-password" required /></label>
+        <div class="span2 dialog-actions"><button class="btn btn-primary" type="submit">Change password</button></div>
+        <p class="status span2" id="status"></p></form>
+    </div></section>
+  </main>
+  <footer><div class="container"><p class="footnote">© Design to Cost</p></div></footer>
+  <script src="/static/common.js"></script>
+  <script src="/static/auth.js"></script>
+  <script>
+    const { $, esc, api, status } = window.DTC;
+    const NAMES = { user: "User", head: "Head of department", admin: "Admin" };
+    api("/api/auth/me").then((m) => {
+      $("who").innerHTML = m.user ? `Signed in as <b>${esc(m.user.name || m.user.username)}</b> (${esc(m.user.username)}) · ${NAMES[m.user.role] || m.user.role} · ${m.user.role === "user" ? "data of: " + (m.user.groups.map((g) => g.replace("_", " ")).join(", ") || "no group yet (ask the admin)") : "all data"}`
+        : "Local mode: there is no login on this computer.";
+      if (!m.user) $("pwForm").hidden = true;
+    });
+    $("pwForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try { await api("/api/auth/password", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(e.target))) }); e.target.reset(); status($("status"), "Password changed.", "ok"); }
+      catch (err) { status($("status"), err.message, "error"); }
+    });
+  </script>
+</body>
+</html>

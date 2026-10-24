@@ -438,14 +438,16 @@ def _db():
 def create(content: bytes, filename: str, name: str = "", project_id: int | None = None, typed: dict | None = None,
            cpl: tuple[bytes, str] | None = None) -> dict:
     from sqlalchemy import select
-    from . import file_store, register
+    from . import file_store, register, scope
     db = _db()
     res = extract(content, filename, typed=typed, cpl=cpl)
     with db.engine().begin() as conn:
+        if project_id and not scope.project_ok(conn, project_id):
+            scope.deny("This project is not yours.")
         f = file_store.put(content, filename, "bom", conn)
         eid = conn.execute(db.bom_extracts.insert().values(
             project_id=project_id, name=name or filename, kind=res["kind"], format=res["format"], file_id=f["id"], board=typed or {},
-            created_by=register.user())).inserted_primary_key[0]
+            created_by=register.user(), owner=scope.me())).inserted_primary_key[0]
         conn.execute(db.bom_extract_lines.insert(), [{"extract_id": eid, "position": i, "data": l} for i, l in enumerate(res["lines"])])
         register._log(conn, "bom_extract", eid, "created", {"file": filename, "format": res["format"], "lines": len(res["lines"])})
     return get(eid)
@@ -467,13 +469,15 @@ def get(eid: int) -> dict:
 
 
 def list_all(project_id: int | None = None) -> list[dict]:
-    from sqlalchemy import func, select
-    from . import register
+    from sqlalchemy import func, or_, select
+    from . import register, scope
     db = _db()
     with db.engine().connect() as conn:
         q = select(db.bom_extracts)
         if project_id:
             q = q.where(db.bom_extracts.c.project_id == project_id)
+        if scope.restricted():          # the user's own extracts and those of projects he / she sees
+            q = q.where(or_(db.bom_extracts.c.owner == scope.me(), db.bom_extracts.c.project_id.in_(select(db.projects.c.id).where(scope.project_clause()))))
         rows = conn.execute(q.order_by(db.bom_extracts.c.id.desc())).mappings().all()
         counts = dict(conn.execute(select(db.bom_extract_lines.c.extract_id, func.count()).group_by(db.bom_extract_lines.c.extract_id)).all())
     return [register._plain(r) | {"line_count": counts.get(r["id"], 0)} for r in rows]

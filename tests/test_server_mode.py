@@ -51,33 +51,26 @@ def test_server_mode_blocks_everything_until_login(server):
 
 
 def test_roles_decide_who_may_change_what(server):
-    make(server, "vera", "viewer")
-    make(server, "eric", "engineer")
-    make(server, "alan", "approver")
-    login(server, "vera")
-    assert server.get("/api/projects").status_code == 200
-    r = server.post("/api/projects", json={"code": "V1", "name": "x"})
-    assert r.status_code == 403 and "viewer" in r.json()["detail"]
-    assert server.get("/api/users").status_code == 403
-    server.post("/api/auth/logout")
-
+    make(server, "eric", "user")
+    make(server, "alan", "head")
     login(server, "eric")
-    p = server.post("/api/projects", json={"code": "E1", "name": "Engineer project"})
+    assert server.get("/api/users").status_code == 403                                 # the user page is the admin's
+    p = server.post("/api/projects", json={"code": "E1", "name": "User project"})
     assert p.status_code == 200
-    draft = server.post("/api/rates", json={"category": "material", "item": "ZZZ", "country": "IN", "value": 10, "unit": "INR/kg", "currency": "INR"}).json()
-    assert draft["status"] == "draft"
-    r = server.post("/api/rates", json={"category": "material", "item": "ZZ2", "country": "IN", "value": 10, "unit": "INR/kg", "currency": "INR", "approve": True})
-    assert r.status_code == 403 and "approver" in r.json()["detail"]
-    assert server.post("/api/rates/status", json={"ids": [draft["id"]], "status": "approved"}).status_code == 403
+    r = server.post("/api/rates", json={"category": "material", "item": "ZZ2", "country": "IN", "value": 10, "unit": "INR/kg", "currency": "INR"})
+    assert r.status_code == 403 and "head" in r.json()["detail"]                       # master data and rates are the head's / admin's
     server.post("/api/auth/logout")
 
     login(server, "alan")
+    draft = server.post("/api/rates", json={"category": "material", "item": "ZZZ", "country": "IN", "value": 10, "unit": "INR/kg", "currency": "INR"}).json()
+    assert draft["status"] == "draft"
     ok = server.post("/api/rates/status", json={"ids": [draft["id"]], "status": "approved"})
-    assert ok.status_code == 200 and ok.json()[0]["approved_by"] == "Alan"             # the logged-in approver, not a typed name
+    assert ok.status_code == 200 and ok.json()[0]["approved_by"] == "Alan"             # the logged-in head, not a typed name
+    assert server.get("/api/users").status_code == 403                                 # a head does not manage users
 
 
 def test_history_records_the_logged_in_user(server):
-    make(server, "eric", "engineer")
+    make(server, "eric", "user")
     login(server, "eric")
     pid = server.post("/api/projects", json={"code": "H1", "name": "History"}).json()["id"]
     part = server.post(f"/api/projects/{pid}/variants", json={"code": "STD", "name": "Std"})
@@ -92,12 +85,12 @@ def test_user_management_rules(server):
     login(server)
     users = server.get("/api/users").json()
     admin_id = users[0]["id"]
-    assert server.post("/api/users", json={"username": "short", "password": "tiny", "role": "viewer"}).status_code == 400
+    assert server.post("/api/users", json={"username": "short", "password": "tiny", "role": "user"}).status_code == 400
     assert server.post("/api/users", json={"username": "x", "password": PW, "role": "boss"}).status_code == 400
-    assert server.post("/api/users", json={"username": "admin", "password": PW, "role": "viewer"}).status_code == 400
-    assert server.put(f"/api/users/{admin_id}", json={"role": "viewer"}).status_code == 400          # the last admin cannot be demoted
+    assert server.post("/api/users", json={"username": "admin", "password": PW, "role": "user"}).status_code == 400
+    assert server.put(f"/api/users/{admin_id}", json={"role": "user"}).status_code == 400          # the last admin cannot be demoted
     assert server.put(f"/api/users/{admin_id}", json={"active": False}).status_code == 400
-    make(server, "bob", "engineer")
+    make(server, "bob", "user")
     login(server)
     bob = next(u for u in server.get("/api/users").json() if u["username"] == "bob")
     server.post("/api/auth/logout")
@@ -146,7 +139,7 @@ def test_migrate_projects_copies_everything_and_refuses_a_filled_target(tmp_path
 
 
 def test_cli_create_user_and_check(capsys):
-    assert server_tools.main(["create-user", "cli.user", "--role", "approver", "--password", PW]) == 0
-    assert "approver" in capsys.readouterr().out
+    assert server_tools.main(["create-user", "cli.user", "--role", "head", "--password", PW]) == 0
+    assert "head" in capsys.readouterr().out
     assert server_tools.main(["create-user", "cli.user", "--password", PW]) == 1
     assert server_tools.main(["check"]) == 0 and "sqlite" in capsys.readouterr().out

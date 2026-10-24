@@ -30,6 +30,7 @@ from sqlalchemy import and_, func, or_, select
 from . import (cad_import, capacity, concept, costing_setup, file_store, formula, master_data, mould_db, rates, register_setup,
                rm_cost, tool_cost)
 from . import projects_db as db
+from . import scope
 from .table_set import EXAMPLE_FILL, HEADER_FILL
 from .trace import EXAMPLE_WARNING
 
@@ -131,7 +132,7 @@ def create_project(data: dict) -> dict:
     with db.engine().begin() as conn:
         if conn.execute(select(db.projects.c.id).where(db.projects.c.code == vals["code"])).first():
             raise RegisterError(f"Project code '{vals['code']}' already exists.")
-        pid = conn.execute(db.projects.insert().values(**vals, created_by=user())).inserted_primary_key[0]
+        pid = conn.execute(db.projects.insert().values(**vals, created_by=user(), owner=scope.me())).inserted_primary_key[0]
         _log(conn, "project", pid, "created", {"code": vals["code"]})
     return get_project(pid)
 
@@ -151,8 +152,11 @@ def update_project(pid: int, data: dict) -> dict:
 
 def list_projects() -> list[dict]:
     with db.engine().connect() as conn:
-        counts = dict(conn.execute(select(db.parts.c.project_id, func.count()).group_by(db.parts.c.project_id)).all())
-        rows = conn.execute(select(db.projects).order_by(db.projects.c.code)).mappings().all()
+        pc, jc = scope.part_clause(), scope.project_clause()
+        cq = select(db.parts.c.project_id, func.count()).group_by(db.parts.c.project_id)
+        counts = dict(conn.execute(cq if pc is None else cq.where(pc)).all())
+        pq = select(db.projects).order_by(db.projects.c.code)
+        rows = conn.execute(pq if jc is None else pq.where(jc)).mappings().all()
         return [_plain(r) | {"part_count": counts.get(r["id"], 0)} for r in rows]
 
 
@@ -383,15 +387,20 @@ def _project_by_id(conn, pid):
 def upsert_part(conn, project_id: int, code: str, values: dict, is_assembly=False) -> tuple[int, bool]:
     """Create the part, or return the existing one with that code. -> (part_id, created)."""
     project = _project_by_id(conn, project_id)
+    if not scope.project_ok(conn, project_id):
+        scope.deny("This project is not yours: ask the head of department to add parts to it.")
     code = (code or "").strip() or next_part_code(conn, project["code"])
     row = conn.execute(select(db.parts).where(db.parts.c.part_code == code)).mappings().first()
     if row:
+        if not scope.part_ok(conn, row["id"]):
+            scope.deny(f"A part with the code '{code}' already exists and belongs to a tool group you are not responsible for.")
         return row["id"], False
     vals = {"sourcing": next(iter(register_setup.sourcing())), "status": register_setup.initial_status()} | values
     if is_assembly:
         vals["process"] = vals.get("process") or register_setup.assembly_process()
+    scope.check_new_part(vals.get("process"))
     pid = conn.execute(db.parts.insert().values(part_code=code, project_id=project_id, is_assembly=is_assembly,
-                                                created_by=user(), **vals)).inserted_primary_key[0]
+                                                created_by=user(), owner=scope.me(), **vals)).inserted_primary_key[0]
     _log(conn, "part", pid, "created", {"part_code": code, **{k: v for k, v in vals.items() if v not in (None, "")}})
     return pid, True
 
@@ -486,6 +495,8 @@ def update_part(part_id: int, data: dict, refresh: bool = True) -> dict:
         if not old:
             raise RegisterError(f"Part {part_id} does not exist.")
         changes = {k: {"old": old[k], "new": v} for k, v in vals.items() if not _same(old[k], v)}
+        if "process" in changes:
+            scope.check_new_part(vals["process"])               # a user cannot move a part into a group he / she does not work on
         if "status" in changes:
             _check_status_change(old["status"], vals["status"], data.get("status_comment", ""))
         if changes:
@@ -565,6 +576,8 @@ def search(q="", project_id=None, process="", status="", sourcing="", rev="", fi
         made = [c for c, x in register_setup.sourcing().items() if x["is_costed"]]
         conds.append(and_(db.parts.c.tool_cost_inr.is_(None), db.parts.c.is_assembly.is_(False),
                           db.parts.c.process.in_(tool_procs), db.parts.c.sourcing.in_(made)))
+    if scope.part_clause() is not None:
+        conds.append(scope.part_clause())
     if conds:
         query = query.where(and_(*conds))
     sort_cols = {"rm_cost": db.parts.c.rm_cost_inr.desc(), "tool_cost": db.parts.c.tool_cost_inr.desc(), "part_code": db.parts.c.part_code, "name": db.parts.c.name, "updated": db.parts.c.updated_at.desc(),
@@ -1092,7 +1105,7 @@ def refresh_rm(part_ids, reason: str) -> None:
 
 def recalculate_project(project_id: int, reason: str = "recalculated with the latest approved rates") -> dict:
     with db.engine().connect() as conn:
-        ids = [r for (r,) in conn.execute(select(db.parts.c.id).where(and_(db.parts.c.project_id == project_id,
+        ids = [r for (r,) in conn.execute(select(db.parts.c.id).where(and_(scope.part_where(project_id),
                                                                          db.parts.c.is_assembly.is_(False))))]
     done = same = 0
     skipped = []
@@ -1784,7 +1797,7 @@ def refresh_tool(part_ids, reason: str) -> None:
 
 def recalculate_project_tools(project_id: int, reason: str = "recalculated with the latest approved rates") -> dict:
     with db.engine().connect() as conn:
-        ids = [r for (r,) in conn.execute(select(db.parts.c.id).where(and_(db.parts.c.project_id == project_id,
+        ids = [r for (r,) in conn.execute(select(db.parts.c.id).where(and_(scope.part_where(project_id),
                                                                          db.parts.c.is_assembly.is_(False))))]
     done = same = 0
     skipped = []
@@ -1936,7 +1949,7 @@ def variant_bom(variant_id: int) -> list[dict]:
         rows = conn.execute(select(db.bom_lines, db.parts.c.part_code, db.parts.c.name, db.parts.c.is_assembly,
                                    db.parts.c.sourcing, db.parts.c.status)
                             .join(db.parts, db.parts.c.id == db.bom_lines.c.child_part_id)
-                            .where(db.bom_lines.c.variant_id == variant_id)).mappings().all()
+                            .where(and_(db.bom_lines.c.variant_id == variant_id, scope.part_clause() if scope.part_clause() is not None else True))).mappings().all()
         ins = db.parts.alias("ins")
         moulded: dict = {}
         for m in conn.execute(select(db.part_inserts.c.part_id, db.part_inserts.c.quantity, ins.c.id, ins.c.part_code,
@@ -2381,21 +2394,21 @@ def dashboard(project_id: int) -> dict:
     project = get_project(project_id)
     statuses = register_setup.statuses()
     with db.engine().connect() as conn:
-        by = lambda col: dict(conn.execute(select(col, func.count()).where(db.parts.c.project_id == project_id)
+        by = lambda col: dict(conn.execute(select(col, func.count()).where(scope.part_where(project_id))
                                            .group_by(col)).all())
         by_status, by_process, by_sourcing = by(db.parts.c.status), by(db.parts.c.process), by(db.parts.c.sourcing)
         r = db.revisions.alias("cur")
         missing = conn.execute(select(func.count()).select_from(db.parts.outerjoin(r, r.c.id == db.parts.c.current_revision_id))
-                               .where(and_(db.parts.c.project_id == project_id, r.c.file_id.is_(None)))).scalar()
+                               .where(and_(scope.part_where(project_id), r.c.file_id.is_(None)))).scalar()
         total = sum(by_status.values())
-        rm_costed = conn.execute(select(func.count()).where(and_(db.parts.c.project_id == project_id,
+        rm_costed = conn.execute(select(func.count()).where(and_(scope.part_where(project_id),
                                                                   db.parts.c.rm_cost_inr.is_not(None)))).scalar()
         targets = conn.execute(select(func.count(), func.sum(db.parts.c.target_piece_cost_inr))
-                               .where(and_(db.parts.c.project_id == project_id,
+                               .where(and_(scope.part_where(project_id),
                                            db.parts.c.target_piece_cost_inr.is_not(None)))).one()
         tool_rows = conn.execute(select(db.parts.c.id, db.parts.c.process, db.parts.c.sourcing, db.parts.c.tool_cost_inr,
                                         db.parts.c.tool_capex_inr)
-                                 .where(and_(db.parts.c.project_id == project_id, db.parts.c.is_assembly.is_(False)))
+                                 .where(and_(scope.part_where(project_id), db.parts.c.is_assembly.is_(False)))
                                  ).mappings().all()
         tool_example = _tool_example_parts(conn, [r["id"] for r in tool_rows if r["tool_capex_inr"] is not None])
     variants = []

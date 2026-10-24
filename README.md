@@ -803,6 +803,22 @@ Use *Examples only* in the Rate library to work through them.
 
 ---
 
+## Several users at the same time: roles and data access (roadmap stage 26)
+
+Run the tool as a web server for a team (`Start_Server.bat`, or `DTC_MODE=server`): every page needs a login. The first start creates the admin (user ID `admin`, the password you type
+or `DTC_ADMIN_PASSWORD`). Everyone opens `http://SERVER:8000/login`. Without `DTC_MODE=server` the tool stays a single-user program on your computer.
+
+| Role | Sees | Can do |
+|---|---|---|
+| **User** | the data of the **tool groups** the admin ticked for him / her (plastic, die casting, foundry, sheet metal, EPS, blow), plus assemblies and bought-out parts he / she created | everything end to end on that data: upload 3D, cost, design tools, correct, edit, update, delete; change own password; reads master data and rates |
+| **Head of department** (several allowed) | all data of all users | the same on all data, including adding parts to any user's project; changes master data and approves rates; changes own password |
+| **Admin** | everything | everything, and the **Users** page: create users, set role, tick groups, reset passwords, deactivate or delete users, backups |
+
+**Responsibilities change?** Admin → *Users* → tick other groups for the user → Save. The data stays where it is and *who sees it* changes: if user 1 now has die casting and EPS and
+user 2 has sheet metal and plastic, user 1 works on all die-casting and EPS data (including what user 2 made), user 2 on all sheet-metal and plastic data. A project that holds parts of several
+groups shows each user only his / her parts. A user deletes a whole project only when every part in it is his / hers. The *Who sees which data* table on the Users page shows the result.
+Every user changes his / her own password on **My account** (click your name in the menu). Older databases are converted at start: engineer = user, approver = head, viewer = user.
+
 ## Versions, upgrade by ZIP, backup and restore (read this before every update)
 
 **Versions.** The file `VERSION` (V0, V1, V2 …) is the version; the footer of the pages and `/api/version` show it. On GitHub every version is a folder
@@ -832,7 +848,7 @@ In server mode the Backup page needs the role admin. With PostgreSQL back up the
 **Move from the hosted copy to your laptop (http://127.0.0.1:8000/).**
 1. On the hosted copy open *Backup*, press **Back up now**, **Download** the ZIP, keep it.
 2. Delete the hosted copy.
-3. On your laptop: download the ZIP of the version from GitHub, unzip it into a folder (for example `C:\DesignToCost`), install Python 3.11 or 3.12 (tick *Add python.exe to PATH*), and double-click **Install_Tool.bat** (creates `.venv`, installs the libraries once).
+3. On your laptop: download the ZIP of the version from GitHub, unzip it into a folder (for example `C:\DesignToCost`), install Python 3.12 or 3.13, 64-bit (3.11 also works; tick *Add python.exe to PATH*), and double-click **Install_Tool.bat** (creates `.venv`, installs the libraries once).
 4. Double-click **Start_Tool.bat**: the browser opens http://127.0.0.1:8000/ .
 5. Open *Backup* → **Upload a backup from my laptop** → choose the ZIP from step 1 → **Restore**. Your projects, CAD files and master data are back.
 

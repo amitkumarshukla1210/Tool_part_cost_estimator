@@ -121,3 +121,9 @@ footer { margin-top: 0; }
 .btn-danger{border-color:#b91c1c !important;color:#b91c1c !important;}
 .btn-danger:hover{background:#fee2e2 !important;border-color:#991b1b !important;}
 .btn-small{padding:2px 10px;font-size:12px;}
+
+/* tick boxes in a row (user groups) */
+.checks{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;}
+.checks b{margin-right:6px;}
+.checks label,label.inline{display:inline-flex !important;flex-direction:row;align-items:center;gap:6px;text-transform:none !important;letter-spacing:0 !important;font-size:13px !important;font-weight:500;margin:0;}
+.checks input[type=checkbox],label.inline input[type=checkbox]{width:auto;margin:0;}

@@ -3,7 +3,7 @@ rem Install Design to Cost on this computer (run once, also after downloading th
 cd /d "%~dp0"
 where python >nul 2>nul
 if errorlevel 1 (
-  echo Python is not installed. Install Python 3.11 or 3.12 from https://www.python.org/downloads/ and tick "Add python.exe to PATH", then run this again.
+  echo Python is not installed. Install Python 3.12 or 3.13 (64-bit; 3.11 also works) from https://www.python.org/downloads/ and tick "Add python.exe to PATH", then run this again.
   pause
   exit /b 1
 )

@@ -1427,6 +1427,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return JSONResponse({"detail": why}, status_code=403)
         token = auth.set_current(user)
         try:
+            from . import scope
+            why = scope.guard(path)
+            if why:
+                return JSONResponse({"detail": why}, status_code=403)
             return await call_next(request)
         finally:
             auth.reset(token)
@@ -1444,6 +1448,7 @@ def auth_error_handler(_, exc: auth.AuthError):
 def _server_startup():
     if auth.server_mode():
         projects_db.engine()
+        auth.migrate_roles()
         auth.bootstrap_admin()
 
 
@@ -1504,12 +1509,30 @@ def users_list():
 
 @app.post("/api/users")
 def users_create(data: dict):
-    return auth.create_user(data.get("username", ""), data.get("password", ""), data.get("role", "engineer"), data.get("name", ""))
+    return auth.create_user(data.get("username", ""), data.get("password", ""), data.get("role", "user"), data.get("name", ""), data.get("groups"))
 
 
 @app.put("/api/users/{uid}")
 def users_update(uid: int, data: dict):
     return auth.update_user(uid, data, auth.current())
+
+
+@app.delete("/api/users/{uid}")
+def users_delete(uid: int):
+    """Remove a user. His / her projects and parts stay (they are seen by group); a user cannot delete himself / herself."""
+    return auth.delete_user(uid, auth.current())
+
+
+@app.get("/api/access-overview")
+def access_overview():
+    """Per tool group: parts and projects in the data, and who sees them (the admin's view when changing responsibilities)."""
+    from . import scope
+    return scope.overview()
+
+
+@app.get("/account")
+def account_page():
+    return FileResponse(FRONTEND_DIR / "account.html")
 
 
 @app.get("/login")

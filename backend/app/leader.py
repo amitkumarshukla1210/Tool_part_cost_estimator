@@ -21,7 +21,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font
 from sqlalchemy import and_, select
 
-from . import master_data, rates, register, register_setup
+from . import master_data, rates, register, register_setup, scope
 from . import projects_db as db
 from .table_set import HEADER_FILL
 
@@ -35,7 +35,7 @@ def _fx(cur: str, as_of: str) -> float:
 def _part_costs(project_id: int) -> dict:
     """{part_id: row with the latest stored piece cost trace (or None)}."""
     with db.engine().connect() as conn:
-        parts = {r["id"]: dict(r) for r in conn.execute(select(db.parts).where(db.parts.c.project_id == project_id)).mappings()}
+        parts = {r["id"]: dict(r) for r in conn.execute(select(db.parts).where(scope.part_where(project_id))).mappings()}
         for pid in parts:
             last = conn.execute(select(db.piece_costs.c.trace, db.piece_costs.c.country, db.piece_costs.c.as_of, db.piece_costs.c.version)
                                 .where(db.piece_costs.c.part_id == pid).order_by(db.piece_costs.c.version.desc()).limit(1)).mappings().first()
@@ -266,7 +266,7 @@ def view(project_id: int) -> dict:
 
 def recalculate_pieces(project_id: int) -> dict:
     with db.engine().connect() as conn:
-        ids = [r for (r,) in conn.execute(select(db.parts.c.id).where(and_(db.parts.c.project_id == project_id, db.parts.c.is_assembly.is_(False))))]
+        ids = [r for (r,) in conn.execute(select(db.parts.c.id).where(and_(scope.part_where(project_id), db.parts.c.is_assembly.is_(False))))]
     done = same = 0
     skipped = []
     for pid in ids:
