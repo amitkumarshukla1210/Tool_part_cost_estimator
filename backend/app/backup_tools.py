@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -41,11 +42,21 @@ def storage_dir(root: Path = ROOT) -> Path:
 
 
 def locations(root: Path = ROOT) -> dict[str, Path]:
-    return {"master_data": root / "master_data", "data": root / "data", "storage": storage_dir(root)}
+    """Where the three parts live. The Windows kit (DTC_Start.bat) keeps them outside the app folder through
+    COSTING_DB_PATH / MASTER_DATA_PATH, DATABASE_URL (sqlite) and DTC_STORAGE_FOLDER."""
+    md = os.environ.get("COSTING_DB_PATH") or os.environ.get("MASTER_DATA_PATH")
+    url = os.environ.get("DATABASE_URL", "")
+    return {"master_data": Path(md).parent if md else root / "master_data",
+            "data": Path(url.removeprefix("sqlite:///")).parent if url.startswith("sqlite:///") else root / "data",
+            "storage": storage_dir(root)}
+
+
+def backups_dir(root: Path = ROOT) -> Path:
+    return Path(os.environ["DTC_BACKUP_FOLDER"]) if os.environ.get("DTC_BACKUP_FOLDER") else root / BACKUPS
 
 
 def make_backup(root: Path = ROOT, label: str = "dtc-backup") -> Path:
-    out_dir = root / BACKUPS
+    out_dir = backups_dir(root)
     out_dir.mkdir(exist_ok=True)
     target = out_dir / f"{label}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.zip"
     manifest = {"created": datetime.now().isoformat(timespec="seconds"), "parts": {}}
@@ -54,7 +65,7 @@ def make_backup(root: Path = ROOT, label: str = "dtc-backup") -> Path:
             n = 0
             if folder.exists():
                 for f in sorted(folder.rglob("*")):
-                    if f.is_file():
+                    if f.is_file() and out_dir.resolve() not in f.resolve().parents:      # never zip the backups themselves
                         z.write(f, f"{part}/{f.relative_to(folder).as_posix()}")
                         n += 1
             manifest["parts"][part] = {"files": n, "from": str(folder)}
@@ -63,7 +74,7 @@ def make_backup(root: Path = ROOT, label: str = "dtc-backup") -> Path:
 
 
 def latest(root: Path = ROOT) -> Path:
-    files = sorted((root / BACKUPS).glob("*.zip")) if (root / BACKUPS).exists() else []
+    files = sorted(backups_dir(root).glob("*.zip"), key=lambda f: f.stat().st_mtime) if backups_dir(root).exists() else []
     if not files:
         raise BackupError("There is no backup in the backups folder yet. Run: python backup.py")
     return files[-1]
@@ -110,9 +121,8 @@ def _git(root: Path, *args: str, check: bool = True) -> str:
 def update(root: Path = ROOT, mode: str = "ask") -> dict:
     """Backup, then pull. mode: ask (stop if both sides changed master_data/), keep-mine, take-new."""
     if not (root / ".git").exists():
-        raise BackupError("This folder is not a git clone (it came from a ZIP). To update: 1) python backup.py  2) unzip the new version over this folder, "
-                          "3) python backup.py --restore latest --only data,storage  4) keep your master_data/ from the backup if you changed it "
-                          "(python backup.py --restore latest --only master_data), or send me the backup to merge the new example rows.")
+        raise BackupError("This folder is not a git clone (it came from a ZIP). On Windows use DTC_Update.bat from the update kit "
+                          "(README: Install and update on Windows): it backs up, installs the new ZIP and merges your master data.")
     backup = make_backup(root, "dtc-before-update")
     branch = _git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
     _git(root, "fetch", "origin", branch)

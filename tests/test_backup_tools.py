@@ -10,6 +10,13 @@ def git(path, *args):
     subprocess.run(["git", "-C", str(path), "-c", "user.email=t@t", "-c", "user.name=t", *args], check=True, capture_output=True)
 
 
+@pytest.fixture(autouse=True)
+def app_folder_layout(monkeypatch):
+    """These tests use the plain app-folder layout (data/, master_data/ and backups/ inside the app)."""
+    for k in ("COSTING_DB_PATH", "MASTER_DATA_PATH", "DATABASE_URL", "DTC_BACKUP_FOLDER"):
+        monkeypatch.delenv(k, raising=False)
+
+
 def make_root(tmp_path):
     root = tmp_path / "app"
     (root / "master_data").mkdir(parents=True)
@@ -120,3 +127,21 @@ def test_update_refuses_when_other_files_were_edited(tmp_path, monkeypatch):
     (clone / "code.py").write_text("edited by hand")
     with pytest.raises(bt.BackupError, match="Other files"):
         bt.update(clone)
+
+
+def test_data_outside_the_app_folder(tmp_path, monkeypatch):
+    """The Windows kit keeps the data in DTC_Data and the backups in DTC_Backups; backup.py follows."""
+    root, data = make_root(tmp_path), tmp_path / "DTC_Data"
+    (data / "master_data").mkdir(parents=True)
+    (data / "master_data" / "costing_db.sqlite").write_bytes(b"db")
+    (data / "data").mkdir()
+    (data / "data" / "projects.sqlite").write_bytes(b"outside")
+    monkeypatch.setenv("COSTING_DB_PATH", str(data / "master_data" / "costing_db.sqlite"))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(data / 'data' / 'projects.sqlite').as_posix()}")
+    monkeypatch.setenv("DTC_BACKUP_FOLDER", str(data / "master_data" / "backups"))                 # even inside a backed-up folder
+    monkeypatch.setattr(bt, "storage_dir", lambda r=root: root / "storage")
+    bt.make_backup(root)
+    z = bt.make_backup(root)
+    names = zipfile.ZipFile(z).namelist()
+    assert "data/projects.sqlite" in names and "master_data/costing_db.sqlite" in names
+    assert not any("backups" in n for n in names) and bt.latest(root) == z
