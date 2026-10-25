@@ -27,7 +27,8 @@ FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 THEME_DIR = Path(__file__).resolve().parents[2] / "theme"
 MAX_UPLOAD_MB = 100
 
-app = FastAPI(title="Design to Cost — Part Cost Estimator", version="0.9.0 (tool cost engine)")
+APP_VERSION = (Path(__file__).resolve().parents[2] / "VERSION").read_text(encoding="utf-8").strip()  # release name, e.g. V0
+app = FastAPI(title="Design to Cost — Part Cost Estimator", version=APP_VERSION)
 
 
 @app.get("/api/part-types")
@@ -1234,7 +1235,7 @@ def auth_logout(request: Request):
 @app.get("/api/auth/me")
 def auth_me():
     u = auth.current()
-    return {"mode": "server" if auth.server_mode() else "local", "user": u}
+    return {"mode": "server" if auth.server_mode() else "local", "user": u, "version": APP_VERSION}
 
 
 @app.post("/api/auth/password")

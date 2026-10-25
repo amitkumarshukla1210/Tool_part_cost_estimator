@@ -2,6 +2,8 @@
 
 # Design to Cost
 
+**Release: V0** (the release name is in the `VERSION` file, the page footer and `DTC_Update.bat` → status).
+
 **Part Cost Estimator** is the Design to Cost module that estimates **part cost, tool cost and machine size** straight
 from a 3D CAD model (STEP file).
 It covers four manufacturing routes:
