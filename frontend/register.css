@@ -133,3 +133,7 @@ td.wrap { white-space: normal; min-width: 260px; }
 header nav li.who { font-size: .85rem; color: var(--grey, #667); }
 #supTable input { min-width: 70px; }
 #supTable select { min-width: 110px; }
+.label-text { font-weight: 600; text-transform: uppercase; font-size: .8rem; letter-spacing: .04em; color: var(--grey, #667); margin-right: 6px; }
+table.ops-order { margin: 6px 0; }
+table.ops-order td.row-actions { white-space: nowrap; text-align: right; }
+table.ops-order td.row-actions .btn { min-width: 34px; padding: 2px 8px; }

@@ -81,6 +81,8 @@ $("panelClose").addEventListener("click", () => {
 });
 
 async function openPart(id) {
+  sheetOps = null;
+  sheetOpsReset = false;
   try {
     part = await api(`/api/parts/${id}`);
   } catch (err) {
@@ -723,12 +725,49 @@ function sheetBlock(p) {
         <option value="multi_stage" ${p.sheet_inputs?.mode === "multi_stage" ? "selected" : ""}>Multi-stage</option></select></label>
       <label>Draw depth (mm) <input type="number" min="0" step="any" name="draw_depth_mm" value="${p.sheet_inputs?.draw_depth_mm ?? ""}" placeholder="from the model" /></label>
       <label>Inside bend radius (mm) <input type="number" min="0" step="any" name="bend_radius_mm" value="${p.sheet_inputs?.bend_radius_mm ?? ""}" placeholder="from the model" /></label>
-      <label class="span2">Operations in order (codes, comma-separated; blank = suggested). Available: ${s.available_operations.map((o) => esc(o.code)).join(", ")}
-        <input name="operations" value="${esc((p.sheet_inputs?.operations || []).join(", "))}" /></label>
+      <div class="span2"><span class="label-text">Operations in order</span>
+        <span class="note">(${p.sheet_inputs?.operations?.length ? "your sequence" : "suggested from the part features; change it below"})</span>
+        <div id="opsEditor">${opsEditor(s)}</div></div>
       <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary small">Save and recalculate</button></div>
       <p class="status span2" id="sheetStatus"></p></form>`;
   return html;
 }
+
+// operation order editor: the current sequence (yours or the suggested one), move up / down, remove, add, reset
+let sheetOps = null;        // codes in order while editing; null = untouched
+let sheetOpsReset = false;  // "Reset to suggested" clicked: save without a typed sequence
+function opsEditor(s) {
+  const codes = sheetOps ?? s.operations.map((o) => o.code);
+  const name = (c) => s.available_operations.find((o) => o.code === c)?.name ?? c;
+  return `<table class="cost-table ops-order" data-nofilter><tbody>${codes.map((c, i) => `<tr><td class="num">${i + 1}</td>
+      <td><b>${esc(name(c))}</b> <span class="note">${esc(c)}</span></td>
+      <td class="row-actions"><button type="button" class="btn btn-outline small" data-op="up" data-i="${i}" ${i === 0 ? "disabled" : ""} title="Move up">↑</button>
+        <button type="button" class="btn btn-outline small" data-op="down" data-i="${i}" ${i === codes.length - 1 ? "disabled" : ""} title="Move down">↓</button>
+        <button type="button" class="btn btn-outline small" data-op="del" data-i="${i}" title="Remove">✕</button></td></tr>`).join("")
+      || '<tr><td colspan="3" class="empty">No operation. Add one below.</td></tr>'}</tbody></table>
+    <div class="toolbar"><label>Add operation <select id="opAdd">${s.available_operations.map((o) => `<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)})</option>`).join("")}</select></label>
+      <button type="button" class="btn btn-outline small" data-op="add">+ Add</button>
+      <button type="button" class="btn btn-outline small" data-op="reset" title="Forget your sequence and use the suggested one">Reset to suggested</button>
+      ${sheetOps || sheetOpsReset ? '<span class="note"><b>Not saved yet</b>: click Save and recalculate.</span>' : ""}</div>`;
+}
+$("panelBody").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-op]");
+  if (!b || !part?.sheet || part.sheet.problem) return;
+  const codes = sheetOps ?? part.sheet.operations.map((o) => o.code);
+  const i = Number(b.dataset.i);
+  if (b.dataset.op === "up") [codes[i - 1], codes[i]] = [codes[i], codes[i - 1]];
+  if (b.dataset.op === "down") [codes[i + 1], codes[i]] = [codes[i], codes[i + 1]];
+  if (b.dataset.op === "del") codes.splice(i, 1);
+  if (b.dataset.op === "add") codes.push($("opAdd").value);
+  if (b.dataset.op === "reset") {
+    sheetOps = null;
+    sheetOpsReset = true;
+  } else {
+    sheetOps = codes;
+    sheetOpsReset = false;
+  }
+  $("opsEditor").innerHTML = opsEditor(part.sheet);
+});
 
 // flat pattern, progressive strip layout and downloads (stage 10)
 function layoutBlock(p) {
@@ -756,9 +795,13 @@ $("panelBody").addEventListener("submit", async (e) => {
   const inputs = {};
   if (f.get("mode")) inputs.mode = f.get("mode");
   for (const k of ["draw_depth_mm", "bend_radius_mm"]) if (f.get(k) !== "") inputs[k] = Number(f.get(k));
-  if (f.get("operations").trim()) inputs.operations = f.get("operations").split(",").map((x) => x.trim()).filter(Boolean);
+  // your sequence: the edited one, else the one saved before (unless Reset to suggested was clicked)
+  const ops = sheetOps ?? (sheetOpsReset ? null : part.sheet_inputs?.operations);
+  if (ops?.length) inputs.operations = ops;
   try {
     await api(`/api/parts/${part.id}`, { method: "PUT", body: JSON.stringify({ sheet_inputs: inputs }) });
+    sheetOps = null;
+    sheetOpsReset = false;
     await openPart(part.id);
   } catch (err) {
     status($("sheetStatus"), err.message, "error");
