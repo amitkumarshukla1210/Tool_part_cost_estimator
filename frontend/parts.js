@@ -399,7 +399,11 @@ function renderPart() {
             <fieldset class="sub grid2"><legend>Bought-out price</legend>${priceFields(p)}</fieldset>
             <fieldset class="sub grid2"><legend>Size without a 3D file</legend>${dimsFields(p.dimensions)}</fieldset>
           </details>
-          <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary">Save changes</button></div>
+          <div class="span2 dialog-actions">
+            <button type="button" class="btn btn-outline" id="partRemoveBom" title="Take this part out of the BOM of every variant of the project; the part stays in the register">Remove from project BOM</button>
+            <button type="button" class="btn btn-outline btn-danger" id="partDelete" title="Delete this part from the register (a backup is made first)">Delete part</button>
+            <span class="spacer"></span>
+            <button type="submit" class="btn btn-primary">Save changes</button></div>
           <p class="status span2" id="partStatus"></p>
         </form></div>
     </div>
@@ -973,6 +977,34 @@ $("panelBody").addEventListener("submit", async (e) => {
     status($("bomStatus"), r.message, r.approved === false ? "error" : "ok");
   } catch (err) {
     status($("bomStatus"), err.message, "error");
+  }
+});
+
+// remove the part from the project BOM, or delete it from the register
+$("panelBody").addEventListener("click", async (e) => {
+  if (e.target.id === "partRemoveBom") {
+    if (!confirm(`Remove ${part.part_code} from the BOM of every variant of its project?\n\nThe part stays in the parts list with its files and costs.`)) return;
+    try {
+      const r = await api(`/api/parts/${part.id}/remove-from-bom`, { method: "POST" });
+      await openPart(part.id);
+      status($("partStatus"), r.message, "ok");
+    } catch (err) {
+      status($("partStatus"), err.message, "error");
+    }
+  }
+  if (e.target.id === "partDelete") {
+    const typed = prompt(`Delete part ${part.part_code} · ${part.name}?\n\nIts revisions, RM / tool / part cost versions, suppliers and BOM lines are ` +
+      `deleted. A backup ZIP is made first.\n\nType the part code ${part.part_code} to confirm:`);
+    if (typed == null) return;
+    try {
+      const r = await api(`/api/parts/${part.id}?confirm=${encodeURIComponent(typed.trim())}`, { method: "DELETE" });
+      $("panel").hidden = true;
+      history.replaceState(null, "", location.pathname + location.search.replace(/[?&]part=\d+/, ""));
+      await search();
+      alert(r.message);
+    } catch (err) {
+      status($("partStatus"), err.message, "error");
+    }
   }
 });
 
