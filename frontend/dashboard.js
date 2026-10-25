@@ -220,9 +220,25 @@ function openProject(edit) {
     for (const k of ["code", "name", "customer", "description", "capex_budget_inr", "sop_date"]) f.elements.namedItem(k).value = p[k] ?? "";
   }
   f.elements.namedItem("code").readOnly = edit;
+  $("deleteProject").hidden = !edit;
   status($("projectStatus"), "");
   $("projectDialog").showModal();
 }
+$("deleteProject").addEventListener("click", async () => {
+  const p = dash.project;
+  const typed = prompt(`Delete project ${p.code} · ${p.name}?\n\nIts variants, BOM, parts, revisions, RM / tool / part cost ` +
+    `versions and CAPEX lines are deleted. A backup ZIP is made first.\n\nType the project code ${p.code} to confirm:`);
+  if (typed == null) return;
+  try {
+    const r = await api(`/api/projects/${current()}?confirm=${encodeURIComponent(typed.trim())}`, { method: "DELETE" });
+    $("projectDialog").close();
+    history.replaceState(null, "", location.pathname);
+    await loadProjects(null);
+    status($("status"), `Project ${r.deleted} deleted (${r.parts} parts, ${r.variants} variants). Backup: ${r.backup}`, "ok");
+  } catch (err) {
+    status($("projectStatus"), err.message, "error");
+  }
+});
 $("newProject").addEventListener("click", () => openProject(false));
 $("emptyNew").addEventListener("click", () => openProject(false));
 $("editProject").addEventListener("click", () => openProject(true));

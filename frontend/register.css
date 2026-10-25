@@ -123,3 +123,6 @@ details.bop fieldset { margin-bottom: 10px; }
 .ex-table .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .ex-table .chip { font-size: 11px; padding: 1px 6px; border-radius: 10px; background: var(--grey-light); color: var(--ink); }
 .ex-table .done { color: var(--grey); }
+.dialog-actions .spacer { flex: 1; }
+.btn-danger { color: var(--danger); border-color: var(--danger); }
+.btn-danger:hover { background: var(--danger); color: #fff; border-color: var(--danger); }

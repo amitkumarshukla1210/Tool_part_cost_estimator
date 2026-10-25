@@ -17,4 +17,5 @@ def master_data_copy(tmp_path, monkeypatch):
     # project data and CAD files of each test go to its own temporary folder
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'projects.sqlite'}")
     monkeypatch.setenv("DTC_STORAGE_FOLDER", str(tmp_path / "storage"))
+    monkeypatch.setenv("DTC_BACKUP_FOLDER", str(tmp_path / "backups"))
     return copy

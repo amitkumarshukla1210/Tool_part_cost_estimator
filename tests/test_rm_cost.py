@@ -63,7 +63,7 @@ def test_sheet_metal_uses_the_nesting_and_traces_it():
     pid = add_part(project(), "sheet_metal_bracket.step", "Mild steel CRCA / HR", "sheet_metal_multistage", "SM-1")
     v = detail(pid)["rm"]["latest"]
     net = 11800 / 1000 * 7.85
-    gross = 2500 * 1250 * 2 / 1000 * 7.85 / 450                            # 450 blanks per sheet (see test_gross_weight)
+    gross = (118 + 5) * (50 + 5) * 2 / 1000 * 7.85                         # calculated blank 118 × 50 + 5 mm gap
     assert v["gross_weight_g"] == pytest.approx(gross, rel=1e-4)
     cost = gross / 1000 * 65 - (gross - net) / 1000 * 30
     assert v["net_rm_cost"] == pytest.approx(cost, rel=1e-4)

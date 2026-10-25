@@ -43,7 +43,8 @@ def test_sheet_metal_nesting():
     # gives 45 × 10 = 450 blanks, better than 20 × 22 = 440 the other way.
     assert r["nesting"] == {"along": 45, "across": 10, "per_sheet": 450, "rotated": True}
     sheet_g = 2500 * 1250 * 2 / 1000 * 7.85
-    assert r["gross_weight_g"] == pytest.approx(sheet_g / 450, abs=1e-3)
+    # gross weight = the calculated blank plus the 5 mm gap (pitch × width), not a share of the standard sheet
+    assert r["gross_weight_g"] == pytest.approx((118 + 5) * (50 + 5) * 2 / 1000 * 7.85, abs=1e-3)
     assert r["sheet_utilisation_pct"] == pytest.approx(100 * net_g * 450 / sheet_g, abs=0.01)
 
 

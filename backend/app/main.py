@@ -500,6 +500,12 @@ def projects_update(project_id: int, data: dict):
     return register.update_project(project_id, data)
 
 
+@app.delete("/api/projects/{project_id}")
+def projects_delete(project_id: int, confirm: str = ""):
+    """Delete a project and its parts; `confirm` must be the project code. A backup ZIP is made first."""
+    return register.delete_project(project_id, confirm)
+
+
 @app.post("/api/projects/{project_id}/variants")
 def variants_create(project_id: int, data: dict):
     return register.create_variant(project_id, data)

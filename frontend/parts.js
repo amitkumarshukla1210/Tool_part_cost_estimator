@@ -825,14 +825,16 @@ function loopBlock(p) {
   return `<h3 class="block-title">Design loop</h3>
     <p>${l.flow.map((f) => `<span class="badge ${f.code === l.status ? "status" : ""}" title="${fmt(f.days, 1)} days">${esc(f.name)}</span>`).join(" → ")}</p>
     <form id="loopForm" class="card grid2">
-      <label>Move to <select name="status">${l.next.map((c) => `<option value="${esc(c)}">${esc(name(c))}</option>`).join("")}</select></label>
+      <label>Move to <select name="status">${l.next.map((c) => `<option value="${esc(c)}">${esc(name(c))}</option>`).join("")}${
+        (l.back || []).filter((c) => !l.next.includes(c)).length ? `<optgroup label="Step back (comment needed)">${(l.back || []).filter((c) => !l.next.includes(c))
+          .map((c) => `<option value="${esc(c)}">↩ Back to ${esc(name(c))}</option>`).join("")}</optgroup>` : ""}</select></label>
       <label>Comment (what has to change, or why) <input name="comment" id="loopComment" /></label>
       <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary small">Change status</button></div>
       <p class="status span2" id="loopStatus"></p></form>
     <details class="card add-insert"><summary class="btn btn-outline small">What changed, who, when (${l.timeline.length})</summary>
       <div class="table-wrap"><table class="cost-table"><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead><tbody>
       ${l.timeline.slice().reverse().map((e) => `<tr><td>${esc(e.when.slice(0, 16).replace("T", " "))}</td><td>${esc(e.who)}</td><td>${
-        e.action === "status_changed" ? `${esc(name(e.old))} → <b>${esc(name(e.new))}</b>${e.comment ? ` · ${esc(e.comment)}` : ""}`
+        e.action === "status_changed" ? `${esc(name(e.old))} ${e.step_back ? "↩" : "→"} <b>${esc(name(e.new))}</b>${e.step_back ? " (step back)" : ""}${e.comment ? ` · ${esc(e.comment)}` : ""}`
         : e.action === "revision_added" ? `Revision <b>${esc(e.rev)}</b> ${esc(e.change_note || "")}` : "Created"}</td></tr>`).join("")}</tbody></table></div></details>`;
 }
 

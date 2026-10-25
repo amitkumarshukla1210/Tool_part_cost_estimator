@@ -149,6 +149,66 @@ def update_project(pid: int, data: dict) -> dict:
     return get_project(pid)
 
 
+def delete_project(pid: int, confirm_code: str = "", backup: bool = True) -> dict:
+    """Delete a project with its variants, BOM, parts, revisions, cost versions and CAPEX lines.
+
+    Safety: you type the project code to confirm; a part used by ANOTHER project (in its BOM or as a moulded-in
+    insert) stops the delete; a backup ZIP is made first (dtc-before-delete-<code>-<time>.zip). CAD files stay in
+    the storage folder (they are stored once by checksum and may be shared), and the history keeps a 'deleted' record.
+    """
+    with db.engine().connect() as conn:
+        p = conn.execute(select(db.projects).where(db.projects.c.id == pid)).mappings().first()
+    if not p:
+        raise RegisterError(f"Project {pid} does not exist.")
+    if str(confirm_code or "").strip().upper() != p["code"]:
+        raise RegisterError(f"To delete project {p['code']}, type its code {p['code']} to confirm.")
+    with db.engine().connect() as conn:
+        part_ids = [i for (i,) in conn.execute(select(db.parts.c.id).where(db.parts.c.project_id == pid))]
+        variant_ids = [i for (i,) in conn.execute(select(db.variants.c.id).where(db.variants.c.project_id == pid))]
+        used = []
+        if part_ids:
+            bl = db.bom_lines
+            for code, vcode, pcode in conn.execute(
+                    select(db.parts.c.part_code, db.variants.c.code, db.projects.c.code)
+                    .select_from(bl.join(db.variants, bl.c.variant_id == db.variants.c.id)
+                                 .join(db.projects, db.variants.c.project_id == db.projects.c.id)
+                                 .join(db.parts, bl.c.child_part_id == db.parts.c.id))
+                    .where(bl.c.child_part_id.in_(part_ids) & ~bl.c.variant_id.in_(variant_ids or [-1]))):
+                used.append(f"{code} in the BOM of {pcode} / {vcode}")
+            body = db.parts.alias("body")
+            for code, bcode in conn.execute(
+                    select(db.parts.c.part_code, body.c.part_code)
+                    .select_from(db.part_inserts.join(db.parts, db.part_inserts.c.insert_part_id == db.parts.c.id)
+                                 .join(body, db.part_inserts.c.part_id == body.c.id))
+                    .where(db.part_inserts.c.insert_part_id.in_(part_ids) & ~db.part_inserts.c.part_id.in_(part_ids))):
+                used.append(f"{code} is moulded into {bcode}")
+    if used:
+        raise RegisterError(f"Project {p['code']} cannot be deleted: its parts are used elsewhere ("
+                            + "; ".join(sorted(set(used))[:10]) + "). Remove those links first.")
+    backup_file = ""
+    if backup:
+        from . import backup_tools
+        backup_file = backup_tools.make_backup(label=f"dtc-before-delete-{p['code']}").name
+    with db.engine().begin() as conn:
+        if part_ids:
+            ids = part_ids
+            conn.execute(db.bom_lines.delete().where(db.bom_lines.c.child_part_id.in_(ids) | db.bom_lines.c.parent_part_id.in_(ids)))
+            conn.execute(db.part_inserts.delete().where(db.part_inserts.c.part_id.in_(ids) | db.part_inserts.c.insert_part_id.in_(ids)))
+            for t in (db.rm_costs, db.tool_costs, db.piece_costs):
+                conn.execute(t.delete().where(t.c.part_id.in_(ids)))
+            conn.execute(db.revisions.delete().where(db.revisions.c.part_id.in_(ids)))
+            conn.execute(db.parts.delete().where(db.parts.c.id.in_(ids)))
+        if variant_ids:
+            conn.execute(db.bom_lines.delete().where(db.bom_lines.c.variant_id.in_(variant_ids)))
+            conn.execute(db.variants.delete().where(db.variants.c.id.in_(variant_ids)))
+        conn.execute(db.capex_items.delete().where(db.capex_items.c.project_id == pid))
+        conn.execute(db.bom_extracts.update().where(db.bom_extracts.c.project_id == pid).values(project_id=None))
+        conn.execute(db.projects.delete().where(db.projects.c.id == pid))
+        _log(conn, "project", pid, "deleted", {"code": p["code"], "name": p["name"], "parts": len(part_ids),
+                                               "variants": len(variant_ids), "backup": backup_file})
+    return {"deleted": p["code"], "parts": len(part_ids), "variants": len(variant_ids), "backup": backup_file}
+
+
 def list_projects() -> list[dict]:
     with db.engine().connect() as conn:
         counts = dict(conn.execute(select(db.parts.c.project_id, func.count()).group_by(db.parts.c.project_id)).all())
@@ -440,13 +500,28 @@ def _same(a, b) -> bool:
     return a == b or (empty(a) and empty(b))
 
 
+def _back_codes(code: str) -> list[str]:
+    """Design loop: the earlier statuses (lower order) a part may step back to, nearest first, e.g. a step forgotten."""
+    sts = register_setup.statuses()
+    cur = next((s for s in sts if s["code"] == code), None)
+    return [s["code"] for s in reversed(sts) if cur and s["sort_order"] < cur["sort_order"]]
+
+
 def _check_status_change(old: str, new: str, comment: str) -> None:
-    """Design loop: the move must be allowed by Part statuses (next statuses), with a comment where required."""
+    """Design loop: the move must be allowed by Part statuses (next statuses), with a comment where required.
+    A step back to an earlier status is always allowed and always needs a comment (why)."""
     st = {s["code"]: s for s in register_setup.statuses()}
+    if new not in st:
+        raise RegisterError(f"Status '{new}' is not in Part register setup → Part statuses.")
+    if new in _back_codes(old):
+        if not str(comment or "").strip():
+            raise RegisterError(f"Stepping back to '{st[new]['name']}' needs a comment (why).")
+        return
     allowed = register_setup.next_codes(st[old]) if old in st else []
     if allowed and new not in allowed:
         names = ", ".join(st[c]["name"] for c in allowed if c in st)
-        raise RegisterError(f"From '{st[old]['name']}' the part can only move to: {names} (Part register setup → Part statuses).")
+        raise RegisterError(f"From '{st[old]['name']}' the part can only move to: {names}, or step back to an earlier "
+                            "status with a comment (Part register setup → Part statuses).")
     if st[new].get("comment_required") and not str(comment or "").strip():
         raise RegisterError(f"Moving to '{st[new]['name']}' needs a comment (what has to change, or why).")
 
@@ -476,6 +551,7 @@ def design_loop(part_id: int) -> dict:
             "flow": [{"code": s["code"], "name": s["name"], "comment_required": bool(s.get("comment_required")),
                       "days": round(days.get(s["code"], 0), 2)} for s in sts],
             "next": register_setup.next_codes(cur) or [s["code"] for s in sts if s["code"] != d["status"]],
+            "back": _back_codes(d["status"]),
             "timeline": timeline}
 
 
@@ -493,7 +569,8 @@ def update_part(part_id: int, data: dict, refresh: bool = True) -> dict:
             _log(conn, "part", part_id, "updated", changes)
         if "status" in changes:
             _log(conn, "part", part_id, "status_changed", {"old": old["status"], "new": vals["status"],
-                                                           "comment": str(data.get("status_comment") or "").strip()})
+                                                           "comment": str(data.get("status_comment") or "").strip(),
+                                                           "step_back": vals["status"] in _back_codes(old["status"])})
     if refresh and {"material", "process", "sourcing", "country", "costing_month", "rm_inputs", "tool_country",
                     "tool_inputs", "annual_volume", "programme_life_years"} & set(changes):
         refresh_costs([part_id], "part details changed")
