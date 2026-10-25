@@ -497,6 +497,8 @@ press. The die type follows the part's process (progressive / multi-stage); the 
 Everything is data in **Mould & die database → Sheet materials, Sheet operations, Sheet rules, Sheet checks** and the sheet-metal
 Parameters; all rows are EXAMPLE values.
 
+
+**Operations in order** (Sheet-metal tools block on the part): the current sequence is listed (the suggested one, or yours), with ↑ / ↓ to reorder, ✕ to remove, *Add operation* and *Reset to suggested*; *Save and recalculate* stores it.
 ## Sheet-metal tools II (roadmap stage 10)
 
 The **Sheet-metal tools** block also shows the **blank** and the **progressive strip layout**. A flat part gets its real outline and
