@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design to Cost — First start</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header><div class="header-inner"><a class="brand" href="/"><img src="/theme/logo.png" alt="Design to Cost logo" />
+    <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span></a></div></header>
+  <main>
+    <section class="page-body"><div class="container" style="max-width:480px">
+      <form class="card" id="setupForm">
+        <h2>First start: create the admin</h2>
+        <p class="note">Nobody can use the app until this first admin ID exists. The admin then creates the IDs of the team
+          on the Admin page. Keep this password safe; if it is lost, DTC_ResetPassword.bat sets a new one at this PC.</p>
+        <label>Admin user ID <input name="username" value="admin" required autocomplete="username" pattern="[A-Za-z0-9._\-]+" /></label>
+        <label>Full name <input name="name" placeholder="e.g. Amit Shukla" /></label>
+        <label>Password (10+ characters) <input type="password" name="password" required minlength="10" autocomplete="new-password" /></label>
+        <label>Password again <input type="password" name="password2" required minlength="10" autocomplete="new-password" /></label>
+        <p class="status error" id="setupStatus" role="alert"></p>
+        <button type="submit" class="btn btn-primary">Create admin and log in</button>
+      </form>
+    </div></section>
+  </main>
+  <script>
+    document.getElementById("setupForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const f = Object.fromEntries(new FormData(e.target));
+      const msg = document.getElementById("setupStatus");
+      if (f.password !== f.password2) return (msg.textContent = "The two passwords differ.");
+      const res = await fetch("/api/auth/setup", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: f.username, name: f.name, password: f.password }) });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok) location.href = "/admin";
+      else msg.textContent = body.detail || "Could not create the admin.";
+    });
+  </script>
+</body>
+</html>

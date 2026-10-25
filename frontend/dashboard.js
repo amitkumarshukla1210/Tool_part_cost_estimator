@@ -113,7 +113,12 @@ async function editCapex(item) {
   const ask = (label, cur) => window.prompt(label, cur ?? "");
   const description = ask("Line (what is bought)", item?.description);
   if (description === null) return;
-  const data = { description, supplier: ask("Supplier", item?.supplier), country: ask("Country code (e.g. CN, IN)", item?.country),
+  const sups = await api("/api/suppliers").then((r) => r.suppliers).catch(() => []);
+  const curCode = sups.find((x) => x.id === item?.supplier_id)?.code ?? item?.supplier;
+  const typed = ask(`Supplier: code from the supplier master (${sups.slice(0, 6).map((x) => x.code).join(", ")}${sups.length > 6 ? ", …" : ""}) or a name`, curCode);
+  const sup = sups.find((x) => x.code.toUpperCase() === String(typed ?? "").trim().toUpperCase());
+  const data = { description, supplier: sup ? sup.name : typed, supplier_id: sup ? sup.id : null,
+    country: ask("Country code (e.g. CN, IN; blank = the supplier's)", item?.country),
     amount_inr: ask("Amount (INR)", item?.amount_inr), need_by: ask("Need-by date YYYY-MM-DD (blank = SOP date)", item?.need_by) };
   if (item) data.supplier ??= "";
   try {

@@ -126,3 +126,10 @@ details.bop fieldset { margin-bottom: 10px; }
 .dialog-actions .spacer { flex: 1; }
 .btn-danger { color: var(--danger); border-color: var(--danger); }
 .btn-danger:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
+
+/* admin & suppliers (stage 22) */
+pre.report { white-space: pre-wrap; font-size: .8rem; max-height: 320px; overflow: auto; margin: 8px 0 0; }
+td.wrap { white-space: normal; min-width: 260px; }
+header nav li.who { font-size: .85rem; color: var(--grey, #667); }
+#supTable input { min-width: 70px; }
+#supTable select { min-width: 110px; }

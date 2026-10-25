@@ -17,6 +17,7 @@ This file and the DTC_*.bat files live in the folder ABOVE the app (the "base fo
     python dtc_manager.py backup     backup now
     python dtc_manager.py restore    put a backup back (yours now is backed up first)
     python dtc_manager.py rollback   back to the version before the last update, with the data of that moment
+    python dtc_manager.py reset-password [user]   new password for a user (e.g. a forgotten admin password), from this PC only
     python dtc_manager.py status     where everything is, installed version, last backup
 """
 
@@ -49,7 +50,8 @@ SETTINGS = BASE / "dtc_settings.ini"
 VERSION = DATA / "version.json"
 MANAGED = {DATA.name, BACKUPS.name, DOWNLOADS.name, OLD.name, VENV.name, STAGING.name}
 PARTS = ("master_data", "data", "storage")
-KIT_FILES = ("dtc_manager.py", "DTC_Start.bat", "DTC_Update.bat", "DTC_Backup.bat", "DTC_Restore.bat", "DTC_Rollback.bat")
+KIT_FILES = ("dtc_manager.py", "DTC_Start.bat", "DTC_Update.bat", "DTC_Backup.bat", "DTC_Restore.bat", "DTC_Rollback.bat",
+             "DTC_ResetPassword.bat")
 
 DEFAULT_SETTINGS = """\
 ; Design to Cost: settings of the Windows kit (dtc_manager.py). Lines starting with ; are notes.
@@ -136,6 +138,8 @@ def app_env() -> dict:
         "DATABASE_URL": "sqlite:///" + (DATA / "data" / "projects.sqlite").as_posix(),
         "DTC_STORAGE_FOLDER": str(storage_dir()),
         "DTC_BACKUP_FOLDER": str(BACKUPS),
+        "DTC_DATA_FOLDER": str(DATA),               # Admin page: version.json and the update reports in logs\
+        "DTC_MODE": "server",                       # logins always on (the first start asks for the first admin)
         "PYTHONUTF8": "1",
         "PYTHONIOENCODING": "utf-8",
     })
@@ -665,7 +669,18 @@ def cmd_status(_args) -> None:
     say(f"Address:        http://127.0.0.1:{port()} ({'running' if running() else 'not running'})")
 
 
-COMMANDS = {"start": cmd_start, "update": cmd_update, "backup": cmd_backup, "restore": cmd_restore, "rollback": cmd_rollback, "status": cmd_status}
+def cmd_reset_password(args) -> None:
+    """A forgotten password (also the admin's): set a new one from this PC. Only someone at this PC can do it."""
+    app = app_dir()
+    if not is_app(app) or not venv_python().exists():
+        raise KitError("The app is not installed in this folder yet: run DTC_Update.bat first.")
+    user = args[0] if args else ask("User name whose password to reset", "admin")
+    r = subprocess.run([str(venv_python()), "-m", "backend.app.server_tools", "reset-password", user], cwd=app, env=app_env())
+    if r.returncode:
+        raise KitError("The password was not changed.")
+
+
+COMMANDS = {"reset-password": cmd_reset_password, "start": cmd_start, "update": cmd_update, "backup": cmd_backup, "restore": cmd_restore, "rollback": cmd_rollback, "status": cmd_status}
 
 
 def main(argv=None) -> int:

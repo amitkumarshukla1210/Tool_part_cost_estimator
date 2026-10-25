@@ -8,6 +8,7 @@ then open http://127.0.0.1:8000 in a browser.
 from __future__ import annotations
 
 import os
+from datetime import datetime
 import tempfile
 from pathlib import Path
 
@@ -1093,25 +1094,50 @@ from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
 from . import auth  # noqa: E402
 
 
+def _log_settings_change(request, response) -> None:
+    """Master data and rate changes go to the activity log too (their own tables keep only the values)."""
+    path = request.url.path
+    if request.method in ("GET", "HEAD", "OPTIONS") or response.status_code >= 400:
+        return
+    entity = "master_data" if path.startswith(auth.MASTER_PATHS) else "rates" if path.startswith(auth.RATE_PATHS) else ""
+    if not entity:
+        return
+    try:
+        with projects_db.engine().begin() as conn:
+            auth.log(conn, entity, 0, "saved", {"table": path.removeprefix("/api/"), "method": request.method})
+    except Exception:  # the log must never break the save itself
+        pass
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
-    """Local mode: nothing changes. Server mode: every page and API call needs a login; roles decide who may change what."""
+    """Every page and API call needs a login (DTC_MODE=local: none). The first start, with no user yet, goes to /setup.
+    Permissions (Admin → Permissions) decide who may change what."""
 
     async def dispatch(self, request, call_next):
-        if not auth.server_mode() or not auth.needs_login(request.url.path):
-            return await call_next(request)
-        user = auth.user_of(request.cookies.get(auth.COOKIE))
         path = request.url.path
+        if not auth.server_mode() or not auth.needs_login(path):
+            response = await call_next(request)
+            if not auth.server_mode():
+                _log_settings_change(request, response)
+            return response
+        from fastapi.responses import RedirectResponse
+        if not auth.has_users():
+            if path.startswith("/api/"):
+                return JSONResponse({"detail": "No user yet: create the first admin on /setup.", "setup": True}, status_code=401)
+            return RedirectResponse("/setup", status_code=303)
+        user = auth.user_of(request.cookies.get(auth.COOKIE))
         if user is None:
             if path.startswith("/api/"):
                 return JSONResponse({"detail": "Please log in."}, status_code=401)
-            from fastapi.responses import RedirectResponse
             return RedirectResponse("/login", status_code=303)
         why = auth.allowed(user, request.method, path)
         if why:
             return JSONResponse({"detail": why}, status_code=403)
         token = auth.set_current(user)
         try:
-            return await call_next(request)
+            response = await call_next(request)
+            _log_settings_change(request, response)
+            return response
         finally:
             auth.reset(token)
 
@@ -1128,7 +1154,7 @@ def auth_error_handler(_, exc: auth.AuthError):
 def _server_startup():
     if auth.server_mode():
         projects_db.engine()
-        auth.bootstrap_admin()
+        auth.bootstrap_admin()       # optional: first admin from DTC_ADMIN_PASSWORD; otherwise /setup asks for it
 
 
 class LoginIn(BaseModel):
@@ -1196,14 +1222,170 @@ def users_update(uid: int, data: dict):
     return auth.update_user(uid, data, auth.current())
 
 
+@app.post("/api/auth/setup")
+def auth_setup(data: dict):
+    """First start: create the first admin and log in."""
+    auth.setup_first_admin(data.get("username", ""), data.get("password", ""), data.get("name", ""))
+    return auth_login(LoginIn(username=data.get("username", ""), password=data.get("password", "")))
+
+
 @app.get("/login")
 def login_page():
+    from fastapi.responses import RedirectResponse
+    if auth.server_mode() and not auth.has_users():
+        return RedirectResponse("/setup", status_code=303)
     return FileResponse(FRONTEND_DIR / "login.html")
+
+
+@app.get("/setup")
+def setup_page():
+    from fastapi.responses import RedirectResponse
+    if auth.has_users():
+        return RedirectResponse("/login", status_code=303)
+    return FileResponse(FRONTEND_DIR / "setup.html")
 
 
 @app.get("/users")
 def users_page():
-    return FileResponse(FRONTEND_DIR / "users.html")
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse("/admin", status_code=303)
+
+
+# ---------- admin page (roadmap stage 22) ----------
+
+@app.get("/admin")
+def admin_page():
+    return FileResponse(FRONTEND_DIR / "admin.html")
+
+
+@app.get("/api/admin/permissions")
+def admin_permissions():
+    me = auth.current()
+    return {"roles": list(auth.ROLES), "permissions": auth.permissions(), "me": me,
+            "mine": {p["action"]: auth.may(p["action"], me) for p in auth.permissions()}}
+
+
+@app.put("/api/admin/permissions")
+def admin_permissions_save(data: dict):
+    auth.require("admin")
+    return {"permissions": auth.save_permissions(data.get("permissions", []), auth.current())}
+
+
+def _activity_filters(entity, user, q, date_from, date_to):
+    for d in (date_from, date_to):
+        if d:
+            try:
+                datetime.strptime(d, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(400, f"Date '{d}' must look like 2026-10-25.") from None
+    return dict(entity=entity, user=user, q=q, date_from=date_from, date_to=date_to)
+
+
+@app.get("/api/admin/activity")
+def admin_activity(entity: str = "", user: str = "", q: str = "", date_from: str = "", date_to: str = "",
+                   limit: int = 200, offset: int = 0):
+    from . import admin
+    return admin.activity(**_activity_filters(entity, user, q, date_from, date_to), limit=min(limit, 2000), offset=offset)
+
+
+@app.get("/api/admin/activity.xlsx")
+def admin_activity_xlsx(entity: str = "", user: str = "", q: str = "", date_from: str = "", date_to: str = ""):
+    from . import admin
+    return _xlsx(admin.activity_excel(**_activity_filters(entity, user, q, date_from, date_to)), "activity_log.xlsx")
+
+
+@app.get("/api/admin/backups")
+def admin_backups():
+    from . import admin
+    return admin.backups()
+
+
+@app.post("/api/admin/backups")
+def admin_backup_now():
+    from . import admin
+    return admin.make_backup()
+
+
+@app.get("/api/admin/backups/{name}")
+def admin_backup_download(name: str):
+    from . import admin
+    try:
+        return FileResponse(admin.backup_file(name), media_type="application/zip", filename=name)
+    except admin.AdminError as exc:
+        raise HTTPException(404, str(exc)) from None
+
+
+@app.get("/api/admin/about")
+def admin_about():
+    from . import admin
+    return admin.about()
+
+
+# ---------- suppliers (roadmap stage 22) ----------
+
+@app.get("/suppliers")
+def suppliers_page():
+    return FileResponse(FRONTEND_DIR / "suppliers.html")
+
+
+@app.get("/api/suppliers")
+def suppliers_list(q: str = "", status: str = "", country: str = "", commodity: str = ""):
+    from . import suppliers
+    return {"suppliers": suppliers.search(q, status, country, commodity), "statuses": suppliers.settings()["statuses"]}
+
+
+@app.get("/api/suppliers/export.xlsx")
+def suppliers_export():
+    from . import suppliers
+    return _xlsx(suppliers.to_excel(), "suppliers.xlsx")
+
+
+@app.post("/api/suppliers")
+def suppliers_create(data: dict):
+    from . import suppliers
+    return suppliers.create(data)
+
+
+@app.get("/api/suppliers/{sid}")
+def suppliers_get(sid: int):
+    from . import suppliers
+    return suppliers.get(sid)
+
+
+@app.put("/api/suppliers/{sid}")
+def suppliers_update(sid: int, data: dict):
+    from . import suppliers
+    return suppliers.update(sid, data)
+
+
+@app.delete("/api/suppliers/{sid}")
+def suppliers_delete(sid: int):
+    from . import suppliers
+    return suppliers.delete(sid)
+
+
+@app.get("/api/parts/{part_id}/suppliers")
+def part_suppliers_get(part_id: int):
+    from . import suppliers
+    return suppliers.part_suppliers(part_id)
+
+
+@app.post("/api/parts/{part_id}/suppliers")
+def part_suppliers_add(part_id: int, data: dict):
+    from . import suppliers
+    return suppliers.link(part_id, data)
+
+
+@app.put("/api/parts/{part_id}/suppliers/{link_id}")
+def part_suppliers_edit(part_id: int, link_id: int, data: dict):
+    from . import suppliers
+    return suppliers.update_link(part_id, link_id, data)
+
+
+@app.delete("/api/parts/{part_id}/suppliers/{link_id}")
+def part_suppliers_remove(part_id: int, link_id: int):
+    from . import suppliers
+    return suppliers.unlink(part_id, link_id)
 
 
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")

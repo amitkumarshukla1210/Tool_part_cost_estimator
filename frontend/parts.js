@@ -101,6 +101,8 @@ async function openPart(id) {
     part.layout = part.sheet.problem ? null : await api(`/api/parts/${id}/sheet-layout`).catch(() => null);
   }
   part.loop = part.is_assembly ? null : await api(`/api/parts/${id}/design-loop`).catch(() => null);
+  part.sup = part.is_assembly ? null : await api(`/api/parts/${id}/suppliers`).catch(() => null);
+  supplierList = supplierList || (await api("/api/suppliers").then((r) => r.suppliers).catch(() => []));
   renderPart();
   $("panel").hidden = false;
 }
@@ -406,6 +408,7 @@ function renderPart() {
     ${pieceBlock(p)}
     ${sheetBlock(p)}
     ${compareBlock(p)}
+    ${suppliersBlock(p)}
     ${insertsBlock(p)}
     ${mouldedIntoBlock(p)}
 
@@ -814,6 +817,72 @@ $("panelBody").addEventListener("click", async (e) => {
   if (pv) {
     const tr = await api(`/api/parts/${part.id}/piece-cost/trace?version=${pv.dataset.pieceversion}`);
     window.TracePanel.open(tr, tr.root);
+  }
+});
+
+// suppliers of the part: main / alternates with quoted piece and tool price against our should-cost
+let supplierList = null;
+function suppliersBlock(p) {
+  const s = p.sup;
+  if (!s) return "";
+  const gap = (v, pc) => (v == null ? "—" : `<span class="${v > 0 ? "error" : "ok"}">${v > 0 ? "+" : ""}${fmt(v, 0)} (${pc > 0 ? "+" : ""}${fmt(pc, 1)} %)</span>`);
+  const choices = (supplierList || []).filter((x) => !s.suppliers.some((l) => l.supplier_id === x.id));
+  return `<h3 class="block-title">Suppliers &amp; quotes vs should-cost</h3>
+    <p class="note">Our should-cost: part ${s.should_cost.piece_inr != null ? `INR ${fmt(s.should_cost.piece_inr, 2)}` : "not costed yet"} ·
+      tool ${s.should_cost.tool_inr != null ? `INR ${fmt(s.should_cost.tool_inr, 0)}` : "not costed yet"}. Quotes are converted with the approved forex of the quote month.</p>
+    <div class="table-wrap"><table class="cost-table" id="supTable"><thead><tr><th>Supplier</th><th>Role</th><th class="num">Piece price</th><th class="num">Tool price</th>
+      <th>Currency</th><th>Quote ref · date</th><th class="num">Piece (INR)</th><th class="num">Gap to should-cost</th><th class="num">Tool (INR)</th>
+      <th class="num">Gap to should-cost</th><th></th></tr></thead><tbody>${s.suppliers.map((l) => `<tr data-link="${l.id}">
+      <td><a href="/suppliers"><b>${esc(l.code)}</b></a> ${esc(l.name)}${l.status === "blocked" ? ' <span class="badge missing">blocked</span>' : ""}</td>
+      <td><select data-sf="role"><option ${l.role === "main" ? "selected" : ""}>main</option><option ${l.role === "alternate" ? "selected" : ""}>alternate</option></select></td>
+      <td><input type="number" step="any" min="0" data-sf="piece_price" value="${l.piece_price ?? ""}" /></td>
+      <td><input type="number" step="any" min="0" data-sf="tool_price" value="${l.tool_price ?? ""}" /></td>
+      <td><input data-sf="currency" value="${esc(l.currency)}" size="4" /></td>
+      <td><input data-sf="quote_ref" value="${esc(l.quote_ref)}" placeholder="ref" size="8" /> <input type="date" data-sf="quote_date" value="${esc(l.quote_date)}" /></td>
+      <td class="calc num">${fmt(l.piece_price_inr, 2)}</td><td class="num">${gap(l.piece_gap_inr, l.piece_gap_pct)}</td>
+      <td class="calc num">${fmt(l.tool_price_inr, 0)}</td><td class="num">${gap(l.tool_gap_inr, l.tool_gap_pct)}</td>
+      <td><button class="btn btn-outline small" type="button" data-supsave>Save</button> <button class="btn btn-outline small" type="button" data-supdel>✕</button>
+      ${l.forex_note ? `<br><span class="error">${esc(l.forex_note)}</span>` : ""}</td></tr>`).join("")
+      || '<tr><td colspan="11" class="empty">No supplier yet.</td></tr>'}</tbody></table></div>
+    <form id="supAdd" class="card toolbar">
+      <label>Add supplier <select name="supplier_id" required>${choices.length ? choices.map((x) => `<option value="${x.id}">${esc(x.code)} · ${esc(x.name)}</option>`).join("")
+        : '<option value="">— create suppliers on the Suppliers page —</option>'}</select></label>
+      <label>Piece price <input type="number" step="any" min="0" name="piece_price" /></label>
+      <label>Tool price <input type="number" step="any" min="0" name="tool_price" /></label>
+      <label>Currency <input name="currency" placeholder="supplier's" size="4" /></label>
+      <label>Quote date <input type="date" name="quote_date" /></label>
+      <button class="btn btn-primary small" type="submit">Add</button>
+      <p class="status" id="supStatus"></p></form>`;
+}
+
+$("panelBody").addEventListener("submit", async (e) => {
+  if (e.target.id !== "supAdd") return;
+  e.preventDefault();
+  const data = Object.fromEntries([...new FormData(e.target).entries()].filter(([, v]) => v !== ""));
+  try {
+    await api(`/api/parts/${part.id}/suppliers`, { method: "POST", body: JSON.stringify(data) });
+    supplierList = null;
+    await openPart(part.id);
+  } catch (err) {
+    status($("supStatus"), err.message, "error");
+  }
+});
+$("panelBody").addEventListener("click", async (e) => {
+  const tr = e.target.closest("tr[data-link]");
+  if (!tr) return;
+  const url = `/api/parts/${part.id}/suppliers/${tr.dataset.link}`;
+  try {
+    if (e.target.matches("[data-supsave]")) {
+      const data = {};
+      tr.querySelectorAll("[data-sf]").forEach((el) => (data[el.dataset.sf] = el.value));
+      await api(url, { method: "PUT", body: JSON.stringify(data) });
+    } else if (e.target.matches("[data-supdel]")) {
+      if (!confirm("Remove this supplier from the part?")) return;
+      await api(url, { method: "DELETE" });
+    } else return;
+    await openPart(part.id);
+  } catch (err) {
+    status($("supStatus"), err.message, "error");
   }
 });
 
