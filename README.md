@@ -577,22 +577,54 @@ Two more part types run through the same stages as injection moulding; pick the 
 All new rows are EXAMPLE values (machines EPS-1000/1400/1800 and ISBM-2C/4C/6C/8C, materials, aluminium 7075 / 6061, bases, BOM rules, cycle times, steam and resin rates for 9 countries, HS 3923). The country comparison and landed cost, the part cost and the project view work
 for them unchanged. The concept and simulation cards (opening direction, undercuts, wall and draft maps) are for plastic injection and die casting only.
 
+## Logins, admin control and suppliers (roadmap stage 22)
+
+**Logins are always on.** Everybody uses their own login ID; every change, approval and backup is recorded under that ID.
+
+- **First start.** With no user yet, the app opens **First start: create the admin** (`/setup`): admin ID, full name and a
+  password of 10+ characters. This page works only once; after it, everyone uses **Log in**.
+- **Forgotten password** (also the admin's): at the PC that runs the app, double-click **`DTC_ResetPassword.bat`**
+  (or `python -m backend.app.server_tools reset-password NAME`). The user is made active again and logged out everywhere.
+
+**Admin** (menu, top right) has four tabs:
+
+| Tab | What it does |
+|---|---|
+| **Users & roles** | Admin creates login IDs (user ID, full name, role, first password), changes name and role, blocks / unblocks a user and sets a new password. The last active admin cannot be removed or demoted. Everyone can change their own password here. |
+| **Permissions** | The lowest role for each action, editable by the admin: change project data (engineer), edit master data (engineer), edit rates (engineer), approve rates (approver), manage suppliers (engineer), delete projects (admin), see the activity log (approver), backups (admin). Managing users and permissions is always admin only. *Back to defaults* restores the column. Roles go viewer < engineer < approver < admin; pure calculations (Estimate page) are open to every logged-in user. |
+| **Activity log** | Who changed what and when, newest first: projects, variants, parts (incl. status, revisions, costs, suppliers), suppliers, users, permissions, master-data and rate saves, rate approvals and backups. Filters (what, who, from, to, search), *Show more*, **Export Excel**. |
+| **Backups & update** | Installed version and data folder, **Backup now**, every backup ZIP with *Download*, and the reports of the last updates (what the master-data merge did). |
+
+**Suppliers** (menu) is the supplier master:
+
+- **Supplier code** is automatic from Master data → Part register setup → Register settings → `supplier_code_pattern` (`SUP-{seq:04d}` → SUP-0001, SUP-0002…), or typed.
+- Each supplier holds:
+  - name, status (`supplier_statuses`: approved / trial / blocked / inactive);
+  - commodities / processes, country, city, address;
+  - contact person, e-mail, phone;
+  - GST / tax ID, payment terms, quote currency;
+  - certifications (IATF 16949, ISO…), last audit date, capacity;
+  - quality, delivery and cost scores (0–100), whose average is the **rating**.
+- The list shows counts per status. Click a code to see its details, the parts it quotes for and its history. **Export Excel** gives two sheets: suppliers and part quotes.
+- A supplier used by a part or a CAPEX line cannot be deleted; set it to *inactive*.
+- **On a part** (Parts → part → **Suppliers & quotes vs should-cost**): add suppliers, one *main* and the others *alternate*. Each one gets its piece price, tool price, currency, quote reference and date. The quote is converted to INR with the approved forex of the quote month, and the gap to our should-cost (the part's stored part cost and tool cost) is shown in INR and %.
+- **CAPEX plan** lines take the supplier from the master: type its code, e.g. SUP-0001. Its name and country go on the line, and the "by supplier" totals use it. A renamed supplier updates its lines.
+
 ## Server mode (roadmap stage 17)
 
-By default the app runs on one PC without a login. For a team, run it once on a server:
+Logins are on everywhere (stage 22). For a team, run the app once on a server instead of on each laptop:
 
 ```
 pip install -r requirements.txt -r requirements-server.txt        # psycopg is only needed for PostgreSQL
-export DTC_MODE=server
-export DTC_ADMIN_PASSWORD='a long first password'                 # creates the first user "admin" when there are no users yet
+export DTC_ADMIN_PASSWORD='a long first password'                 # optional: creates the first user "admin"; else /setup asks on first start
 export DATABASE_URL='postgresql+psycopg://user:password@dbhost/dtc'
 export DTC_STORAGE_FOLDER=/srv/dtc-files                          # shared folder for CAD files and thumbnails (or set it in Master data → Register settings)
 export DTC_COOKIE_SECURE=1                                        # when served over HTTPS
 uvicorn backend.app.main:app --host 0.0.0.0 --port 8000           # put an HTTPS reverse proxy (nginx, Caddy, IIS) in front
 ```
 
-- **Logins and roles**: everybody logs in; the admin adds users on **Users** (user name, role, password of 10+ characters, active). **viewer** reads; **engineer** changes projects, parts, costs and
-  master data; **approver** also approves rates; **admin** also manages users. The last admin cannot be removed. Passwords are stored as scrypt hashes, sessions expire after 12 hours,
+- **Logins and roles**: everybody logs in; the admin adds users on **Admin → Users & roles** (user name, role, password of 10+ characters, active) and sets
+  **Admin → Permissions**. **viewer** reads; **engineer** changes projects, parts, costs and master data; **approver** also approves rates; **admin** also manages users. The last admin cannot be removed. Passwords are stored as scrypt hashes, sessions expire after 12 hours,
   changing a password or deactivating a user ends their sessions.
 - **Who did what**: every history record shows the logged-in user, and an approved rate shows the approver who clicked, never a typed name.
 - **Move from the local PC**: `python -m backend.app.server_tools migrate-projects --from sqlite:///data/projects.sqlite --to postgresql+psycopg://...` copies all project data into an empty
@@ -693,7 +725,7 @@ There is no limit on the number of corrections; each one is a new pull request. 
 
 ## Install and update on Windows (ZIP download, local http://127.0.0.1:8000)
 
-The `windows/` folder holds an update kit: `dtc_manager.py` and five double-click files. They live in the folder **above**
+The `windows/` folder holds an update kit: `dtc_manager.py` and six double-click files. They live in the folder **above**
 the app (the *base folder*, e.g. `D:\DTC\`). Your data is kept **outside** the app folder, so the app folder can be
 deleted and replaced by every new version without losing anything.
 
@@ -710,7 +742,7 @@ D:\DTC\                           base folder (any name)
   DTC_Old\                        the last 3 app versions, for DTC_Rollback.bat
   venv\                           Python libraries   kept, so CadQuery is not downloaded again each time
   dtc_settings.ini                port, GitHub, backup copy folder, ...
-  dtc_manager.py  DTC_Start.bat  DTC_Update.bat  DTC_Backup.bat  DTC_Restore.bat  DTC_Rollback.bat
+  dtc_manager.py  DTC_Start.bat  DTC_Update.bat  DTC_Backup.bat  DTC_Restore.bat  DTC_Rollback.bat  DTC_ResetPassword.bat
 ```
 
 | Double-click | What it does |
@@ -720,15 +752,17 @@ D:\DTC\                           base folder (any name)
 | `DTC_Backup.bat` | Backup now (`DTC_Backups\dtc-backup-<time>.zip`, plus the copy folder if set). |
 | `DTC_Restore.bat` | Lists the backups; pick one and choose: everything, only projects + CAD files, or only master data. What is there now is backed up first. Backups made by `backup.py` work too. |
 | `DTC_Rollback.bat` | Back to the version before the last update **with the data of that moment** (data changed after the update stays in the safety backup). |
+| `DTC_ResetPassword.bat` | New password for a login ID (e.g. a forgotten admin password). Only possible at this PC. |
 
 **First time (moving from your current installation).** Your current app folder keeps working until the end of step 4.
 1. Stop the running app (close its window).
 2. Download the new version: GitHub → **Code → Download ZIP**. Save it in the base folder (the folder that holds your current `Tool_part_cost_estimator…` folder) or in your Downloads folder.
-3. Open the ZIP, go into its `windows` folder and copy `dtc_manager.py` and the five `DTC_*.bat` files into the base folder.
+3. Open the ZIP, go into its `windows` folder and copy `dtc_manager.py` and the six `DTC_*.bat` files into the base folder.
 4. Double-click `DTC_Update.bat`, answer **2** (the ZIP). It finds your old app folder (also a double-unzipped `…-main\…-main`), backs up its data
    (`DTC_Backups\dtc-before-migration-*.zip`, never deleted), copies `master_data`, `data`, `storage` and your old `backups` into `DTC_Data` / `DTC_Backups`,
    installs the new version and moves the old folder to `DTC_Old\`. You do not delete anything by hand.
-5. Double-click `DTC_Start.bat`. Check one known part against its last cost. Your old start file is no longer needed.
+5. Double-click `DTC_Start.bat`. The first start asks you to create the admin ID (see *Logins, admin control and suppliers*).
+   Check one known part against its last cost. Your old start file is no longer needed.
 
 **Every next update.** Double-click `DTC_Update.bat` → **1** (download from GitHub) or **2** (a ZIP you downloaded) → `DTC_Start.bat`. The kit updates itself from the new ZIP.
 
@@ -756,8 +790,8 @@ would use the example data inside the app folder.
 All planned stages are built: Stages A–C, the rate library and MHR engine, the part register (stages 1 and 1b), RM cost
 (2), rates by country (3), tool cost (4, 4b), mould concept (5), simulation (6), design loop (7), part cost (8),
 sheet-metal tools (9, 10), country comparison (11), monthly rate update (12), project leader view (13), harness & PCB
-(14–16), server mode (17), EPS and PET blow moulding (18, 19), backup and the Windows update kit, and the corrections
-from use (stage 21). The original requirement sets **A** sheet-metal tools, **B** tool / mould / die cost, **C** country
+(14–16), server mode (17), EPS and PET blow moulding (18, 19), backup and the Windows update kit (20), the corrections
+from use (21) and logins with admin control and the supplier master (22). The original requirement sets **A** sheet-metal tools, **B** tool / mould / die cost, **C** country
 rate library, **D** country comparison and **E** monthly rate update with approval are all covered.
 
 ### Ground rules for everything that follows

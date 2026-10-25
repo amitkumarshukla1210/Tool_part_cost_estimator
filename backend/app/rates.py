@@ -229,8 +229,8 @@ def _server() -> bool:
 
 def _approver() -> str:
     from . import auth
-    if auth.server_mode():                       # server mode: the logged-in approver, never a typed name
-        auth.require("approver")
+    if auth.server_mode():                       # with logins: the logged-in approver, never a typed name
+        auth.require_perm("approve_rates")
         return auth.username()
     name = settings()["approver_name"].strip()
     if not name:
@@ -241,6 +241,8 @@ def _approver() -> str:
 def set_status(ids: list[int], status: str, comment: str = "") -> list[dict]:
     if status not in ("reviewed", "approved", "rejected"):
         raise RateError(f"Status must be reviewed, approved or rejected, not '{status}'.")
+    from . import auth
+    auth.require_perm("approve_rates" if status == "approved" else "edit_rates")
     rows = [get(i) for i in ids]
     for r in rows:
         if r["status"] not in OPEN:

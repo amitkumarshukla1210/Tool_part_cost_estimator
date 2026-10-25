@@ -2,6 +2,7 @@
 
     python -m backend.app.server_tools create-user NAME --role admin|approver|engineer|viewer [--password ...]
     python -m backend.app.server_tools migrate-projects --from sqlite:///data/projects.sqlite --to postgresql+psycopg://user:pw@host/dtc
+    python -m backend.app.server_tools reset-password NAME [--password ...]     (DTC_ResetPassword.bat on Windows)
     python -m backend.app.server_tools check
 
 migrate-projects copies every project table (projects, parts, revisions, costs, history, users, ...) into an EMPTY database and keeps the ids.
@@ -58,6 +59,9 @@ def main(argv=None) -> int:
     u.add_argument("--role", default="engineer", choices=auth.ROLES)
     u.add_argument("--name", default="")
     u.add_argument("--password")
+    rp = sub.add_parser("reset-password")
+    rp.add_argument("username")
+    rp.add_argument("--password")
     m = sub.add_parser("migrate-projects")
     m.add_argument("--from", dest="src", required=True)
     m.add_argument("--to", dest="dst", required=True)
@@ -67,6 +71,13 @@ def main(argv=None) -> int:
         if a.cmd == "create-user":
             pw = a.password or getpass.getpass("Password: ")
             print(auth.create_user(a.username, pw, a.role, a.name))
+        elif a.cmd == "reset-password":
+            pw = a.password or getpass.getpass(f"New password for {a.username} (10+ characters): ")
+            if not a.password and pw != getpass.getpass("Type it again: "):
+                print("Error: the two passwords differ.", file=sys.stderr)
+                return 1
+            u = auth.reset_password(a.username, pw)
+            print(f"Password of {u['username']} ({u['role']}) changed; the user is active and logged out everywhere.")
         elif a.cmd == "migrate-projects":
             for k, v in migrate(a.src, a.dst).items():
                 print(f"{k}: {v}")

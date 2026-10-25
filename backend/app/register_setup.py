@@ -186,6 +186,17 @@ def _check(clean: dict) -> None:
     if settings["default_country"] not in costing_setup.countries():
         raise RegisterSetupError(f"Register settings: default_country '{settings['default_country']}' is not a code in "
                                  "Countries, machines & formulas → Countries.")
+    sp = settings.get("supplier_code_pattern") or ""
+    if sp:
+        try:
+            sp.format(seq=1)
+        except (KeyError, IndexError, ValueError) as exc:
+            raise RegisterSetupError(f"Register settings: supplier_code_pattern '{sp}' is not valid ({exc}). "
+                                     "Use {seq}, e.g. SUP-{seq:04d}.") from None
+        if "{seq" not in sp:
+            raise RegisterSetupError("Register settings: supplier_code_pattern needs {seq}, e.g. SUP-{seq:04d}.")
+    if "supplier_statuses" in settings and not [x for x in settings["supplier_statuses"].split(",") if x.strip()]:
+        raise RegisterSetupError("Register settings: supplier_statuses needs at least one status, e.g. approved,trial,blocked.")
     pattern = settings["part_code_pattern"]
     try:
         sample = pattern.format(project="PRJ", seq=1)

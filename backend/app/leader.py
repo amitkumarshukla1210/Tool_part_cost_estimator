@@ -155,6 +155,17 @@ def _item_values(data: dict) -> dict:
     for k in ("description", "supplier", "country", "notes"):
         if k in data:
             out[k] = str(data[k] or "").strip()
+    if "supplier_id" in data:  # from the supplier master: its name (and country, when none is given) go on the line
+        sid = register._num(data["supplier_id"], "CAPEX line: supplier", int)
+        out["supplier_id"] = sid
+        if sid:
+            with db.engine().connect() as conn:
+                sup = conn.execute(select(db.suppliers).where(db.suppliers.c.id == sid)).mappings().first()
+            if not sup:
+                raise register.RegisterError(f"CAPEX line: supplier {sid} is not in the supplier master.")
+            out["supplier"] = sup["name"]
+            if not out.get("country"):
+                out["country"] = sup["country"]
     if "amount_inr" in data:
         out["amount_inr"] = register._num(data["amount_inr"], "CAPEX line: amount", required=True)
         if out["amount_inr"] < 0:

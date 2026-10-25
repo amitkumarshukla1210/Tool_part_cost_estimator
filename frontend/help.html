@@ -20,6 +20,7 @@
         <ul>
           <li><a href="/dashboard">Dashboard</a></li>
           <li><a href="/parts">Parts</a></li>
+          <li><a href="/suppliers">Suppliers</a></li>
           <li><a href="/import">Import</a></li>
           <li><a href="/bom-extract">Harness &amp; PCB</a></li>
           <li><a href="/">Estimate</a></li>
@@ -246,6 +247,40 @@
             <h3>Writing rules</h3>
             <p>One-line formulas such as <code>max(4, ceil(cavities * projected_area_cm2 / 8))</code> or
               <code>cavities if hot_runner else 0</code>. The list of variables is on the Master data page.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="page-body">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Admin &amp; suppliers</p>
+          <h2>Logins, admin control and suppliers</h2>
+        </div>
+        <div class="help-steps two">
+          <div class="card">
+            <h3>Logins</h3>
+            <p>Everyone logs in with their own ID. The very first start asks for the admin ID and password. A forgotten password is
+              reset at the PC that runs the app with <b>DTC_ResetPassword.bat</b>.</p>
+          </div>
+          <div class="card">
+            <h3>Admin page</h3>
+            <p><b>Users &amp; roles</b>: create IDs, roles, block users. <b>Permissions</b>: the lowest role for each action.
+              <b>Activity log</b>: who changed what and when, with Excel export. <b>Backups &amp; update</b>: backup now, download, version.</p>
+          </div>
+          <div class="card">
+            <h3>Supplier master</h3>
+            <p>Codes come automatically from <code>supplier_code_pattern</code> (SUP-0001…). Each supplier has status, capability,
+              contacts, certifications and quality / delivery / cost scores; their average is the rating.</p>
+          </div>
+          <div class="card">
+            <h3>Quotes vs should-cost</h3>
+            <p>On a part, add its main and alternate suppliers with their piece and tool price. The quote is converted to INR with the
+              approved forex and compared with our part cost and tool cost. CAPEX lines take the supplier by its code.</p>
+          </div>
+          <div class="card">
+            <h3>Table filters</h3>
+            <p>Every table has a <b>▾</b> in each column header: search, tick several values, Select all, Clear all.</p>
           </div>
         </div>
       </div>

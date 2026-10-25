@@ -1,10 +1,11 @@
-"""Server mode (roadmap stage 17): logins, roles and who-did-what.
+"""Logins, roles, permissions and who-did-what (roadmap stages 17 and 22).
 
-    DTC_MODE=server   every request needs a login (cookie session); without it (the default, "local") the app is single-user, no login
-    roles             viewer    reads everything
-                      engineer  + creates and changes projects, parts, costs, master data
-                      approver  + approves rates (draft -> approved)
-                      admin     + manages users
+    logins            every page and API call needs a login (cookie session). The first start, with no user yet, shows
+                      /setup to create the first admin. DTC_MODE=local turns logins off: only for the automated tests
+                      and developers; the Windows kit always starts with logins.
+    roles             viewer < engineer < approver < admin
+    permissions       the lowest role for each action (PERMISSIONS); the admin changes them on Admin → Permissions
+                      (table role_permissions). Managing users and permissions is always admin only.
     who               the logged-in user is the author of every history record and the approver of every rate approval
 
 Passwords: scrypt with a random salt (standard library). Sessions: a random token in an HttpOnly cookie; only its SHA-256 is stored.
@@ -27,8 +28,24 @@ ROLES = ("viewer", "engineer", "approver", "admin")
 COOKIE = "dtc_session"
 SESSION_HOURS = 12
 MIN_PASSWORD = 10
-PUBLIC_PREFIXES = ("/login", "/static", "/theme", "/api/auth/login", "/api/server/health", "/favicon")
-ADMIN_PREFIXES = ("/api/users",)
+PUBLIC_PREFIXES = ("/login", "/setup", "/static", "/theme", "/api/auth/login", "/api/auth/setup", "/api/server/health", "/favicon")
+ADMIN_PREFIXES = ("/api/users", "/api/admin/users")
+
+# action -> (default lowest role, label, what it covers). Order = order on the Admin page.
+PERMISSIONS = {
+    "change_data": ("engineer", "Change project data", "Create and change projects, variants, parts, revisions, imports, costs, design-loop status, CAPEX, BOM extracts"),
+    "edit_master_data": ("engineer", "Edit master data", "General master data, mould & die database, countries, machines & formulas, part register setup"),
+    "edit_rates": ("engineer", "Edit rates", "Create, change, upload and fetch rate drafts; rate settings"),
+    "approve_rates": ("approver", "Approve rates", "Approve rate drafts (only approved rates are used in costing)"),
+    "manage_suppliers": ("engineer", "Manage suppliers", "Supplier master and the suppliers / quotes of parts"),
+    "delete_project": ("admin", "Delete projects", "Delete a project with its parts and costs (a backup is made first)"),
+    "view_activity": ("approver", "See the activity log", "Admin → Activity log: who changed what, when"),
+    "backups": ("admin", "Backups", "Admin → Backups: list, make and download backups"),
+}
+# Pure calculations that change nothing: anyone logged in may run them.
+CALC_PATHS = ("/api/analyze", "/api/gross-weight", "/api/capacity", "/api/mould/estimate", "/api/tool-cost", "/api/suggest-process")
+MASTER_PATHS = ("/api/master-data", "/api/mould-db", "/api/costing-setup", "/api/register-setup", "/api/examples")
+RATE_PATHS = ("/api/rates", "/api/settings")
 
 _user: contextvars.ContextVar = contextvars.ContextVar("dtc_user", default=None)
 
@@ -40,7 +57,8 @@ class AuthError(Exception):
 
 
 def server_mode() -> bool:
-    return os.environ.get("DTC_MODE", "local").lower() == "server"
+    """Logins on (the default). Only DTC_MODE=local turns them off (automated tests, developers)."""
+    return os.environ.get("DTC_MODE", "server").lower() != "local"
 
 
 def current() -> dict | None:
@@ -66,9 +84,62 @@ def has_role(minimum: str, user: dict | None = None) -> bool:
 
 
 def require(minimum: str) -> None:
-    """In server mode: the logged-in user must have at least this role. Local mode: always fine."""
+    """With logins: the logged-in user must have at least this role. Local mode: always fine."""
     if server_mode() and not has_role(minimum):
         raise AuthError(f"This needs the role '{minimum}' (you are {current()['role'] if current() else 'not logged in'}).", 403)
+
+
+# ---------- permissions ----------
+
+def permissions() -> list[dict]:
+    with db.engine().connect() as conn:
+        saved = {r["action"]: r for r in conn.execute(select(db.role_permissions)).mappings()}
+    return [{"action": a, "label": label, "covers": covers, "default": d,
+             "min_role": saved[a]["min_role"] if a in saved else d,
+             "updated_by": saved[a]["updated_by"] if a in saved else "",
+             "updated_at": saved[a]["updated_at"].isoformat(timespec="seconds") if a in saved and saved[a]["updated_at"] else ""}
+            for a, (d, label, covers) in PERMISSIONS.items()]
+
+
+def min_role(action: str) -> str:
+    return next(p["min_role"] for p in permissions() if p["action"] == action)
+
+
+def may(action: str, user: dict | None = None) -> bool:
+    return not server_mode() or has_role(min_role(action), user)
+
+
+def require_perm(action: str) -> None:
+    if not may(action):
+        label = PERMISSIONS[action][1]
+        raise AuthError(f"'{label}' needs the role '{min_role(action)}' or higher (Admin → Permissions).", 403)
+
+
+def save_permissions(rows: list[dict], by: dict | None) -> list[dict]:
+    """[{action, min_role}] -> saved; a history record per change."""
+    old = {p["action"]: p["min_role"] for p in permissions()}
+    changes = {}
+    for r in rows:
+        a, role = r.get("action"), r.get("min_role")
+        if a not in PERMISSIONS:
+            raise AuthError(f"Unknown permission '{a}'.", 400)
+        if role not in ROLES:
+            raise AuthError(f"Role must be one of {', '.join(ROLES)}.", 400)
+        if old[a] != role:
+            changes[a] = {"old": old[a], "new": role}
+    who = (by or {}).get("username") or "local user"
+    with db.engine().begin() as conn:
+        for a, ch in changes.items():
+            conn.execute(db.role_permissions.delete().where(db.role_permissions.c.action == a))
+            conn.execute(db.role_permissions.insert().values(action=a, min_role=ch["new"], updated_by=who))
+        if changes:
+            log(conn, "permissions", 0, "updated", changes)
+    return permissions()
+
+
+def log(conn, entity: str, entity_id: int, action: str, detail: dict | None = None) -> None:
+    conn.execute(db.history.insert().values(entity=entity, entity_id=entity_id, action=action, detail=detail or {},
+                                            user=username() or "local user"))
 
 
 # ---------- passwords ----------
@@ -112,6 +183,7 @@ def create_user(username: str, password: str, role: str = "engineer", name: str 
             raise AuthError(f"User '{username}' already exists.", 400)
         uid = conn.execute(db.users.insert().values(username=username, name=name.strip(), password_hash=hash_password(password), role=role,
                                                      active=True)).inserted_primary_key[0]
+        log(conn, "user", uid, "created", {"username": username, "role": role, "name": name.strip()})
     return get_user(uid)
 
 
@@ -152,6 +224,11 @@ def update_user(uid: int, data: dict, by: dict) -> dict:
                 raise AuthError("There must always be one active admin.", 400)
         if vals:
             conn.execute(db.users.update().where(db.users.c.id == uid).values(**vals))
+            detail = {k: {"old": old[k], "new": v} for k, v in vals.items() if k != "password_hash" and old[k] != v}
+            if "password_hash" in vals:
+                detail["password"] = "changed"
+            if detail:
+                log(conn, "user", uid, "updated", {"username": old["username"], **detail})
         if "active" in vals and not vals["active"] or "password_hash" in vals:
             conn.execute(db.sessions.delete().where(db.sessions.c.user_id == uid))      # log the user out everywhere
     return get_user(uid)
@@ -216,22 +293,63 @@ def bootstrap_admin() -> str | None:
     return u["username"]
 
 
+def has_users() -> bool:
+    with db.engine().connect() as conn:
+        return conn.execute(select(db.users.c.id).limit(1)).first() is not None
+
+
+def setup_first_admin(username: str, password: str, name: str = "") -> dict:
+    """First start: create the first admin. Refused as soon as any user exists."""
+    if has_users():
+        raise AuthError("The first admin already exists. Log in instead.", 400)
+    return create_user(username, password, "admin", name or "Administrator")
+
+
+def reset_password(username: str, password: str) -> dict:
+    """Command line (the PC owner): new password for a user, e.g. a forgotten admin password; the user is made active again."""
+    with db.engine().connect() as conn:
+        u = conn.execute(select(db.users).where(db.users.c.username == (username or "").strip().lower())).mappings().first()
+    if not u:
+        raise AuthError(f"User '{username}' does not exist.", 404)
+    return update_user(u["id"], {"password": password, "active": True}, None)
+
+
 # ---------- request rules ----------
 
 def needs_login(path: str) -> bool:
     return not path.startswith(PUBLIC_PREFIXES)
 
 
+def action_for(method: str, path: str) -> str | None:
+    """The permission a request needs (None = any logged-in user)."""
+    if method in ("GET", "HEAD", "OPTIONS"):
+        if path.startswith("/api/admin/activity"):
+            return "view_activity"
+        if path.startswith("/api/admin/backups"):
+            return "backups"
+        return None
+    if path in ("/api/auth/logout", "/api/auth/password") or path.startswith(CALC_PATHS):
+        return None
+    if path.startswith("/api/admin/backups"):
+        return "backups"
+    if method == "DELETE" and path.startswith("/api/projects/"):
+        return "delete_project"
+    if path.startswith("/api/suppliers") or (path.startswith("/api/parts/") and "/suppliers" in path):
+        return "manage_suppliers"
+    if path.startswith(MASTER_PATHS):
+        return "edit_master_data"
+    if path == "/api/rates/status":
+        return None                     # rates.set_status checks edit_rates, and approve_rates for an approval
+    if path.startswith(RATE_PATHS):
+        return "edit_rates"
+    return "change_data"
+
+
 def allowed(user: dict, method: str, path: str) -> str | None:
     """None if allowed, else the reason."""
-    if path.startswith(ADMIN_PREFIXES) and not has_role("admin", user):
-        return "Managing users needs the role 'admin'."
-    if method in ("GET", "HEAD", "OPTIONS"):
-        return None
-    if path in ("/api/auth/logout", "/api/auth/password"):
-        return None
-    if not has_role("engineer", user):
-        return "Your role 'viewer' can read but not change anything."
-    if method == "DELETE" and path.startswith("/api/projects/") and not has_role("admin", user):
-        return "Deleting a project needs the role 'admin'."
+    if (path.startswith(ADMIN_PREFIXES) or path.startswith("/api/admin/permissions") and method != "GET") and not has_role("admin", user):
+        return "Managing users and permissions needs the role 'admin'."
+    action = action_for(method, path)
+    if action and not has_role(min_role(action), user):
+        return f"'{PERMISSIONS[action][1]}' needs the role '{min_role(action)}' or higher; you are '{user['role']}' (Admin → Permissions)."
     return None

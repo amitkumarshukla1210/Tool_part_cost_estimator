@@ -18,4 +18,6 @@ def master_data_copy(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'projects.sqlite'}")
     monkeypatch.setenv("DTC_STORAGE_FOLDER", str(tmp_path / "storage"))
     monkeypatch.setenv("DTC_BACKUP_FOLDER", str(tmp_path / "backups"))
+    # logins are on by default; the tests run without them unless a test turns them on (test_server_mode)
+    monkeypatch.setenv("DTC_MODE", "local")
     return copy

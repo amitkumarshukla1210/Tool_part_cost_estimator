@@ -242,6 +242,7 @@ capex_items = Table(
     Column("description", String(300), nullable=False),
     Column("part_id", Integer),
     Column("supplier", String(200), default=""),
+    Column("supplier_id", Integer),                    # from the supplier master (the name is kept in `supplier` too)
     Column("country", String(10), default=""),
     Column("amount_inr", Float, nullable=False),
     Column("need_by", String(10), default=""),         # blank = the project's SOP date
@@ -275,6 +276,62 @@ bom_extract_lines = Table(
     Column("position", Integer, nullable=False),
     Column("data", JSON, nullable=False),              # category, ref, part_number, ..., confidence, flags, source, edited
     Index("ix_bom_extract_lines", "extract_id", "position"),
+)
+
+# Supplier master: code from Register settings → supplier_code_pattern, status, capability, rating.
+suppliers = Table(
+    "suppliers", meta,
+    Column("id", Integer, primary_key=True),
+    Column("code", String(40), nullable=False, unique=True),
+    Column("name", String(200), nullable=False),
+    Column("country", String(10), default=""),
+    Column("city", String(100), default=""),
+    Column("address", Text, default=""),
+    Column("commodities", String(300), default=""),    # e.g. plastic moulding, sheet metal, tooling
+    Column("contact_person", String(200), default=""),
+    Column("email", String(200), default=""),
+    Column("phone", String(60), default=""),
+    Column("tax_id", String(60), default=""),          # GST / VAT number
+    Column("payment_terms", String(100), default=""),
+    Column("currency", String(10), default=""),
+    Column("status", String(30), default=""),          # Register settings → supplier_statuses
+    Column("certifications", String(200), default=""),  # IATF 16949, ISO 9001, ISO 14001, ...
+    Column("quality_score", Float),                    # 0-100
+    Column("delivery_score", Float),                   # 0-100
+    Column("cost_score", Float),                       # 0-100
+    Column("capacity", String(200), default=""),
+    Column("audit_date", String(10), default=""),
+    Column("notes", Text, default=""),
+    Column("created_by", String(100), default=""),
+    Column("created_at", DateTime, default=now),
+    Column("updated_at", DateTime, default=now, onupdate=now),
+)
+
+# Suppliers of a part (main / alternate) with their quoted piece and tool price, compared with our should-cost.
+part_suppliers = Table(
+    "part_suppliers", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),
+    Column("supplier_id", ForeignKey("suppliers.id"), nullable=False),
+    Column("role", String(20), default="main"),        # main, alternate
+    Column("piece_price", Float),                      # quoted, in `currency`
+    Column("tool_price", Float),
+    Column("currency", String(10), default="INR"),
+    Column("quote_ref", String(100), default=""),
+    Column("quote_date", String(10), default=""),
+    Column("notes", Text, default=""),
+    Column("created_by", String(100), default=""),
+    Column("created_at", DateTime, default=now),
+    UniqueConstraint("part_id", "supplier_id"),
+)
+
+# Admin: the lowest role allowed for each action (rows missing = the default in auth.PERMISSIONS).
+role_permissions = Table(
+    "role_permissions", meta,
+    Column("action", String(40), primary_key=True),
+    Column("min_role", String(20), nullable=False),
+    Column("updated_by", String(100), default=""),
+    Column("updated_at", DateTime, default=now, onupdate=now),
 )
 
 users = Table(

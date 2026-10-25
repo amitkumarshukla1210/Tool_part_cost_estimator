@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design to Cost — Part Cost Estimator · Admin</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/register.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img src="/theme/logo.png" alt="Design to Cost logo" />
+        <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/dashboard">Dashboard</a></li>
+          <li><a href="/parts">Parts</a></li>
+          <li><a href="/suppliers">Suppliers</a></li>
+          <li><a href="/import">Import</a></li>
+          <li><a href="/bom-extract">Harness &amp; PCB</a></li>
+          <li><a href="/">Estimate</a></li>
+          <li><a href="/rates">Rates</a></li>
+          <li><a href="/master-data">Master data</a></li>
+          <li><a href="/help">Help</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section class="bg-grey page-head">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Admin control</p>
+          <h2>Users, permissions, activity &amp; backups</h2>
+          <p>Who may log in and do what, who changed what and when, and the safety copies of your data.</p>
+        </div>
+        <div class="card toolbar">
+          <div class="tabs" role="tablist" id="tabs">
+            <button role="tab" class="btn btn-outline" data-tab="users" aria-selected="true">Users &amp; roles</button>
+            <button role="tab" class="btn btn-outline" data-tab="perms" aria-selected="false">Permissions</button>
+            <button role="tab" class="btn btn-outline" data-tab="activity" aria-selected="false">Activity log</button>
+            <button role="tab" class="btn btn-outline" data-tab="backups" aria-selected="false">Backups &amp; update</button>
+          </div>
+          <span class="spacer"></span>
+          <span class="note" id="whoami"></span>
+        </div>
+      </div>
+    </section>
+    <section class="page-body"><div class="container">
+      <p id="status" class="status" role="status"></p>
+
+      <div id="tab-users" class="tab-pane">
+        <div id="usersAdmin">
+          <h3 class="block-title">Create a login ID</h3>
+          <form class="card grid2" id="newUser">
+            <label>User ID (login name) <input name="username" required pattern="[A-Za-z0-9._\-]+" placeholder="e.g. amit.shukla" /></label>
+            <label>Full name <input name="name" placeholder="e.g. Amit Shukla" /></label>
+            <label>Role <select name="role" id="newRole"></select></label>
+            <label>First password (10+ characters) <input type="password" name="password" required minlength="10" autocomplete="new-password" /></label>
+            <p class="note span2" id="roleHelp"></p>
+            <div class="span2 dialog-actions"><button class="btn btn-primary" type="submit">Create ID</button></div>
+          </form>
+          <h3 class="block-title">Login IDs</h3>
+          <div class="table-wrap"><table class="cost-table" id="users"></table></div>
+        </div>
+        <p class="note" id="usersNoAdmin" hidden>Only an admin can create and change login IDs. You can change your own password below.</p>
+        <h3 class="block-title">Change my password</h3>
+        <form class="card grid2" id="pwForm">
+          <label>Old password <input type="password" name="old" autocomplete="current-password" required /></label>
+          <label>New password (10+ characters) <input type="password" name="new" minlength="10" autocomplete="new-password" required /></label>
+          <div class="span2 dialog-actions"><button class="btn btn-outline" type="submit">Change password</button></div>
+        </form>
+        <p class="note">Forgotten password (also the admin's): at the PC that runs the app, double-click <b>DTC_ResetPassword.bat</b>.</p>
+      </div>
+
+      <div id="tab-perms" class="tab-pane" hidden>
+        <p class="note">The lowest role for each action. Roles go viewer &lt; engineer &lt; approver &lt; admin; a higher role may do
+          everything a lower one may. Creating IDs and changing these permissions is always admin only.</p>
+        <div class="table-wrap"><table class="cost-table" id="perms"></table></div>
+        <div class="dialog-actions" id="permsActions"><button class="btn btn-outline" id="permsDefault" type="button">Back to defaults</button>
+          <button class="btn btn-primary" id="permsSave" type="button">Save permissions</button></div>
+      </div>
+
+      <div id="tab-activity" class="tab-pane" hidden>
+        <form class="card toolbar" id="actFilter">
+          <label>What <select name="entity" id="actEntity"><option value="">everything</option></select></label>
+          <label>Who <input name="user" placeholder="user" /></label>
+          <label>From <input type="date" name="date_from" /></label>
+          <label>To <input type="date" name="date_to" /></label>
+          <label>Search <input name="q" placeholder="code, field, value…" /></label>
+          <button class="btn btn-primary" type="submit">Show</button>
+          <span class="spacer"></span>
+          <a class="btn btn-outline" id="actXlsx">Export Excel</a>
+        </form>
+        <p class="note" id="actCount"></p>
+        <div class="table-wrap tall"><table class="cost-table" id="activity"></table></div>
+        <div class="dialog-actions"><button class="btn btn-outline" id="actMore" type="button" hidden>Show more</button></div>
+      </div>
+
+      <div id="tab-backups" class="tab-pane" hidden>
+        <div class="two-col">
+          <div>
+            <h3 class="block-title">Installed version</h3>
+            <div class="card" id="about"></div>
+          </div>
+          <div>
+            <h3 class="block-title">Backups</h3>
+            <div class="card"><p class="note" id="backupWhere"></p>
+              <div class="dialog-actions"><button class="btn btn-primary" id="backupNow" type="button">Backup now</button></div></div>
+          </div>
+        </div>
+        <div class="table-wrap"><table class="cost-table" id="backups"></table></div>
+        <h3 class="block-title">Update reports</h3>
+        <div id="reports"><p class="note">No update report yet.</p></div>
+        <p class="note">To update: close the app window, double-click <b>DTC_Update.bat</b> (a backup is made first), then <b>DTC_Start.bat</b>.
+          To go back: <b>DTC_Rollback.bat</b>. To put a backup back: <b>DTC_Restore.bat</b>.</p>
+      </div>
+    </div></section>
+  </main>
+  <script src="/static/common.js"></script>
+  <script src="/static/admin.js"></script>
+  <script src="/static/auth.js"></script>
+  <script src="/static/table-filter.js"></script>
+</body>
+</html>

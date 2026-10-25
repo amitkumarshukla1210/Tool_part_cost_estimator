@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design to Cost — Part Cost Estimator · Suppliers</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/register.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img src="/theme/logo.png" alt="Design to Cost logo" />
+        <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/dashboard">Dashboard</a></li>
+          <li><a href="/parts">Parts</a></li>
+          <li><a href="/suppliers" class="active" aria-current="page">Suppliers</a></li>
+          <li><a href="/import">Import</a></li>
+          <li><a href="/bom-extract">Harness &amp; PCB</a></li>
+          <li><a href="/">Estimate</a></li>
+          <li><a href="/rates">Rates</a></li>
+          <li><a href="/master-data">Master data</a></li>
+          <li><a href="/help">Help</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section class="bg-grey page-head">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Supplier master</p>
+          <h2>Suppliers</h2>
+          <p>Every supplier with its code, capability, status and rating, and the parts it quotes for against our should-cost.</p>
+        </div>
+        <div class="card toolbar">
+          <label>Search <input id="q" placeholder="code, name, city, commodity, contact…" /></label>
+          <label>Status <select id="fStatus"><option value="">all</option></select></label>
+          <span class="spacer"></span>
+          <a class="btn btn-outline" href="/api/suppliers/export.xlsx">Export Excel</a>
+          <button class="btn btn-primary" id="newSupplier" type="button">+ New supplier</button>
+        </div>
+      </div>
+    </section>
+    <section class="page-body"><div class="container">
+      <p id="status" class="status" role="status"></p>
+      <div class="tiles" id="tiles"></div>
+      <div class="table-wrap tall"><table class="cost-table" id="suppliers"></table></div>
+      <div id="detail"></div>
+    </div></section>
+  </main>
+
+  <dialog id="supDialog" class="card">
+    <form method="dialog" id="supForm" class="grid2">
+      <h3 class="span2" id="supTitle">New supplier</h3>
+      <label>Supplier code <input name="code" maxlength="40" placeholder="blank = automatic (SUP-0001)" /></label>
+      <label>Name <input name="name" required /></label>
+      <label>Status <select name="status" id="supStatus"></select></label>
+      <label>Commodities / processes <input name="commodities" placeholder="e.g. injection moulding, tooling" /></label>
+      <label>Country code <input name="country" maxlength="10" placeholder="e.g. IN, CN" /></label>
+      <label>City <input name="city" /></label>
+      <label class="span2">Address <input name="address" /></label>
+      <label>Contact person <input name="contact_person" /></label>
+      <label>E-mail <input type="email" name="email" /></label>
+      <label>Phone <input name="phone" /></label>
+      <label>GST / tax ID <input name="tax_id" /></label>
+      <label>Payment terms <input name="payment_terms" placeholder="e.g. 60 days" /></label>
+      <label>Quote currency <input name="currency" maxlength="10" placeholder="e.g. INR" /></label>
+      <label>Certifications <input name="certifications" placeholder="e.g. IATF 16949, ISO 14001" /></label>
+      <label>Last audit date <input type="date" name="audit_date" /></label>
+      <label>Quality score (0-100) <input type="number" name="quality_score" min="0" max="100" step="any" /></label>
+      <label>Delivery score (0-100) <input type="number" name="delivery_score" min="0" max="100" step="any" /></label>
+      <label>Cost score (0-100) <input type="number" name="cost_score" min="0" max="100" step="any" /></label>
+      <label>Capacity <input name="capacity" placeholder="e.g. 12 presses 80-450 t" /></label>
+      <label class="span2">Notes <input name="notes" /></label>
+      <p class="status error span2" id="supStatusMsg"></p>
+      <div class="span2 dialog-actions">
+        <button type="button" class="btn btn-outline btn-danger" id="supDelete" hidden>Delete</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-outline" data-close>Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+  <script src="/static/common.js"></script>
+  <script src="/static/suppliers.js"></script>
+  <script src="/static/auth.js"></script>
+  <script src="/static/table-filter.js"></script>
+</body>
+</html>
