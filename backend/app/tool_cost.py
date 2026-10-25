@@ -28,7 +28,8 @@ from .rm_cost import _parameter_row
 from .trace import EXAMPLE_WARNING, Trace
 
 PART_TYPES = ("plastic", "die_casting", "eps", "blow")
-LATER = {"sheet_metal": "Tool cost of sheet-metal dies comes with roadmap stages 9 and 10.",
+LATER = {"sheet_metal": "Tool cost of sheet-metal dies is not priced yet (the Sheet-metal tools block gives the operations, "
+                         "press and strip layout).",
          "foundry": "Tool cost of foundry patterns and core boxes comes in a later stage."}
 GROUP_LABEL = {"cutting": "Raw material cutting", "machining": "Machining (CNC, EDM, wire cut, grinding, drilling)",
                "polishing": "Polishing", "treatment": "Heat & surface treatment", "assembly": "Fitting & assembly",

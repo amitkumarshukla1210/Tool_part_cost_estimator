@@ -745,10 +745,13 @@ would use the example data inside the app folder.
 
 ## Full roadmap
 
-Stages A–C, the rate library and MHR engine, the part register (stages 1 and 1b), the RM cost on the register (stage 2), the material & process rates by country (stage 3) and the tool cost engine (stage 4) are done.
-Next come five requirement sets, built one PR at a time:
-**A** sheet-metal tools, **B** tool / mould / die cost, **C** country rate library,
-**D** country comparison for parts, and **E** dynamic rate library with monthly update and approval.
+Every planned stage is built and merged: Stages A–C, the rate library and MHR engine, the part register (stages 1 and 1b),
+RM cost (2), rates by country (3), tool cost (4, 4b), mould concept (5), simulation (6), design loop (7), part cost (8),
+sheet-metal tools (9, 10), country comparison and landed cost (11), monthly rate update (12), project leader view (13),
+harness & PCB (14–16), server mode (17), EPS and PET blow moulding (18, 19), and the Windows update kit.
+The five requirement sets of `docs/ROADMAP_PROMPT.txt` (**A** sheet-metal tools, **B** tool / mould / die cost, **C** country
+rate library, **D** country comparison, **E** monthly rate update with approval) are all covered. Not built yet: tool cost of
+sheet-metal dies and foundry patterns, and the items marked *External* in [ROADMAP.md](ROADMAP.md).
 
 ### Ground rules for everything that follows
 - **No hard-coded values.** Every number comes from master data or from a formula stored in master data.
