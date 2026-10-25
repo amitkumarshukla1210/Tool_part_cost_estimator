@@ -1,5 +1,7 @@
 // Traceability panel: shows how any traced value was made.
-//   window.TracePanel.open(trace, nodeId)   a node of a calculation trace
+//   window.TracePanel.open(trace, nodeId, ctx)   a node of a calculation trace; with ctx = {partId, scope, reload()}
+//                                                every value can be changed for this part only, or corrected at its
+//                                                source for the future (rate library / master data)
 //   window.TracePanel.openRate(rate)        a rate-library version (history + trend)
 // A trace is { root, currency, nodes: {id: node}, rates_used: [...], components: [...] }.
 
@@ -27,10 +29,21 @@
     panel.setAttribute("aria-label", "How this value is calculated");
     panel.hidden = true;
     panel.innerHTML = `<div class="trace-head"><button type="button" class="btn btn-outline trace-back" hidden>← Back</button>
-      <span class="kicker">Traceability</span><button type="button" class="trace-close" aria-label="Close">✕</button></div>
+      <span class="kicker">Traceability</span>
+      <button type="button" class="btn btn-outline small trace-full" title="Full screen / side panel">⤢ Full screen</button>
+      <button type="button" class="trace-close" aria-label="Close">✕</button></div>
       <div class="trace-body"></div>`;
     document.body.appendChild(panel);
     panel.querySelector(".trace-close").addEventListener("click", close);
+    const full = panel.querySelector(".trace-full");
+    const setFull = (on) => {
+      panel.classList.toggle("full", on);
+      full.textContent = on ? "⤡ Side panel" : "⤢ Full screen";
+      try { localStorage.setItem("dtc-trace-full", on ? "1" : ""); } catch { /* private window */ }
+    };
+    try { setFull(localStorage.getItem("dtc-trace-full") === "1"); } catch { setFull(false); }
+    full.addEventListener("click", () => setFull(!panel.classList.contains("full")));
+    panel.addEventListener("click", onEditClick);
     panel.querySelector(".trace-back").addEventListener("click", () => {
       stack.pop();
       render();
@@ -39,7 +52,7 @@
     panel.addEventListener("click", (e) => {
       const go = e.target.closest("[data-go]");
       if (go) {
-        stack.push({ trace: stack.at(-1).trace, node: go.dataset.go });
+        stack.push({ trace: stack.at(-1).trace, node: go.dataset.go, ctx: stack.at(-1).ctx });
         render();
       }
     });
@@ -63,6 +76,8 @@
     if (s.type === "cad") return `3D file ${esc(s.file || "")}${s.rev ? " · rev " + esc(s.rev) : ""}${s.note ? " · " + esc(s.note) : ""}`;
     if (s.type === "master") return `Master data → ${esc(s.sheet)} · ${esc(s.row)} ${example(s.is_example)}`;
     if (s.type === "register") return `Part register · ${esc(s.note)}`;
+    if (s.type === "override") return `<span class="badge badge-override">changed for this part</span> ${esc(s.by || "")} ${esc((s.at || "").replace("T", " "))}
+      · was ${num(s.was)} from ${sourceText({ source: s.was_source })}${s.note && s.note !== "Changed for this part" ? ` · ${esc(s.note)}` : ""}`;
     return node.kind === "calculated" ? "Calculated" : "—";
   }
 
@@ -77,7 +92,10 @@
     if (n.description) html += `<p class="note">${esc(n.description)}</p>`;
 
     if (n.kind === "calculated") {
-      html += `<p class="trace-label">Formula</p><code class="trace-formula">${esc(n.formula)}</code>`;
+      html += `<p class="trace-label">Formula${n.override ? ' <span class="badge badge-override">changed for this part</span>' : ""}</p>
+        <code class="trace-formula">${esc(n.formula)}</code>`;
+      if (n.override) html += `<p class="note">${esc(n.override.by || "")} ${esc((n.override.at || "").replace("T", " "))} · ` +
+        (n.override.was_formula ? `master-data formula: <code>${esc(n.override.was_formula)}</code>` : `calculated value was ${num(n.override.was_value)}`) + "</p>";
       html += `<p class="trace-label">Inputs</p><div class="table-wrap"><table class="cost-table">
         <thead><tr><th>Name</th><th class="num">Value</th><th>Comes from</th></tr></thead><tbody>`;
       for (const inp of n.inputs) {
@@ -114,6 +132,8 @@
         <p class="note">Intermediate steps (hours per year, residual value, …) are one click away inside each component.</p>`;
     }
 
+    html += editBox(n, stack.at(-1).ctx);
+
     if (stack.length === 1 && trace.rates_used?.length) {
       const ex = trace.rates_used.filter((r) => r.is_example).length;
       html += `<p class="trace-label">Rate versions used (for reproducible reports)</p>
@@ -124,6 +144,8 @@
     body.innerHTML = html;
     const holder = body.querySelector("[data-rate]");
     if (holder) loadHistory(holder, n.source.rate);
+    const bases = body.querySelector("[data-bases]");
+    if (bases) loadBases(bases, n, stack.at(-1).ctx);
   }
 
   function rateDetails(r) {
@@ -213,10 +235,133 @@
     tip.hidden = false;
   });
 
+  // ---------- editing (stage 24) ----------
+  function editInfo(n) {
+    const formula = n.kind === "calculated" && !n.method;
+    const ov = formula ? n.override : n.source?.type === "override" ? n.source : null;
+    const src = !formula && n.source?.type === "override" ? n.source.was_source : n.source;
+    const ref = formula ? n.ref : src?.ref;
+    const rate = !formula && src?.type === "rate" ? src.rate : null;
+    return { formula, ov, src, ref, rate };
+  }
+
+  function editBox(n, ctx) {
+    const { formula, ov, ref, rate } = editInfo(n);
+    const future = ref || rate;
+    if (!ctx && !future) return "";
+    if (n.method) return "";
+    const where = rate ? "a new version in the Rate library (this month)" : ref ? `Master data → ${esc(ref.table.replace(/_/g, " "))}` : "";
+    let html = `<div class="trace-edit" data-node="${esc(n.id)}"><p class="trace-label">${formula ? "Change this formula" : "Change this value"}</p>
+      ${formula ? `<textarea data-ed="formula">${esc(n.formula)}</textarea>
+        <p class="note">Use the names in the Inputs table above and numbers, + - * / ( ), min, max, ceil, round, 'a if condition else b'.</p>`
+        : `<div class="row"><input type="number" step="any" data-ed="value" value="${n.value}" /> <span>${esc(n.unit || "")}</span></div>`}
+      <div class="row"><input data-ed="note" placeholder="Why (optional, kept in the history)" style="flex:1" /></div>
+      <div class="row">
+        ${ctx ? `<button type="button" class="btn btn-primary small" data-edit="part">For this ${ctx.partCode ? "part (" + esc(ctx.partCode) + ")" : "part"} only</button>` : ""}
+        ${future ? `<button type="button" class="btn btn-outline small" data-edit="future" title="Corrects ${where}">Save for the future</button>` : ""}
+        ${ctx && ov ? '<button type="button" class="btn btn-outline small" data-edit="reset">Reset to master data</button>' : ""}
+      </div>
+      <p class="note">${ctx ? "<b>For this part only</b>: used in this part's cost from now on (recalculated and stored as a new version); master data stays as it is. " : ""}
+        ${future ? `<b>Save for the future</b>: corrects ${where}; new and recalculated costs use it.` : ""}</p>
+      <p class="status" data-ed="status"></p></div>`;
+    if (!formula && n.source?.type !== "override" && ref?.choose_base) html += `<div data-bases></div>`;
+    if (!formula && ref?.choose_base && n.source?.type === "override") html += `<div data-bases></div>`;
+    return html;
+  }
+
+  async function call(url, method, body) {
+    const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : res.statusText);
+    return data;
+  }
+
+  async function onEditClick(e) {
+    const b = e.target.closest("[data-edit], [data-base-use], [data-base-add]");
+    if (!b) return;
+    const top = stack.at(-1);
+    const { trace, node: id, ctx } = top;
+    const n = trace.nodes[id];
+    const box = b.closest(".trace-edit") || panel.querySelector(".trace-edit");
+    const st = box?.querySelector('[data-ed="status"]') || panel.querySelector("[data-bases] .status");
+    const say = (msg, kind = "") => { if (st) { st.textContent = msg; st.className = `status ${kind}`; } };
+    const { formula, ref, rate } = editInfo(n);
+    const val = box?.querySelector('[data-ed="value"]')?.value;
+    const ftext = box?.querySelector('[data-ed="formula"]')?.value;
+    const note = box?.querySelector('[data-ed="note"]')?.value || "";
+    try {
+      say("Saving…");
+      let msg = "";
+      if (b.dataset.edit === "part" || b.dataset.edit === "reset") {
+        const r = await call(`/api/parts/${ctx.partId}/trace-override`, "PUT", b.dataset.edit === "reset"
+          ? { scope: ctx.scope, node: id, reset: true } : { scope: ctx.scope, node: id, note, ...(formula ? { formula: ftext } : { value: val }) });
+        msg = r.message || "Saved for this part.";
+      } else if (b.dataset.edit === "future") {
+        const r = await call("/api/trace/save-default", "POST", { ref: rate ? null : ref, rate, note, ...(formula ? { formula: ftext } : { value: val }) });
+        msg = r.message;
+      } else if (b.dataset.baseUse) {
+        const r = await call(`/api/parts/${ctx.partId}/tool-bom`, "PUT", { key: ref.line_key, line: { base: b.dataset.baseUse } });
+        msg = r.message || "Base changed for this part.";
+      } else if (b.dataset.baseAdd != null) {
+        const f = b.closest("form");
+        const row = Object.fromEntries(new FormData(f).entries());
+        for (const k of Object.keys(row)) if (k !== "series" && k !== "size_code" && k !== "notes") row[k] = Number(row[k] || 0);
+        const full = { part_type: ref.part_type, a_plate_mm: 0, b_plate_mm: 0, clamp_plates_mm: 0, support_plate_mm: 0, spacer_block_mm: 0,
+          ejector_plates_mm: 0, notes: "Added from the traceability panel", ...row };
+        await call(`/api/master-rows/mould_db/mould_bases`, "POST", { row: full });
+        msg = `${full.series} ${full.size_code} added to Mould bases. Click "Use for this part" to take it.`;
+        loadBases(panel.querySelector("[data-bases]"), n, ctx);
+        say(msg, "ok");
+        return;
+      }
+      if (ctx) {
+        const fresh = await ctx.reload();
+        if (fresh) {
+          const nodeNow = fresh.nodes[id] ? id : fresh.root;
+          stack = [{ trace: fresh, node: nodeNow, ctx }];
+          render();
+        }
+      }
+      const st2 = panel.querySelector('.trace-edit [data-ed="status"]');
+      if (st2) { st2.textContent = msg; st2.className = "status ok"; }
+    } catch (err) {
+      say(err.message, "error");
+    }
+  }
+
+  async function loadBases(holder, n, ctx) {
+    const { ref } = editInfo(n);
+    holder.innerHTML = '<p class="note">Loading mould bases / die sets…</p>';
+    try {
+      const db = await (await fetch("/api/mould-db")).json();
+      const rows = db.mould_bases.filter((b) => b.part_type === ref.part_type).sort((a, b) => a.length_mm * a.width_mm - b.length_mm * b.width_mm);
+      const cur = ref.match.size_code;
+      holder.innerHTML = `<p class="trace-label">${ref.part_type === "sheet_metal" ? "Die sets" : "Mould bases"} (Master data → Mould bases · ${esc(ref.part_type.replace("_", " "))})</p>
+        <div class="table-wrap"><table class="cost-table base-pick"><thead><tr><th>Series · size</th><th class="num">L × W (mm)</th><th class="num">Usable L × W</th>
+          <th class="num">Stack h</th><th class="num">Weight (kg)</th><th class="num">Price (INR)</th><th></th></tr></thead><tbody>
+        ${rows.map((b) => `<tr class="${b.size_code === cur ? "current" : ""}"><td>${esc(b.series)} <b>${esc(b.size_code)}</b>${b.is_example ? ' <span class="badge badge-example">EXAMPLE</span>' : ""}</td>
+          <td class="num">${num(b.length_mm, 0)} × ${num(b.width_mm, 0)}</td><td class="num">${num(b.max_insert_length_mm, 0)} × ${num(b.max_insert_width_mm, 0)}</td>
+          <td class="num">${num(b.stack_height_mm, 0)}</td><td class="num">${num(b.weight_kg, 0)}</td><td class="num">${num(b.cost, 0)}</td>
+          <td>${b.size_code === cur ? "in use" : ctx ? `<button type="button" class="btn btn-outline small" data-base-use="${esc(b.size_code)}">Use for this part</button>` : ""}</td></tr>`).join("")}
+        </tbody></table></div>
+        <details class="card"><summary class="btn btn-outline small">+ Add a ${ref.part_type === "sheet_metal" ? "die set" : "mould base"} row</summary>
+        <form class="grid2" onsubmit="return false">
+          <label>Series <input name="series" required value="${esc(rows[0]?.series || "")}" /></label><label>Size code <input name="size_code" required /></label>
+          <label>Length (mm) <input type="number" name="length_mm" required /></label><label>Width (mm) <input type="number" name="width_mm" required /></label>
+          <label>Usable / pocket L (mm) <input type="number" name="max_insert_length_mm" required /></label><label>Usable / pocket W (mm) <input type="number" name="max_insert_width_mm" required /></label>
+          <label>Stack height (mm) <input type="number" name="stack_height_mm" required /></label><label>Weight (kg) <input type="number" step="any" name="weight_kg" required /></label>
+          <label>Price (INR) <input type="number" step="any" name="cost" required /></label>
+          <div class="span2 dialog-actions"><button type="button" class="btn btn-primary small" data-base-add>Save to master data</button></div>
+          <p class="status span2"></p></form></details>`;
+    } catch (err) {
+      holder.innerHTML = `<p class="error">${esc(err.message)}</p>`;
+    }
+  }
+
   window.TracePanel = {
-    open(trace, nodeId) {
+    open(trace, nodeId, ctx) {
       ensurePanel();
-      stack = [{ trace, node: nodeId || trace.root }];
+      stack = [{ trace, node: nodeId || trace.root, ctx: ctx || null }];
       panel.hidden = false;
       render();
       panel.querySelector(".trace-close").focus();

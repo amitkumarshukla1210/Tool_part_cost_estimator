@@ -57,6 +57,11 @@ class ToolCostError(ValueError):
     pass
 
 
+def _ref(store: str, table: str, match: dict, column: str, **extra) -> dict:
+    """Where a master-data value lives, so the traceability panel can correct it there ("Save for the future")."""
+    return {"store": store, "table": table, "match": match, "column": column} | extra
+
+
 class ToolInput(mould.MouldInput):
     country: Optional[str] = None
     as_of: Optional[str] = None
@@ -69,6 +74,7 @@ class ToolInput(mould.MouldInput):
     programme_years: float = Field(0, ge=0)
     bom: dict = Field(default_factory=dict)        # your changes per BOM line: {line key: {grade, make, qty, price_each, std_part}}
     learned: dict = Field(default_factory=dict)    # learned from your earlier parts: {element: {grade, make, std_part, note}}
+    overrides: dict = Field(default_factory=dict)  # your changes of traced values for this part: {node id: {value | formula}}
 
 
 def default_country() -> str:
@@ -86,7 +92,7 @@ class _Run:
             raise ToolCostError(f"Country '{self.country}' is not in Master data → Countries.")
         self.cur = countries[self.country]["currency"]
         self.as_of = inp.as_of or rates.current_month()
-        self.trace = Trace(self.cur)
+        self.trace = Trace(self.cur, inp.overrides)
         self.missing: list[str] = []
         self.db = mould_db.tables()
         self.time = mould_db.time_parameters(inp.part_type)
@@ -134,11 +140,17 @@ class _Run:
         except rates.RateMissing as exc:
             return self.miss(f"{nid}:fx", f"{label} (currency)", str(exc), money=True)
 
-    def master(self, nid: str, label: str, value, unit: str, sheet: str, row: str, example: bool = False) -> str:
+    def master(self, nid: str, label: str, value, unit: str, sheet: str, row: str, example: bool = False,
+               ref: dict | None = None) -> str:
         if nid not in self.trace.nodes:
-            self.trace.add_input(nid, label, value, unit, {"type": "master", "sheet": sheet, "row": row,
-                                                           "is_example": bool(example)})
+            src = {"type": "master", "sheet": sheet, "row": row, "is_example": bool(example)}
+            if ref:
+                src["ref"] = ref
+            self.trace.add_input(nid, label, value, unit, src)
         return nid
+
+    def sub_overrides(self, prefix: str) -> dict:
+        return {k[len(prefix):]: v for k, v in (self.inp.overrides or {}).items() if k.startswith(prefix)}
 
     def embed(self, sub: dict, prefix: str, label: str) -> str:
         """Copy a rate-engine trace (MHR, labour rate) into this one; returns the node of its result."""
@@ -159,7 +171,8 @@ class _Run:
             m = self.machines.get(machine_id)
             label = f"MHR {machine_id}" + (f" · {m['name']}" if m else "")
             try:
-                self.cache[key] = self.embed(rate_engine.mhr(machine_id, self.country, self.as_of), f"mhr:{machine_id}:", label)
+                self.cache[key] = self.embed(rate_engine.mhr(machine_id, self.country, self.as_of, self.sub_overrides(f"mhr:{machine_id}:")),
+                                             f"mhr:{machine_id}:", label)
             except (rates.RateError, rate_engine.EngineError, formula.FormulaError) as exc:
                 self.cache[key] = self.miss(f"mhr:{machine_id}", label, str(exc), self.money_unit("h"), True)
         return self.cache[key]
@@ -169,7 +182,8 @@ class _Run:
         if key not in self.cache:
             label = f"Labour rate · {grade}"
             try:
-                self.cache[key] = self.embed(rate_engine.labour_rate(grade, self.country, self.as_of), f"lab:{grade}:", label)
+                self.cache[key] = self.embed(rate_engine.labour_rate(grade, self.country, self.as_of, self.sub_overrides(f"lab:{grade}:")),
+                                             f"lab:{grade}:", label)
             except (rates.RateError, rate_engine.EngineError, formula.FormulaError) as exc:
                 self.cache[key] = self.miss(f"lab:{grade}", label, str(exc), self.money_unit("h"), True)
         return self.cache[key]
@@ -182,7 +196,8 @@ class _Run:
             terms.append("mhr")
         if tp["operators"]:
             names["operators"] = self.master(f"ops:{tp['code']}", f"Operators · {tp['code']}", tp["operators"], "persons",
-                                             "Mould & die database → Tool processes", tp["code"], tp["is_example"])
+                                             "Mould & die database → Tool processes", tp["code"], tp["is_example"],
+                                             ref=_ref("mould_db", "tool_processes", {"code": tp["code"]}, "operators"))
             names["labour"] = self.labour(tp["labour_grade"])
             terms.append("operators * labour")
         if not terms:
@@ -221,7 +236,8 @@ class _Run:
         elif name in mould.SIZING_KEYS:
             r = sz["rules"][name]
             self.master(nid, r["description"] or name, r["value"], r["unit"], "Mould & die database → Sizing rules",
-                        f"{i.part_type} / {name}", r["is_example"])
+                        f"{i.part_type} / {name}", r["is_example"],
+                        ref=_ref("mould_db", "sizing_rules", {"part_type": i.part_type, "parameter": name}, "value"))
         elif name == "insert_each_l":
             t.compute(nid, "Insert length per cavity", "part_l + 2 * insert_wall_mm", "mm",
                       names={"part_l": self.var("part_l"), "insert_wall_mm": self.var("insert_wall_mm")})
@@ -252,7 +268,9 @@ class _Run:
                                   "base_stack_h": ("stack_height_mm", "Mould base stack height", "mm"),
                                   "base_weight_kg": ("weight_kg", "Mould base weight", "kg")}[name]
             self.master(nid, label, b[field], unit, "Mould & die database → Mould bases",
-                        f"{b['series']} {b['size_code']}", b["is_example"])
+                        f"{b['series']} {b['size_code']}", b["is_example"],
+                        ref=_ref("mould_db", "mould_bases", {"part_type": b["part_type"], "series": b["series"],
+                                                             "size_code": b["size_code"]}, field))
         elif name == "part_box_cm3":
             t.compute(nid, "Part bounding box", "part_l * part_w * part_h / 1000", "cm³",
                       names={k: self.var(k) for k in ("part_l", "part_w", "part_h")},
@@ -266,7 +284,9 @@ class _Run:
             else:
                 row = _parameter_row(i.part_type, name)
                 self.master(nid, row["description"] if row else name, (row or {}).get("value") or 0,
-                            (row or {}).get("unit") or "", "Parameters", f"{(row or {}).get('part_type', 'all')} / {name}")
+                            (row or {}).get("unit") or "", "Parameters", f"{(row or {}).get('part_type', 'all')} / {name}",
+                            ref=_ref("master_data", "Parameters", {"part_type": (row or {}).get("part_type", "all"),
+                                                                   "parameter": name}, "value") if row else None)
         elif name == "programme_shots":
             t.compute(nid, "Shots (strokes) over the programme per tool", "annual_volume * programme_years / cavities", "shots",
                       names={k: self.var(k) for k in ("annual_volume", "programme_years", "cavities")},
@@ -274,13 +294,15 @@ class _Run:
         elif name in self.time:
             r = self.time[name]
             self.master(nid, r["description"] or name, r["value"], r["unit"],
-                        "Mould & die database → Process time parameters", f"{i.part_type} / {name}", r["is_example"])
+                        "Mould & die database → Process time parameters", f"{i.part_type} / {name}", r["is_example"],
+                        ref=_ref("mould_db", "time_parameters", {"part_type": i.part_type, "parameter": name}, "value"))
         else:
             raise ToolCostError(f"'{name}' is not a rule variable, and not a Process time parameter for {i.part_type}.")
         return nid
 
     def rule(self, nid: str, label: str, text: str, unit: str, element: str, column: str, density: str | None = None,
              money: bool = False) -> float:
+        el = next((e for e in self.db["bom_elements"] if e["part_type"] == self.inp.part_type and e["element"] == element), {})
         names = {}
         try:
             for n in formula.names(text):
@@ -290,9 +312,12 @@ class _Run:
                     names[n] = density
                 else:
                     names[n] = self.var(n)
-            return self.trace.compute(nid, label, text, unit, money=money, names=names,
-                                      description=f"Rule '{column}' of BOM element '{element}' "
-                                                  f"(Mould & die database → BOM elements)")
+            v = self.trace.compute(nid, label, text, unit, money=money, names=names,
+                                   description=f"Rule '{column}' of BOM element '{element}' (Mould & die database → BOM elements). "
+                                               "The numbers written in the rule are its constants; every name is an input below."
+                                               + (f" Notes: {el['notes']}" if el.get("notes") else ""))
+            self.trace.nodes[nid]["ref"] = _ref("mould_db", "bom_elements", {"part_type": self.inp.part_type, "element": element}, column)
+            return v
         except formula.FormulaError as exc:
             raise ToolCostError(f"BOM element '{element}', {column}: {exc}") from None
 
@@ -362,7 +387,10 @@ class _Run:
                         {"type": "user", "note": "Your price (Tool cost → BOM, changed by you)"}, money=True)
         else:
             base_inr = self.master(f"{base_key}:cost_inr", f"{base_label} · catalogue price", b["cost"], "INR",
-                                   "Mould & die database → Mould bases", f"{b['series']} {b['size_code']}", b["is_example"])
+                                   "Mould & die database → Mould bases", f"{b['series']} {b['size_code']}", b["is_example"],
+                                   ref=_ref("mould_db", "mould_bases", {"part_type": b["part_type"], "series": b["series"],
+                                                                        "size_code": b["size_code"]}, "cost",
+                                            choose_base=True, line_key=base_key, part_type=b["part_type"]))
         self.trace.nodes[base_inr]["money"] = True
         base_cost = self.from_inr(base_inr, f"{base_label} price")
         lines = [{"key": base_key, "element": base_label, "category": "bought_out", "quantity": 1,
@@ -378,7 +406,7 @@ class _Run:
         k = 0
         for el in self.elements():
             k += 1
-            tag, name = f"bom:{k}", el["element"]
+            tag, name = f"bom:{el['element']}", el["element"]   # by name, so your changes stay on the same line
             key = self.line_key(name)
             ov = self.override(key)
             if ov.get("qty") is not None:
@@ -399,6 +427,11 @@ class _Run:
                     grade, reason = learned["grade"], f"learned from your earlier parts ({learned.get('note', '')})".replace(" ()", "")
                 ov.pop("grade", None)
                 ov["_learned"] = learned.get("note") or "earlier parts"
+            if not ov.get("std_part") and ov.get("price_each") is None:
+                if el.get("std_part"):
+                    ov = dict(ov, std_part=el["std_part"])
+                elif el.get("price_each_inr"):          # blank / 0 in master data = not set: the line is calculated
+                    ov = dict(ov, price_each=el["price_each_inr"], _price_from="master")
             suggested = grade
             if ov.get("grade"):
                 if ov["grade"] not in materials:
@@ -412,13 +445,14 @@ class _Run:
                     "weight_each_kg": 0, "material_cost": 0, "bought_out_cost": 0, "process": el["process_code"],
                     "pricing": "", "cost_group": "", "hours": 0, "amount": 0, "process_cost": 0,
                     "is_example": bool(el["is_example"]),
-                    "changed": sorted(k2 for k2 in ov if ov[k2] not in (None, "") and not k2.startswith("_")),
+                    "changed": sorted(k2 for k2 in (self.override(key)) if self.override(key)[k2] not in (None, "")),
                     "learned": ov.get("_learned") or "", "std_part": "", "part_number": "", "nodes": {"qty": q}}
             parts = []
             density = None
             if mat:
                 density = self.master(f"den:{mat['code']}", f"Density of {mat['code']}", mat["density_g_cm3"], "g/cm³",
-                                      "Mould & die database → Tool materials", mat["code"], mat["is_example"])
+                                      "Mould & die database → Tool materials", mat["code"], mat["is_example"],
+                                      ref=_ref("mould_db", "tool_materials", {"code": mat["code"]}, "density_g_cm3"))
                 line["weight_each_kg"] = self.rule(f"{tag}:wt", f"{name} · weight each", el["weight_rule"], "kg", name,
                                                    "weight_rule", density)
                 t.compute(f"{tag}:kg", f"{name} · steel weight", "qty * weight", "kg", names={"qty": q, "weight": f"{tag}:wt"})
@@ -431,7 +465,8 @@ class _Run:
                 line["std_part"], line["make"] = sp["code"], ov.get("make") or sp["make"]
                 line["part_number"] = sp.get("part_number") or ""
                 node = self.master(f"{tag}:sp", f"{name} · {sp['make']} {sp.get('part_number') or sp['code']} · {sp['description']}", sp["price"],
-                                   sp["currency"], "Mould & die database → Standard parts", sp["code"], sp["is_example"])
+                                   sp["currency"], "Mould & die database → Standard parts", sp["code"], sp["is_example"],
+                                   ref=_ref("mould_db", "standard_parts", {"code": sp["code"]}, "price"))
                 t.nodes[node]["money"] = True
                 try:
                     each = rate_engine._convert(t, node, f"{name} · {sp['code']}", sp["currency"], cur, self.as_of)
@@ -447,8 +482,14 @@ class _Run:
                 continue
             if ov.get("price_each") is not None:
                 # your price per piece replaces the calculated cost of the whole line (steel, bought-out and processes)
-                t.add_input(f"{tag}:you", f"{name} · your price each", float(ov["price_each"]), "INR",
-                            {"type": "user", "note": "Your price per piece in INR (Tool cost → BOM, changed by you)"}, money=True)
+                if ov.get("_price_from") == "master":
+                    self.master(f"{tag}:you", f"{name} · price each (BOM element default)", float(ov["price_each"]), "INR",
+                                "Mould & die database → BOM elements", f"{self.inp.part_type} / {name} · price each", el["is_example"],
+                                ref=_ref("mould_db", "bom_elements", {"part_type": el["part_type"], "element": name}, "price_each_inr"))
+                    t.nodes[f"{tag}:you"]["money"] = True
+                else:
+                    t.add_input(f"{tag}:you", f"{name} · your price each", float(ov["price_each"]), "INR",
+                                {"type": "user", "note": "Your price per piece in INR (Tool cost → BOM, changed by you)"}, money=True)
                 each = self.from_inr(f"{tag}:you", f"{name} · your price each")
                 line["bought_out_cost"] = t.compute(f"{tag}:bo", f"{name} · your price", "qty * each", cur, money=True,
                                                     names={"qty": q, "each": each})
@@ -582,7 +623,8 @@ class _Run:
                 if row is None or not isinstance(row["value"], (int, float)):
                     raise ToolCostError(f"{label}: Master data → Parameters has no number '{inp['item']}' for {self.inp.part_type}.")
                 names[var] = self.master(nid, label, row["value"], inp["unit"] or row["unit"] or "", "Parameters",
-                                         f"{row['part_type']} / {inp['item']}")
+                                         f"{row['part_type']} / {inp['item']}",
+                                         ref=_ref("master_data", "Parameters", {"part_type": row["part_type"], "parameter": inp["item"]}, "value"))
             elif inp["source"] == "tool":
                 if inp["item"] not in self.tool_items:
                     raise ToolCostError(f"{label}: '{inp['item']}' is not a tool engine value.")
@@ -598,6 +640,16 @@ class _Run:
             self.sized = self.size()
         except ValueError as exc:
             raise ToolCostError(str(exc)) from None
+        chosen = self.override(self.line_key("__base__")).get("base")
+        if chosen:  # the mould base / die set you picked for this part instead of the smallest that fits
+            row = next((b for b in self.db["mould_bases"] if b["part_type"] == inp.part_type and b["size_code"] == chosen), None)
+            if not row:
+                raise ToolCostError(f"Mould base / die set '{chosen}' is not in Mould bases for {inp.part_type}.")
+            auto = self.sized["base"]
+            if row["max_insert_length_mm"] * row["max_insert_width_mm"] < auto["max_insert_length_mm"] * auto["max_insert_width_mm"]:
+                self.sized["warnings"] = list(self.sized.get("warnings") or []) + [
+                    f"Your base {row['size_code']} is smaller than the one that fits ({auto['size_code']}): check it."]
+            self.sized["base"] = row
         lines = self.bom()
 
         mats = [l["nodes"]["mat"] for l in lines if l["nodes"].get("mat")]

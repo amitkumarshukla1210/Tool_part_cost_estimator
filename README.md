@@ -587,6 +587,31 @@ Two more part types run through the same stages as injection moulding; pick the 
 All new rows are EXAMPLE values (machines EPS-1000/1400/1800 and ISBM-2C/4C/6C/8C, materials, aluminium 7075 / 6061, bases, BOM rules, cycle times, steam and resin rates for 9 countries, HS 3923). The country comparison and landed cost, the part cost and the project view work
 for them unchanged. The concept and simulation cards (opening direction, undercuts, wall and draft maps) are for plastic injection and die casting only.
 
+## Correct any value from the traceability panel (roadmap stage 24)
+
+Click any value of a part's RM cost, tool cost or part cost: the **traceability** window opens. **⤢ Full screen** works there
+and on the part window, and the choice is remembered on the PC. Below the formula or source there is **Change this value** or
+**Change this formula**, with these choices:
+
+| Button | What it does |
+|---|---|
+| **For this part only** | The new value or formula replaces the rate-library or master-data one **in this part's cost only**. The cost is recalculated and stored as a new version; the part cost follows. The value shows *changed for this part* with who, when and what it was. **Reset to master data** removes it. Other parts are not touched. |
+| **Save for the future** | Corrects the source: a **rate** gets a new rate-library version this month (approved when you may approve rates, else a draft for the approver); a **master-data value** (Parameters, Sizing rules, Process time parameters, Tool materials, Tool processes, Machines, Mould bases, Standard parts) or a **rule / formula** (BOM element rules, Cost formulas) is changed in its master-data row and loses its EXAMPLE flag. New and recalculated costs use it; stored costs show "master data changed" until you recalculate. |
+
+**How a number in a rule is arrived at:** a rule such as `1500 + die_l * die_w / 100` (screws, dowels & bolts) is the BOM
+element's rule in master data. The numbers in it are its constants (here a base price of 1500 INR plus 1 INR per cm² of die
+plate), the names are the inputs listed below it, and the notes of the element are shown. Change it for this part, or save it
+for every tool.
+
+**Mould base / die set:** clicking the mould base or die set price shows every base of that part type (size, usable area,
+stack height, weight, price) with **Use for this part** (instead of the smallest that fits; a smaller one is warned) and
+**+ Add a row** (saved to Master data → Mould bases, then selectable).
+
+**Default grade, make, standard part and price per BOM element:** *Mould & die database → BOM elements* has the columns
+*Material* (grade), *Make*, *Standard part* and *Price each, INR* next to the rules. Every costing recalls them as the default
+of the line, unless you change it on the part. Ticking **my default** on a part's BOM line saves all four there. A blank or 0
+price means the line is calculated.
+
 ## Sheet-metal dies and the tool BOM: grade, make, standard parts, learning (roadmap stage 23)
 
 **Sheet-metal dies, stage-wise.** A sheet-metal part's tool cost (Parts → the part → Tool cost) suggests its dies from
@@ -861,7 +886,7 @@ All planned stages are built: Stages A–C, the rate library and MHR engine, the
 sheet-metal tools (9, 10), country comparison (11), monthly rate update (12), project leader view (13), harness & PCB
 (14–16), server mode (17), EPS and PET blow moulding (18, 19), backup and the Windows update kit (20), the corrections
 from use (21), logins with admin control and the supplier master (22), and sheet-metal dies stage-wise with the
-editable, learning tool BOM (23). The original requirement sets **A** sheet-metal tools, **B** tool / mould / die cost, **C** country
+editable, learning tool BOM (23), and correcting any traced value for one part or for the future (24). The original requirement sets **A** sheet-metal tools, **B** tool / mould / die cost, **C** country
 rate library, **D** country comparison and **E** monthly rate update with approval are all covered.
 
 ### Ground rules for everything that follows

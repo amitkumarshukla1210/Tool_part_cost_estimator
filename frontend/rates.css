@@ -136,3 +136,15 @@ button.tv:hover, button.tv:focus-visible { color: var(--brand); outline: none; b
   .trace-panel { width: 100vw; }
 }
 .trace-body .cost-table tr.subtotal td { font-weight: 800; }
+
+/* traceability: full screen and editing (stage 24) */
+.trace-panel.full { width: 100vw; }
+.trace-panel.full .trace-body { max-width: 1200px; margin: 0 auto; }
+.trace-head .trace-full { margin-left: auto; }
+.trace-edit { margin-top: 18px; padding: 14px; border: 1px solid var(--grey-border); border-radius: 10px; background: var(--grey-light); }
+.trace-edit .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+.trace-edit input[type=number] { max-width: 180px; }
+.trace-edit textarea { width: 100%; min-height: 60px; font-family: ui-monospace, monospace; }
+.trace-edit .was { font-size: 12.5px; color: var(--grey); }
+.badge-override { border-color: #f5b400; background: #fff5d6; color: #6b4e00; }
+.base-pick tr.current td { background: #e9f3ff; font-weight: 600; }

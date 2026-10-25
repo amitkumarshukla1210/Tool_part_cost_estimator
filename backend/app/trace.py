@@ -16,15 +16,24 @@ EXAMPLE_WARNING = "Uses example rates – not for negotiation"
 
 
 class Trace:
-    def __init__(self, currency: str = ""):
+    def __init__(self, currency: str = "", overrides: dict | None = None):
         self.nodes: dict[str, dict] = {}
         self.currency = currency
         self.rates_used: dict[int, dict] = {}
+        # Your changes for one part: {node id: {"value": number} or {"formula": text}, "note", "by", "at"}.
+        # The value / formula replaces the master-data or rate-library one in this calculation only, and the node
+        # keeps what it replaced ("was"), so the panel shows both and can reset it.
+        self.overrides = overrides or {}
 
     def value(self, node_id: str) -> float:
         return self.nodes[node_id]["value"]
 
     def add_input(self, node_id, label, value, unit="", source=None, money=False):
+        ov = self.overrides.get(node_id)
+        if ov and ov.get("value") is not None:
+            source = {"type": "override", "note": ov.get("note") or "Changed for this part", "by": ov.get("by", ""),
+                      "at": ov.get("at", ""), "was": value, "was_source": source or {"type": "unknown"}}
+            value = float(ov["value"])
         self.nodes[node_id] = {"id": node_id, "label": label, "value": value, "unit": unit, "money": money,
                                "kind": "input", "source": source or {"type": "unknown"}}
         rate = (source or {}).get("rate")
@@ -41,6 +50,10 @@ class Trace:
     def compute(self, node_id, label, text, unit="", money=False, description="", names=None):
         """Evaluate a formula whose names refer to existing node ids (or `names` maps name -> node id)."""
         names = names or {}
+        ov = self.overrides.get(node_id) or {}
+        was_formula = None
+        if ov.get("formula"):
+            was_formula, text = text, ov["formula"]
         used = formula.names(text)
         env, inputs = {}, []
         for n in sorted(used):
@@ -52,6 +65,11 @@ class Trace:
         value = formula.evaluate(text, env)
         self.nodes[node_id] = {"id": node_id, "label": label, "value": value, "unit": unit, "money": money,
                                "kind": "calculated", "formula": text, "inputs": inputs, "description": description}
+        if was_formula is not None or ov.get("value") is not None:
+            self.nodes[node_id]["override"] = {"note": ov.get("note") or "Changed for this part", "by": ov.get("by", ""),
+                                               "at": ov.get("at", ""), "was_formula": was_formula, "was_value": value}
+            if ov.get("value") is not None:
+                value = self.nodes[node_id]["value"] = float(ov["value"])
         return value
 
     def add_derived(self, node_id, label, value, unit, method, inputs: dict, description=""):

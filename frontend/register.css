@@ -140,3 +140,7 @@ table.ops-order td.row-actions .btn { min-width: 34px; padding: 2px 8px; }
 table.bom-edit select, table.bom-edit input { min-width: 90px; max-width: 220px; }
 table.bom-edit input[type=number] { max-width: 100px; }
 label.check.small { font-size: .75rem; display: inline-flex; gap: 4px; align-items: center; text-transform: none; }
+
+/* full screen part panel and traceability panel (stage 24) */
+.part-panel.full { width: 100vw; }
+.part-panel.full .panel-body { max-width: 1400px; margin: 0 auto; }

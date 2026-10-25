@@ -46,7 +46,7 @@ PERMISSIONS = {
 # Pure calculations that change nothing: anyone logged in may run them.
 CALC_PATHS = ("/api/analyze", "/api/gross-weight", "/api/capacity", "/api/mould/estimate", "/api/tool-cost", "/api/suggest-process")
 MASTER_PATHS = ("/api/master-data", "/api/mould-db", "/api/costing-setup", "/api/register-setup", "/api/examples",
-                "/api/tool-materials", "/api/standard-parts")
+                "/api/tool-materials", "/api/standard-parts", "/api/master-rows")
 RATE_PATHS = ("/api/rates", "/api/settings")
 
 _user: contextvars.ContextVar = contextvars.ContextVar("dtc_user", default=None)
@@ -342,6 +342,8 @@ def action_for(method: str, path: str) -> str | None:
         return "manage_suppliers"
     if path.startswith(MASTER_PATHS):
         return "edit_master_data"
+    if path == "/api/trace/save-default":
+        return None                     # trace_edit checks edit_rates or edit_master_data, by what is corrected
     if path == "/api/rates/status":
         return None                     # rates.set_status checks edit_rates, and approve_rates for an approval
     if path.startswith(RATE_PATHS):

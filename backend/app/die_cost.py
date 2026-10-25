@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from . import mould_db, rate_engine, register_setup
 from .rm_cost import _parameter_row
-from .tool_cost import ToolCostError, ToolInput, _Run, examples
+from .tool_cost import ToolCostError, ToolInput, _ref, _Run, examples
 from .trace import Trace
 
 SIZING = ("die_wall_mm", "die_plate_min_mm", "die_plate_t_factor")
@@ -141,7 +141,8 @@ class _DieRun(_Run):
         elif name in SIZING or name in self.sized["rules"]:
             r = self.sized["rules"][name]
             self.master(nid, r["description"] or name, r["value"], r["unit"], "Mould & die database → Sizing rules",
-                        f"sheet_metal / {name}", r["is_example"])
+                        f"sheet_metal / {name}", r["is_example"],
+                        ref=_ref("mould_db", "sizing_rules", {"part_type": "sheet_metal", "parameter": name}, "value"))
         elif name in ("die_l", "die_w"):
             work = "work_l" if name == "die_l" else "work_w"
             t.compute(nid, "Die plate length" if name == "die_l" else "Die plate width", f"{work} + 2 * die_wall_mm", "mm",
@@ -175,7 +176,8 @@ class _DieRun(_Run):
         t = self.trace
         row = _parameter_row("sheet_metal", "press_safety_factor")
         sf = self.master("trial:sf", "Press safety factor", (row or {}).get("value") or 1.0, "×", "Parameters",
-                         "sheet_metal / press_safety_factor")
+                         "sheet_metal / press_safety_factor",
+                         ref=_ref("master_data", "Parameters", {"part_type": "sheet_metal", "parameter": "press_safety_factor"}, "value"))
         t.compute("trial:force", "Press force needed for this die", "die_force_t * safety", "t",
                   names={"die_force_t": self.var("die_force_t"), "safety": sf})
         return self.trial_machine("trial:force", "press force")
@@ -205,15 +207,17 @@ def run(inp: ToolInput, sheet: dict, layout: dict | None, sources: dict | None =
     dies = plan(sheet, layout)
     results = []
     for die in dies:
+        pre = f"{die['key']}:"
+        die_inp = inp.model_copy(update={"overrides": {k[len(pre):]: v for k, v in (inp.overrides or {}).items() if k.startswith(pre)}})
         try:
-            results.append(_DieRun(inp, sources, die, sheet).run())
+            results.append(_DieRun(die_inp, sources, die, sheet).run())
         except ToolCostError as exc:
             raise ToolCostError(f"{die['name']}: {exc}") from None
     cur, as_of = results[0]["currency"], results[0]["as_of"]
     t = Trace(cur)
     lines, out_dies, missing = [], [], []
     for k, (die, r) in enumerate(zip(dies, results), start=1):
-        p = f"d{k}:"
+        p = f"{die['key']}:"
         _embed(t, r, p)
         t.nodes[p + r["root"]]["label"] = f"{die['name']} · tool cost"
         if r.get("capex_node"):
@@ -252,7 +256,7 @@ def run(inp: ToolInput, sheet: dict, layout: dict | None, sources: dict | None =
                        ("process_cost", "Processes (design excluded)"), ("design_cost", "Design")):
         sub = {"material_cost": "sum:material", "bought_out_cost": "sum:bought_out", "process_cost": "sum:process",
                "design_cost": "sum:design"}[key]
-        totals[key] = _sum(t, f"sum:{key}", f"{label} (all dies)", [f"d{k}:{sub}" for k in range(1, len(dies) + 1)], cur)
+        totals[key] = _sum(t, f"sum:{key}", f"{label} (all dies)", [f"{d['key']}:{sub}" for d in dies], cur)
     totals["tool_weight_kg"] = _sum(t, "tool_weight", "Weight of all dies", [d["weight_node"] for d in out_dies], "kg", money=False)
     out = t.to_dict(total)
     first = results[0]

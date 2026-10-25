@@ -87,6 +87,8 @@ TABLES = {
         col("hours_rule", "Hours each (rule)", "formula"),
         col("amount_rule", "Amount each, in the process unit (rule)", "formula", required=False),
         col("make", "Make (suggested brand / supplier)", required=False),
+        col("std_part", "Standard part (default, code from Standard parts)", required=False),
+        col("price_each_inr", "Price each, INR (default; replaces the calculated line)", "number", required=False),
         col("operations", "Sheet-metal dies: operations it belongs to (codes, comma-separated; blank = every die)", required=False),
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
@@ -333,6 +335,10 @@ def _check(clean: dict) -> None:
         bad = [c for c in (r.get("operations") or "").replace(" ", "").split(",") if c and c not in ops]
         if bad:
             raise MouldDbError(f"BOM elements row {i}: operation '{bad[0]}' is not in Sheet operations ({', '.join(sorted(ops))}).")
+    std = {r["code"] for r in clean.get("standard_parts", [])}
+    for i, r in enumerate(clean["bom_elements"], start=2):
+        if r.get("std_part") and r["std_part"] not in std:
+            raise MouldDbError(f"BOM elements row {i}: standard part '{r['std_part']}' is not in Standard parts.")
     elements = {(r["part_type"], r["element"]) for r in clean["bom_elements"]}
     for i, r in enumerate(clean.get("grade_rules", []), start=2):
         where = f"Grade rules row {i}"

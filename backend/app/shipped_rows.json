@@ -1,6 +1,6 @@
 {
 "note": "Fingerprints of every master-data row ever shipped; see upgrade_tools.py. Rebuild: python -m backend.app.upgrade_tools fingerprints",
-"commits": 20,
+"commits": 21,
 "rows": [
 "0027269340db376d",
 "003696da8ab68f24",
