@@ -48,7 +48,7 @@ def flat_pattern(shape, geometry: dict, blank: dict, thickness: float) -> dict:
                         "length_mm": max(p[0] for p in o), "width_mm": max(p[1] for p in o),
                         "area_mm2": outer.area - sum(h.area for h in holes)}
     l, w = blank["length"], blank["width"]
-    return {"method": "bent part: developed rectangle from the blank estimate (no bend lines or hole positions)",
+    return {"method": f"bent part: {blank.get('method') or 'developed rectangle'} (no bend lines or hole positions drawn)",
             "outline": [[0, 0], [l, 0], [l, w], [0, w], [0, 0]], "holes": [], "length_mm": l, "width_mm": w, "area_mm2": l * w}
 
 

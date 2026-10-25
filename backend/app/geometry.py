@@ -248,6 +248,123 @@ def blank_estimate(volume_mm3: float, bbox_mm: dict, thickness_mm: float) -> dic
     return {"length": round(max(flat_area / width, length), 1), "width": round(width, 1)}
 
 
+def _unit(v):
+    n = (v[0] ** 2 + v[1] ** 2 + v[2] ** 2) ** 0.5
+    return (v[0] / n, v[1] / n, v[2] / n) if n > 1e-12 else None
+
+
+def _sheet_faces(shape: cq.Shape, thickness: float) -> list:
+    """Flat faces of the sheet itself: each has a parallel twin facing the other way one thickness away.
+    (Edge faces, the side faces of an L / U profile and the rim of a tray do not: their twin is a part size away.)"""
+    flats = []
+    for f in shape.Faces():
+        if f.geomType() == "PLANE":
+            n, c = f.normalAt(), f.Center()
+            flats.append((f, (n.x, n.y, n.z), n.x * c.x + n.y * c.y + n.z * c.z))
+    out = []
+    for i, (f, n, off) in enumerate(flats):
+        if any(sum(a * b for a, b in zip(n, n2)) < -0.999 and abs(abs(off + off2) - thickness) <= 0.1 * thickness
+               for j, (_, n2, off2) in enumerate(flats) if j != i):
+            out.append(f)
+    return out
+
+
+def bend_axes(shape: cq.Shape, thickness: float) -> list[tuple]:
+    """Directions of the bend lines of a sheet-metal part.
+
+    Rounded bends: the axes of the bend cylinders. Sharp-cornered models: the line where two large flat faces with
+    different normals meet (cross product of the normals). Parallel directions are merged.
+    """
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    # rounded bends: coaxial cylinder pairs whose radii differ by the thickness (hole walls are single cylinders)
+    cyl = []
+    for face in shape.Faces():
+        if face.geomType() == "CYLINDER":
+            c = BRepAdaptor_Surface(face.wrapped).Cylinder()
+            ax, loc = c.Axis().Direction(), c.Axis().Location()
+            cyl.append(((ax.X(), ax.Y(), ax.Z()), (loc.X(), loc.Y(), loc.Z()), c.Radius()))
+    dirs = []
+    for i, (d1, o1, r1) in enumerate(cyl):
+        for d2, o2, r2 in cyl[i + 1:]:
+            if abs(sum(a * b for a, b in zip(d1, d2))) < 0.999 or abs(abs(r1 - r2) - thickness) > max(0.05 * thickness, 0.01):
+                continue
+            off = [b - a for a, b in zip(o1, o2)]
+            along = sum(a * b for a, b in zip(off, d1))
+            if sum((a - along * b) ** 2 for a, b in zip(off, d1)) ** 0.5 < 1e-3:
+                dirs.append(d1)
+    if not dirs:
+        planes = sorted(_sheet_faces(shape, thickness), key=lambda f: -f.Area())
+        big = [f for f in planes if f.Area() > 0.05 * planes[0].Area()] if planes else []
+        normals = []
+        for f in big:
+            n = f.normalAt()
+            n = (n.x, n.y, n.z)
+            if all(abs(sum(a * b for a, b in zip(n, m))) < 0.99 for m in normals):
+                normals.append(n)
+        for i, a in enumerate(normals):
+            for b in normals[i + 1:]:
+                c = _unit((a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]))
+                if c:
+                    dirs.append(c)
+    out = []
+    for d in dirs:
+        d = _unit(d)
+        if d and all(abs(sum(a * b for a, b in zip(d, e))) < 0.99 for e in out):
+            out.append(d)
+    return out
+
+
+def extent_along(shape: cq.Shape, d: tuple) -> float:
+    """Size of the part along a direction (projection of its vertices)."""
+    vals = [v.x * d[0] + v.y * d[1] + v.z * d[2] for v in (p.Center() for p in shape.Vertices())]
+    return (max(vals) - min(vals)) if vals else 0.0
+
+
+def developed_blank(shape: cq.Shape, volume_mm3: float, bbox_mm: dict, thickness: float) -> dict:
+    """The flat blank of a sheet-metal part, chosen for the best material yield.
+
+    Options compared (material yield = flat part area ÷ blank area):
+      developed strip   bent part whose bends all run the same way (L, U, Z, channel): strip width = the part's size
+                        along the bend lines, length = flat area ÷ width. A straight strip, formed by a bending stage.
+      rectangle         the rectangle the old estimate used: part width × developed length (keeps the formed width).
+    A flat part (no bend) uses its own length × width. The option with the highest yield is used.
+    """
+    old = blank_estimate(volume_mm3, bbox_mm, thickness)
+    hole_area = 0.0
+    if shape is not None:   # holes punched through the sheet (each shows on both faces of the sheet)
+        hole_area = sum(cq.Face.makeFromWires(w).Area() for f in _sheet_faces(shape, thickness) for w in f.innerWires()) / 2
+    flat_area = volume_mm3 / thickness + hole_area
+    opt = lambda name, l, w, note: {"name": name, "length": round(l, 1), "width": round(w, 1), "area_mm2": round(l * w, 1),
+                                    "yield_pct": round(100 * flat_area / max(l * w, 1e-9), 1), "note": note}
+    if bbox_mm["height"] <= thickness * 1.05 or shape is None:
+        o = opt("Flat part", old["length"], old["width"], "length × width of the flat part")
+        return {"length": o["length"], "width": o["width"], "method": o["name"], "options": [o], "chosen": o["name"],
+                "flat_area_mm2": round(flat_area, 1), "bends": 0}
+    options = [opt("Rectangle keeping the formed width", old["length"], old["width"],
+                   "part width × developed length: wide blank, low yield when the part is L / U shaped")]
+    axes = bend_axes(shape, thickness)
+    strip = None
+    if len(axes) == 1:
+        w = extent_along(shape, axes[0])
+        if w > thickness:
+            strip = opt("Developed straight strip + bending stage", flat_area / w, w,
+                        "strip width = part size along the bend line; length = flat area ÷ width; "
+                        "the L / U / Z shape is formed in a bending stage")
+            options.append(strip)
+    elif len(axes) >= 2:          # bends two ways (the third direction is the vertical corner of a tray / box)
+        h = bbox_mm["height"] - thickness
+        strip = opt("Tray / box blank (L + 2·H) × (W + 2·H)", bbox_mm["length"] + 2 * h, bbox_mm["width"] + 2 * h,
+                    "flanges on both sides folded up in bending stages; corners notched (relief)")
+        options.append(strip)
+    valid = [o for o in options if o["yield_pct"] <= 100.5] or options   # a blank smaller than the flat part is impossible
+    # the developed blank of the bends (straight strip, or tray / box blank) is the true one; the rectangle that keeps
+    # the formed width only has the same area by chance
+    best = strip if strip in valid else max(valid, key=lambda o: o["yield_pct"])
+    return {"length": best["length"], "width": best["width"], "method": best["name"], "options": options,
+            "chosen": best["name"], "flat_area_mm2": round(flat_area, 1), "bends": 1 if len(axes) == 1 else len(axes),
+            "bend_axes": len(axes)}
+
+
 def sheet_features(shape: cq.Shape, thickness: float) -> dict:
     """Holes and bend radii of a sheet-metal part.
 

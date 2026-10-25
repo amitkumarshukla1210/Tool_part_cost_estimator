@@ -587,6 +587,47 @@ Two more part types run through the same stages as injection moulding; pick the 
 All new rows are EXAMPLE values (machines EPS-1000/1400/1800 and ISBM-2C/4C/6C/8C, materials, aluminium 7075 / 6061, bases, BOM rules, cycle times, steam and resin rates for 9 countries, HS 3923). The country comparison and landed cost, the part cost and the project view work
 for them unchanged. The concept and simulation cards (opening direction, undercuts, wall and draft maps) are for plastic injection and die casting only.
 
+## Developed blank for the best material yield, and the simulation result in the design loop (roadmap stage 25)
+
+**Blank of a bent sheet-metal part.** The blank is worked out from the 3D model for the best material yield. Material
+yield = flat part area ÷ blank area; holes are added back, because they are punched out of the blank.
+
+| Part | Blank |
+|---|---|
+| Flat part | Its own length × width |
+| Bends all running the same way (L, U, Z, channel, angle bracket) | A **developed straight strip**: width = the part's size along the bend line, length = flat area ÷ width. The L / U shape is then formed in a **bending stage**, which the operations include. |
+| Bends both ways (tray / box) | (L + 2·H) × (W + 2·H), corners notched |
+
+Before, a bent part kept its formed width. For an L bracket 300 × 100 mm made from a 20 mm strip, that gave a 300 × 100
+blank at 26.5 % yield; the developed strip is 398 × 20 at about 100 % (gross weight then adds only the gap between blanks).
+
+**How the bend line is found:**
+- Rounded bends: coaxial cylinder pairs one thickness apart (hole walls are not bends).
+- Sharp-cornered models: where two sheet faces with different normals meet. A sheet face is one with a twin face one thickness away; edge and side faces don't count.
+
+The *Sheet-metal tools* block shows the options with their yield, the chosen one ticked. The gross weight, RM cost, nesting,
+strip layout and dies use the chosen blank, and the RM / tool cost asks for a recalculation when it changes. Other sizes can
+still be typed under RM inputs.
+
+**Base material of moulds and dies.** *Mould bases* now have a **plate material** (grade from Tool materials; C45 / S50C for
+the example bases, EN8 (080M40) added with an example price in every country) and a **make**. The traceability of the base
+shows the material, the base weight and the plate steel value (weight × steel rate); the steel grade drop-down changes it for
+this part. A base with no catalogue price (cost 0) is priced by weight: plate steel value × `base_make_factor` (Sizing rules,
+2.2 = machining, pillars, bushes, screws; EXAMPLE).
+
+**Tool BOM table on the part** is now a closed section (*Tool BOM table · optional*): grade, price and base are normally
+changed in the traceability window; the table and *+ New grade / + New standard part* are inside it.
+
+**Simulation result in the Design loop.** The Design loop card now shows the simulation result for the part:
+- **Plastic / die casting:** *Run simulation & show result* opens *Tool cost → Simulation & analysis* (wall, draft, sink and undercut maps, cycle time, clamp force, machine) and runs it.
+- **Sheet metal:** the forming result, from the Sheet-metal tools:
+  - the blank and its yield;
+  - every stage with its force and press;
+  - the formability checks (bend radius, holes, draw ratio, springback), as "No corrections required" or the list of corrections.
+
+**Put this result in the Design loop form** fills *Move to* (Simulation OK / Corrections required) and the comment when that move is
+allowed from the current status. Moving from *Simulation* to *Simulation OK* then records the result in the timeline.
+
 ## Correct any value from the traceability panel (roadmap stage 24)
 
 Click any value of a part's RM cost, tool cost or part cost: the **traceability** window opens. **⤢ Full screen** works there
@@ -892,7 +933,8 @@ All planned stages are built: Stages A–C, the rate library and MHR engine, the
 sheet-metal tools (9, 10), country comparison (11), monthly rate update (12), project leader view (13), harness & PCB
 (14–16), server mode (17), EPS and PET blow moulding (18, 19), backup and the Windows update kit (20), the corrections
 from use (21), logins with admin control and the supplier master (22), and sheet-metal dies stage-wise with the
-editable, learning tool BOM (23), and correcting any traced value for one part or for the future (24). The original requirement sets **A** sheet-metal tools, **B** tool / mould / die cost, **C** country
+editable, learning tool BOM (23), correcting any traced value for one part or for the future (24), and the developed blank with the simulation result in
+the design loop (25). The original requirement sets **A** sheet-metal tools, **B** tool / mould / die cost, **C** country
 rate library, **D** country comparison and **E** monthly rate update with approval are all covered.
 
 ### Ground rules for everything that follows

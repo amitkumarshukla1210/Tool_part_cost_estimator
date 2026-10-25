@@ -572,6 +572,14 @@ $("panelBody").addEventListener("click", async (e) => {
       status($("conceptStatus"), err.message, "error");
     }
   }
+  if (e.target.id === "loopSimRun") {
+    const btn = $("simRun");
+    if (!btn) return;
+    btn.closest("details").open = true;
+    btn.scrollIntoView({ block: "center" });
+    btn.click();
+    return;
+  }
   if (e.target.id === "simRun") {
     status($("simStatus"), "Analysing the 3D model…");
     try {
@@ -594,7 +602,7 @@ $("panelBody").addEventListener("click", async (e) => {
   }
   if (e.target.id === "simToLoop") {
     const sel = $("loopForm").elements.status;
-    if (![...sel.options].some((o) => o.value === e.target.dataset.status)) return status($("simStatus"), "That status is not an allowed next step from the current status.", "error");
+    if (![...sel.options].some((o) => o.value === e.target.dataset.status)) return status($("simStatus") || $("loopStatus"), "That status is not an allowed next step from the current status.", "error");
     sel.value = e.target.dataset.status;
     $("loopComment").value = e.target.dataset.comment || "Simulation OK, no corrections";
     $("loopForm").scrollIntoView({ block: "center" });
@@ -724,6 +732,11 @@ function sheetBlock(p) {
       <td>${o.press ? esc(o.press.machine_id || "none large enough") : ""}</td></tr>`).join("")}
     <tr class="total"><td></td><td>Total × safety ${fmt(s.safety_factor, 2)}</td><td class="calc num">${fmt(s.design_force_t, 1)}</td><td></td>
       <td>${pr ? esc(pr.machine_id ? `${pr.machine_id} (${fmt(pr.tonnage_t)} t)` : "none large enough") : ""}</td></tr></tbody></table></div>
+    ${s.blank?.options?.length ? `<h4>Blank (developed for the best material yield)</h4><div class="table-wrap"><table class="cost-table" data-nofilter>
+      <thead><tr><th>Option</th><th class="num">Blank L × W (mm)</th><th class="num">Material yield</th><th>How</th></tr></thead><tbody>
+      ${s.blank.options.map((o) => `<tr class="${o.name === s.blank.chosen ? "total" : ""}"><td>${o.name === s.blank.chosen ? "✔ " : ""}${esc(o.name)}</td>
+        <td class="num">${fmt(o.length, 1)} × ${fmt(o.width, 1)}</td><td class="num">${fmt(o.yield_pct, 1)} %</td><td>${esc(o.note)}</td></tr>`).join("")}</tbody></table></div>
+      <p class="note">The chosen blank is used for the gross weight, the RM cost, the nesting and the dies. Type other blank sizes under RM inputs if needed.</p>` : ""}
     ${s.problems.length ? `<h4>Formability</h4><ul>${s.problems.map((x) => `<li>${esc(x.message)}</li>`).join("")}</ul>` : '<p class="note">Formability checks passed.</p>'}
     ${layoutBlock(p)}
     <form id="sheetForm" class="card grid2">
@@ -909,9 +922,11 @@ function bomEditor(p, tr) {
         ${Object.keys(own).length ? '<button type="button" class="btn btn-outline small" data-bomreset title="Back to the suggestion">Reset</button>' : ""}
         <label class="check small" title="Use this grade and make for this element on every new tool (master data)"><input type="checkbox" data-bf="as_default" /> my default</label></td></tr>`;
   }).join("");
-  return `<h4 class="block-title">Tool BOM · grade, make, standard part, price</h4>
-    <p class="note">Suggested by the software: grade from Grade rules (or learned from your earlier parts), make from master data. Change any line and
-      click Save: the tool cost is recalculated and your choice is remembered for the next parts. Price each is in INR and replaces the calculated cost of the line.</p>
+  return `<details class="card add-insert tool-bom-table"><summary class="btn btn-outline small">Tool BOM table (grade, make, standard part, price) · optional</summary>
+    <p class="note">You normally do not need this table: click a value in the cost build-up and change the grade, price or base in the
+      <b>traceability</b> window. Here every BOM line can be changed at once: suggested grade from Grade rules (or learned from your
+      earlier parts), make from master data; Save recalculates the tool cost and remembers your choice for the next parts.
+      Price each is in INR and replaces the calculated cost of the line.</p>
     <datalist id="makeList">${ch.makes.map((m) => `<option value="${esc(m)}"></option>`).join("")}</datalist>
     <div class="table-wrap tall"><table class="cost-table bom-edit" id="bomTable"><thead><tr>${tr.dies ? "<th>Die</th>" : ""}<th>Element</th><th>Qty</th><th>Grade</th><th>Make</th>
       <th>Standard part (part no.)</th><th>Price each (INR)</th><th class="num">Line (${esc(cur)})</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
@@ -936,7 +951,8 @@ function bomEditor(p, tr) {
         <label>For BOM element <select name="element"><option value="">any bought-out line</option>${[...new Set(tr.lines.filter((l) => l.category === "bought_out" && !l.is_base).map((l) => l.element))].map((e) => `<option>${esc(e)}</option>`).join("")}</select></label>
         <label>Price each <input type="number" step="any" min="0" name="price" required /></label>
         <label>Country of the price <select name="country">${(rmMeta?.countries || []).map((c) => `<option value="${esc(c.code)}" ${c.code === (p.tool_country || p.effective_country) ? "selected" : ""}>${esc(c.name)} (${esc(c.currency)})</option>`).join("")}</select></label>
-        <div class="span2 dialog-actions"><button class="btn btn-primary small" type="submit">Save standard part</button></div></form></details>`;
+        <div class="span2 dialog-actions"><button class="btn btn-primary small" type="submit">Save standard part</button></div></form></details>
+    </details>`;
 }
 
 $("panelBody").addEventListener("click", async (e) => {
@@ -1098,6 +1114,36 @@ $("panelBody").addEventListener("click", async (e) => {
   }
 });
 
+// design loop: where the simulation result is, by part type (stage 25)
+function simResultBox(p) {
+  const pt = p.tool?.live?.part_type || (p.sheet ? "sheet_metal" : "");
+  if (pt === "plastic" || pt === "die_casting") {
+    return `<div class="card sim-result"><b>Simulation result</b> · wall, draft, sink, undercut maps, cycle time, clamp force and machine.
+      <button type="button" class="btn btn-outline small" id="loopSimRun">Run simulation &amp; show result</button>
+      <span class="note">It opens <i>Tool cost → Simulation &amp; analysis</i> below; from there <b>Put this result in the Design loop form</b>.</span></div>`;
+  }
+  const s = p.sheet;
+  if (!s) return "";
+  if (s.problem) return `<div class="card sim-result"><b>Forming simulation</b> · ${esc(s.problem)}</div>`;
+  const b = s.blank || {};
+  const chosen = (b.options || []).find((o) => o.name === b.chosen);
+  const presses = s.mode === "progressive" ? [s.press["all stations"]] : s.operations.map((o) => o.press);
+  const noPress = presses.some((x) => x && !x.machine_id);
+  const issues = s.problems.map((x) => x.message);
+  const comment = issues.join(" ");
+  return `<div class="card sim-result"><b>Forming simulation (sheet metal, analytical)</b> ·
+      <span class="badge ${issues.length ? "missing" : "status"}">${issues.length ? `${issues.length} correction(s) required` : "No corrections required"}</span>
+    <ul class="sim-list">
+      <li>Blank: <b>${esc(b.method || "")}</b> ${fmt(b.length, 1)} × ${fmt(b.width, 1)} mm${chosen ? ` · material yield <b>${fmt(chosen.yield_pct, 1)} %</b>` : ""}</li>
+      <li>Stages: ${s.operations.map((o) => `${esc(o.name)} ${fmt(o.force_t, 1)} t${o.press ? ` → ${esc(o.press.machine_id || "no press")}` : ""}`).join(" · ")}
+        ${s.mode === "progressive" ? ` · all stations ${fmt(s.design_force_t, 1)} t → ${esc(s.press["all stations"]?.machine_id || "no press")}` : ""}</li>
+      <li>Formability checks: ${issues.length ? issues.map(esc).join("; ") : "all passed (bend radius, hole size and distance, draw ratio, springback)"}${noPress ? " · <b>no press large enough</b>" : ""}</li>
+    </ul>
+    ${p.loop ? `<button type="button" class="btn btn-outline small" id="simToLoop" data-status="${issues.length ? "corrections_required" : "simulation_ok"}"
+      data-comment="${esc(comment)}">Put this result in the Design loop form</button>` : ""}
+    <span class="note">Details: <i>Sheet-metal tools</i> below (operations, forces, strip layout, blank DXF).</span></div>`;
+}
+
 // design loop: status flow, allowed moves, timeline
 function loopBlock(p) {
   const l = p.loop;
@@ -1105,6 +1151,7 @@ function loopBlock(p) {
   const name = (c) => l.flow.find((f) => f.code === c)?.name ?? c;
   return `<h3 class="block-title">Design loop</h3>
     <p>${l.flow.map((f) => `<span class="badge ${f.code === l.status ? "status" : ""}" title="${fmt(f.days, 1)} days">${esc(f.name)}</span>`).join(" → ")}</p>
+    ${simResultBox(p)}
     <form id="loopForm" class="card grid2">
       <label>Move to <select name="status">${l.next.map((c) => `<option value="${esc(c)}">${esc(name(c))}</option>`).join("")}${
         (l.back || []).filter((c) => !l.next.includes(c)).length ? `<optgroup label="Step back (comment needed)">${(l.back || []).filter((c) => !l.next.includes(c))
