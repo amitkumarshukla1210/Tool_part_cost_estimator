@@ -539,6 +539,8 @@ let timerM = null;
 let lastCavities = null;
 let lastStageC = null;
 let lastTool = null; // last tool cost result (its trace opens in the traceability panel)
+let toolSelections = {}; // grades and makes chosen instead of the recommended ones: {element: {material, make}}
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 let toolMeta = null;
 
 // A new part starts from its own Stage C cavities and no side actions.
@@ -568,7 +570,10 @@ async function startMould(stageC) {
     formM.elements.cavities.value = stageC.cavities_per_tool;
   }
   lastCavities = stageC.cavities_per_tool;
-  if (first) applyRegisteredTool();
+  if (first) {
+    toolSelections = {};
+    applyRegisteredTool();
+  }
   formM.elements.hot_runner.closest("label").hidden = type !== "plastic";
   formM.elements.lifters_per_cavity.closest("label").hidden = type !== "plastic";
   $("stageM").hidden = false;
@@ -598,6 +603,8 @@ function toolBody() {
     hot_runner: formM.elements.hot_runner.checked && m.part_type === "plastic",
     warranty: formM.elements.warranty.checked,
     tools_count: lastStageC?.tool_sets_over_programme || 1,
+    annual_volume: lastStageC?.inputs?.annual_volume || 0,
+    selections: toolSelections,
     country: formM.elements.tool_country.value || $("country").value,
     material: chosenMaterial()?.material ?? registered?.material ?? "",
   };
@@ -671,6 +678,25 @@ function showMould(r) {
     (r.capex_inr !== null && cur !== "INR" ? row("Tool CAPEX in INR", "CAPEX × forex", "capex:inr") : "");
 
   const CATEGORY = { made: "Made", bought_out: "Bought-out", process: "Process" };
+  const choice = (l) => {
+    if (l.recommended_material) {
+      const byType = {};
+      for (const m of r.choices.materials) (byType[m.type || "Other"] ||= []).push(m);
+      const opts = Object.entries(byType).map(([type, list]) => `<optgroup label="${esc(type)}">` +
+        list.map((m) => `<option value="${esc(m.code)}" ${m.code === l.material ? "selected" : ""}>` +
+          `${m.code === l.recommended_material ? "★ " : ""}${esc(m.code)}</option>`).join("") + "</optgroup>").join("");
+      return `<select class="grade-pick" data-element="${esc(l.element)}" data-kind="material" title="${esc(
+        "Recommended: " + l.recommended_material + " — " + l.material_reason)}">${opts}</select>` +
+        (l.material_chosen ? `<div class="note">recommended ★ ${esc(l.recommended_material)}</div>` : "");
+    }
+    if (l.recommended_make) {
+      const opts = (r.choices.makes[l.element] || []).map((m) => `<option value="${esc(m.make)}" ${m.make === l.make ? "selected" : ""}>` +
+        `${m.recommended ? "★ " : ""}${esc(m.make)}${m.catalogue_ref ? " · " + esc(m.catalogue_ref) : ""}</option>`).join("");
+      return `<select class="grade-pick" data-element="${esc(l.element)}" data-kind="make">${opts}</select>` +
+        (l.make_chosen ? `<div class="note">recommended ★ ${esc(l.recommended_make)}</div>` : "");
+    }
+    return l.material || "";
+  };
   const cell = (v, node) => (v ? tv(node, money(v)) : "");
   $("m-bom").innerHTML = r.lines
     .map((l) => {
@@ -678,7 +704,7 @@ function showMould(r) {
         : l.amount ? tv(l.nodes.amount, `${fmt(l.amount, 2)} ${n[l.nodes.amount]?.unit || ""} each`) : "";
       return `<tr><td>${l.element}${l.is_example ? '<span class="example-mark" title="Example value">•</span>' : ""}</td>` +
         `<td>${CATEGORY[l.category] ?? l.category}</td>` +
-        `<td class="calc num">${tv(l.nodes.qty, fmt(l.quantity, l.quantity % 1 ? 2 : 0))}</td><td>${l.material || ""}</td>` +
+        `<td class="calc num">${tv(l.nodes.qty, fmt(l.quantity, l.quantity % 1 ? 2 : 0))}</td><td>${choice(l)}</td>` +
         `<td class="calc num">${cell(l.material_cost, l.nodes.mat)}</td><td class="calc num">${cell(l.bought_out_cost, l.nodes.bo)}</td>` +
         `<td>${l.process || ""}</td><td class="calc num">${work}</td>` +
         `<td class="calc num">${cell(l.process_cost, l.nodes.proc)}</td>` +
@@ -696,6 +722,20 @@ function showMould(r) {
     `<td class="num">${money(r.lines.reduce((a, l) => a + l.total, 0))}</td></tr>`;
   $("m-warnings").textContent = r.warnings.join(" ");
 }
+
+// A grade or make picked in the BOM table: cost it at once (the recommendation stays marked ★).
+$("m-bom").addEventListener("change", (e) => {
+  const sel = e.target.closest(".grade-pick");
+  if (!sel || !lastTool) return;
+  const line = lastTool.lines.find((l) => l.element === sel.dataset.element);
+  const rec = sel.dataset.kind === "material" ? line?.recommended_material : line?.recommended_make;
+  const pick = { ...(toolSelections[sel.dataset.element] || {}) };
+  if (sel.value === rec) delete pick[sel.dataset.kind];
+  else pick[sel.dataset.kind] = sel.value;
+  if (Object.keys(pick).length) toolSelections[sel.dataset.element] = pick;
+  else delete toolSelections[sel.dataset.element];
+  calculateMould();
+});
 
 $("stageM").addEventListener("click", (e) => {
   const b = e.target.closest("[data-node]");
@@ -724,6 +764,7 @@ $("toolPdf").addEventListener("click", () => downloadTool("pdf"));
 function applyRegisteredTool() {
   if (!registered) return;
   const t = registered.tool_inputs || {};
+  toolSelections = { ...(t.selections || {}) };
   for (const [k, v] of Object.entries(t)) {
     const el = formM.elements[k];
     if (!el) continue;
@@ -742,5 +783,6 @@ function toolInputsToSave() {
   for (const k of ["slides_per_cavity", "lifters_per_cavity", "inserts_per_cavity"]) {
     if (Number(formM.elements[k].value || 0)) out[k] = Number(formM.elements[k].value);
   }
+  if (lastTool && Object.keys(lastTool.selections).length) out.selections = lastTool.selections;
   return out;
 }

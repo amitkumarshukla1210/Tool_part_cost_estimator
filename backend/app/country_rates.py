@@ -15,6 +15,8 @@ Library categories (item = material / steel / process name, country = the produc
     process_hour               machining / toolroom processes, per hour
     process_unit               heat treatment per kg, wire cut per cm², polishing per cm², painting per m², ...
     process_min_charge         minimum charge per job for a process rate by unit
+    standard_part              standard parts per piece, item = "<BOM element> · <make>" (Mould & die database →
+                               Standard parts); proposed for other countries at the same price ÷ forex
 
 Nothing is overwritten: a proposal is only made where a country has no version of that rate at all.
 """
@@ -34,6 +36,7 @@ GROUPS = {
     "process_hour": ("Processes charged per hour", "process_index"),
     "process_unit": ("Processes charged per unit (kg, cm², m², …)", "process_index"),
     "process_min_charge": ("Minimum charge per job", "process_index"),
+    "standard_part": ("Standard parts by make (per piece)", None),
 }
 SEED_SOURCE = "Moved from Master data in Stage 3"
 SIGNIFICANT_DIGITS = 3
@@ -69,6 +72,10 @@ def sync_base(month: str | None = None, approver: str = "") -> int:
         if r["min_charge"]:
             wanted.append(("process_min_charge", r["code"], r["min_charge"], f"{cur}/job", r["is_example"],
                            "Process rates by unit"))
+    for r in db["standard_parts"]:
+        if r["india_price"]:
+            wanted.append(("standard_part", standard_part_item(r["element"], r["make"]), r["india_price"], f"{cur}/pc",
+                           r["is_example"], "Standard parts"))
     made = 0
     with closing(rates._connect()) as con:
         todo = [w for w in wanted if not _exists(con, w[0], w[1], base)]
@@ -78,6 +85,11 @@ def sync_base(month: str | None = None, approver: str = "") -> int:
                       "comment": "", "is_example": example}, approve=True, origin="seed", approver=approver or "Example seed")
         made += 1
     return made
+
+
+def standard_part_item(element: str, make: str) -> str:
+    """Library item of a standard part of one make."""
+    return f"{element} · {make}"
 
 
 def _round(value: float) -> float:
@@ -113,13 +125,14 @@ def propose(month: str | None = None, approve: bool = False, approver: str = "",
             with closing(rates._connect()) as con:
                 if _exists(con, row["category"], row["item"], c["code"]):
                     continue
-            factor = index[c["code"]][GROUPS[row["category"]][1]]
+            index_key = GROUPS[row["category"]][1]
+            factor = index[c["code"]][index_key] if index_key else 1
             unit = a["unit"].replace(base["currency"], c["currency"], 1) if a["unit"].startswith(base["currency"]) else a["unit"]
             rates.create({
                 "category": row["category"], "item": row["item"], "country": c["code"],
                 "value": _round(a["value"] * factor / inr_per_unit), "unit": unit, "currency": c["currency"],
                 "month": month, "is_example": True,
-                "source": f"Proposed: {base['code']} rate × {GROUPS[row['category']][1].replace('_', ' ')} {factor} ÷ forex",
+                "source": f"Proposed: {base['code']} rate × {(index_key or 'same price').replace('_', ' ')} {factor} ÷ forex",
                 "comment": f"{base['code']} {a['value']} {a['unit']} ({a['month']}) × {factor} ÷ {inr_per_unit} INR per {c['currency']}. "
                            "EXAMPLE: replace with a supplier quote or market rate.",
             }, approve=approve, origin=origin, approver=approver)

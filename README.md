@@ -620,6 +620,44 @@ Master data: **Part register setup → Part library** (price per piece or per me
 operators); new EXAMPLE machines (cut-and-strip, crimp press, SMT line, test bench) and rates for 9 countries. **A part that is not in the library is listed as "not priced" and
 counts as 0** until you add it: nothing is guessed. Distributor price APIs (Octopart, Mouser, Digi-Key) are not used. A wire line's length is the total length of its wires.
 
+## Price master, grades and makes (roadmap stage 20)
+
+**Master data → Price master** (`/master-data/prices`) holds the month-wise prices of everything the tool and part costs buy,
+per country, as an item × month grid (24 months by default, plus next month to enter new prices):
+
+| Group | Master list (type · grade) | Library category |
+|---|---|---|
+| Tool materials (per kg) | Mould & die database → Tool materials: **material type** (pre-hardened mould steel, hot-work, cold-work, stainless, copper alloy, aluminium, plate steel) and grade (P20, 2738, NAK80, S136, 1.2316, H13, 1.2343 ESR, D2, SKD11, **Beryllium copper C17200 / C17510**, BeCu, aluminium 7075 / 6061, C45, 4140) | `tool_material` |
+| Standard parts (per piece) | Mould & die database → **Makes** (HASCO, MISUMI, DME, Meusburger, Futaba, YUDO, Synventive, local) and **Standard parts**: which makes each bought-out BOM element (guide pillar, guide bush, ejector pin, sprue bush, locating ring, hot runner, ...) is offered in, the recommended make, catalogue reference and a size factor rule | `standard_part`, item `<element> · <make>` |
+| Part raw materials (per kg) and their scrap value | Master data → Materials: **material type** and grade, one grade per type marked **recommended** | `material`, `material_scrap` |
+
+- **Edit a price**: type it under a month. It is saved as a new version from that month on (approved at once with *Save & approve*,
+  else a draft for Rates → Rate review). Old versions are never changed; stored costs change only when you recalculate.
+- **Next month**: type in the last column (or download the grid, fill in a month, upload it: only changed cells become versions).
+- **New grade or make**: *+ Add a new grade* (tool material or part material, with density and type) or *+ Add a make to a standard
+  part*, with its first price. It is added to the master list and at once offered in the drop-downs of the tool and part cost.
+- **History**: every country has 24 months (2024-11 … 2026-10) of **EXAMPLE** values: the 2026-10 value × an illustrative trend,
+  not market data. Replace them with your purchase records (the grid shades EXAMPLE values). `python -m backend.app.price_master
+  seed-history [month]` fills missing months again and never touches a month that has a version.
+
+**Recommended and chosen grades / makes in the tool cost.** Every steel part of the mould or die BOM gets a **recommended grade**
+(★): the first **Grade rule** of that BOM element that applies (Mould & die database → Grade rules, e.g. *annual volume ≥ 0.5 M →
+H13*, *small low-volume mould → P20*), else the element's own material. Every standard part with makes gets the recommended make
+(★ in Standard parts, e.g. HASCO). In the **Tool BOM** table of the Estimate page and under *Tool features → Grades and makes* on the
+part panel you pick another grade or make from the master list, e.g. P20 → D2, D2 → 2738, 2738 → Beryllium copper, guide pillar
+HASCO → MISUMI. The line is re-costed with that grade's density and price (or that make's price × size factor) of the tool country
+and costing month; the trace says "your choice (recommended …)". *Save to part* / *Save and calculate* stores only the choices that
+differ from the recommendation (`tool_inputs.selections`), so a part follows a changed recommendation for the rest. A choice that is
+later removed from the master list falls back to the recommendation with a warning. The Excel and PDF tool cost sheets list the
+make, the recommendation and whose choice it is.
+
+**Part raw material.** The part panel shows the recommended grade of the material's type (Materials → *recommended*) next to the
+material drop-down, with **Use it**; the drop-down still offers every grade.
+
+API: `GET /api/price-master/meta`, `GET /api/price-master/grid?group=&country=&months=`, `POST /api/price-master/price`
+(`group, item, country, month, value, approve`), `POST /api/price-master/item` (new grade / make with its price),
+`GET /api/price-master/export.xlsx`, `POST /api/price-master/upload`. `POST /api/tool-cost` takes `selections` and `annual_volume`.
+
 ## Rates page: country rate library, MHR & labour rates
 
 Open **Rates** in the header. Pick the **producing country** and the **costing month**.
@@ -748,7 +786,8 @@ would use the example data inside the app folder.
 Every planned stage is built and merged: Stages A–C, the rate library and MHR engine, the part register (stages 1 and 1b),
 RM cost (2), rates by country (3), tool cost (4, 4b), mould concept (5), simulation (6), design loop (7), part cost (8),
 sheet-metal tools (9, 10), country comparison and landed cost (11), monthly rate update (12), project leader view (13),
-harness & PCB (14–16), server mode (17), EPS and PET blow moulding (18, 19), and the Windows update kit.
+harness & PCB (14–16), server mode (17), EPS and PET blow moulding (18, 19), the Windows update kit, and the price master with
+recommended / chosen grades and makes (20).
 The five requirement sets of `docs/ROADMAP_PROMPT.txt` (**A** sheet-metal tools, **B** tool / mould / die cost, **C** country
 rate library, **D** country comparison, **E** monthly rate update with approval) are all covered. Not built yet: tool cost of
 sheet-metal dies and foundry patterns, and the items marked *External* in [ROADMAP.md](ROADMAP.md).
@@ -875,6 +914,7 @@ backend/app/master_data.py    Reads, checks and saves master_data.xlsx
 backend/app/mould_db.py       Mould & die tables in the costing database
 backend/app/mould.py          Mould sizing (layout, insert, base) from the database
 backend/app/example_values.py Replace example values checklist: counts by category, replace / keep rates and rows
+backend/app/price_master.py   Price master: month-wise price grid by country, new grades / makes, Excel, EXAMPLE history
 backend/app/tool_cost.py      Tool cost engine: BOM, process-wise cost with MHR + labour, try-out, overhead, profit, ... fully traced
 backend/app/formula.py        Safe evaluation of the BOM rules and cost formulas
 backend/app/costing_db.py     The shared SQLite file (costing_db.sqlite)
@@ -897,6 +937,7 @@ frontend/app.js               Estimator logic and three.js viewer
 frontend/master-data.*        Master data page (editor for both data sets)
 frontend/help.*               Help page
 frontend/examples.*           Replace example values checklist (Master data)
+frontend/prices.*             Price master (Master data): month-wise prices, new grades and makes
 frontend/rates.*              Rates page (MHR & labour, rate library, rate review)
 frontend/dashboard.*          Project dashboard
 frontend/parts.*              Part register (search, part details, revisions, history)

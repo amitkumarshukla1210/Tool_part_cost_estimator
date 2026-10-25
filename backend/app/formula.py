@@ -44,6 +44,7 @@ VARIABLE_HELP = {
     "density": "Density of the row's material (g/cm³), for weight rules",
     "part_volume_cm3": "Volume of one part (cm³), from the 3D file",
     "part_surface_cm2": "Surface area of one part (cm²), from the 3D file: the moulding surface of core + cavity",
+    "annual_volume": "Annual volume of the part (parts/yr); 0 when it is not known",
     "part_box_cm3": "Bounding box of one part = part_l × part_w × part_h ÷ 1000 (cm³): basis of the steel removed per cavity",
 }
 # The rules may also use the names in Mould & die database → Process time parameters of the part type

@@ -351,7 +351,7 @@
           <div class="table-wrap">
             <table class="cost-table">
               <thead>
-                <tr><th>Element</th><th>Category</th><th class="num">Qty</th><th>Steel</th>
+                <tr><th>Element</th><th>Category</th><th class="num">Qty</th><th>Grade / make <span class="note">(★ recommended)</span></th>
                   <th class="num">Steel cost</th><th class="num">Bought-out</th><th>Process</th><th class="num">Hours / amount</th>
                   <th class="num">Process cost</th><th class="num">Line total</th></tr>
               </thead>
@@ -359,6 +359,9 @@
               <tfoot id="m-total"></tfoot>
             </table>
           </div>
+          <p class="note">Grade / make: the engine recommends a tool material for every steel part (Master data → Grade rules,
+            else the BOM element's material) and a make for every standard part (Standard parts). Pick another one from the
+            drop-down to cost it; <b>Save to part</b> keeps your choice. Prices: <a class="link" href="/master-data/prices">Price master</a>.</p>
           <p class="note">• = still an EXAMPLE value in master data. Hours are priced at MHR + operators × labour rate of the tool
             country; per-unit processes (cutting, heat treatment, nitriding, …) at their rate per kg / cm², at least the minimum
             charge per job.</p>

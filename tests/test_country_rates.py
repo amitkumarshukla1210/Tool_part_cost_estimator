@@ -98,6 +98,6 @@ def test_rm_cost_now_works_for_another_country():
 
 def test_api_grid_and_propose():
     body = client.get(f"/api/rates/grid?as_of={MONTH}").json()
-    assert body["base"] == "IN" and len(body["groups"]) == 6
+    assert body["base"] == "IN" and len(body["groups"]) == 7
     r = client.post("/api/rates/propose-from-index", json={"month": MONTH})
     assert r.status_code == 200 and r.json()["created"] == 0

@@ -293,11 +293,11 @@ def to_excel() -> bytes:
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = HEADER_FILL
-    for r in rows:
+    for i, r in enumerate(rows, start=2):
         ws.append(["yes" if r[k] is True else "no" if r[k] is False else r[k] for k in keys])
         if r["is_example"]:
-            for cell in ws[ws.max_row]:
-                cell.fill = EXAMPLE_FILL
+            for j in range(1, len(keys) + 1):  # ws.cell is direct; ws[i] scans the whole sheet for its width
+                ws.cell(row=i, column=j).fill = EXAMPLE_FILL
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
     buf = io.BytesIO()

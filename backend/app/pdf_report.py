@@ -160,6 +160,15 @@ def rm_cost_pdf(part: dict, tr: dict) -> bytes:
     return buf.getvalue()
 
 
+def _grade(l: dict) -> str:
+    """Grade of a steel line or make of a standard part, and whether it is the recommended one (Helvetica has no ★)."""
+    for kind in ("material", "make"):
+        rec = l.get(f"recommended_{kind}")
+        if rec:
+            return f"{l[kind]} (recommended)" if not l.get(f"{kind}_chosen") else f"{l[kind]} (your choice; recommended {rec})"
+    return l["material"]
+
+
 def tool_cost_pdf(tr: dict, part: dict | None = None) -> bytes:
     """Tool cost sheet of one mould / die: result, cost build-up, BOM & processes, steps, inputs with sources, rates."""
     from .tool_cost import examples
@@ -206,11 +215,11 @@ def tool_cost_pdf(tr: dict, part: dict | None = None) -> bytes:
               _table([["Step", "Formula", "Value", "Unit"]] + build, theme, [70 * mm, 110 * mm, 30 * mm, 25 * mm],
                      [1 + len(tr["groups"]) + i for i, s in enumerate(tr["steps"]) if s["is_result"]])]
     bom = [[wrap(l["element"] + (" •" if l["is_example"] else "")), l["category"].replace("_", " "), num(l["quantity"]),
-            wrap(l["material"]), num(l["material_cost"]) if l["material_cost"] else "", num(l["bought_out_cost"]) if l["bought_out_cost"] else "",
+            wrap(_grade(l)), num(l["material_cost"]) if l["material_cost"] else "", num(l["bought_out_cost"]) if l["bought_out_cost"] else "",
             wrap(l["process"]), num(l["hours"]) if l["hours"] else (num(l["amount"]) if l["amount"] else ""),
             num(l["process_cost"]) if l["process_cost"] else "", num(l["total"])] for l in tr["lines"]]
     story += [Paragraph(f"BOM & processes ({cur}; • = EXAMPLE master-data row)", h2), _table(
-        [["Element", "Category", "Qty", "Steel", "Steel cost", "Bought-out", "Process", "Hours / amount", "Process cost",
+        [["Element", "Category", "Qty", "Grade / make", "Steel cost", "Bought-out", "Process", "Hours / amount", "Process cost",
           "Line total"]] + bom, theme, [52 * mm, 20 * mm, 14 * mm, 28 * mm, 22 * mm, 22 * mm, 38 * mm, 22 * mm, 22 * mm, 24 * mm])]
     steps = [[wrap(n["label"]), wrap(n["formula"]), num(n["value"]), n["unit"]] for n in nodes.values() if n["kind"] == "calculated"]
     story += [Paragraph("Every step and formula", h2), _table([["Step", "Formula", "Value", "Unit"]] + steps, theme,

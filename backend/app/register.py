@@ -635,7 +635,22 @@ def part_detail(part_id: int, with_rm: bool = True) -> dict:
         out["effective_country"] = (out["country"] or register_setup.settings()["default_country"]).upper()
         out["tool"] = tool_summary(out)
         out["effective_tool_country"] = (out["tool_country"] or out["effective_country"]).upper()
+        out["material_recommendation"] = material_recommendation(out)
     return out
+
+
+def material_recommendation(p: dict) -> dict | None:
+    """The recommended grade of the part material's type (Master data → Materials), shown next to the material."""
+    if p["is_assembly"] or not p["material"]:
+        return None
+    proc = register_setup.processes().get(p["process"])
+    types = [proc["part_type"]] if proc else [r["part_type"] for r in master_data.tables()["Materials"]
+                                                if r["material"] == p["material"]]
+    for pt in types:
+        rec = master_data.recommended_material(pt, p["material"])
+        if rec:
+            return rec | {"part_type": pt, "is_recommended": rec["material"] == p["material"]}
+    return None
 
 
 def revision_trace(part_id: int, rev_id: int | None = None) -> dict:
@@ -1223,7 +1238,8 @@ TOOL_COLUMNS = ("id", "part_id", "version", "revision_id", "rev", "part_type", "
                 "reason", "created_by", "created_at")
 TOOL_INPUTS = {"cavities": "Cavities per tool", "hot_runner": "Hot runner", "slides_per_cavity": "Slides per cavity",
                "lifters_per_cavity": "Lifters per cavity", "inserts_per_cavity": "Small inserts per cavity",
-               "warranty": "Warranty / spares included"}
+               "warranty": "Warranty / spares included",
+               "selections": "Grades and makes chosen instead of the recommended ones"}
 TOOL_FLAGS = ("hot_runner", "warranty")
 
 
@@ -1471,6 +1487,19 @@ def _tool_inputs(v, where):
         if k in TOOL_FLAGS:
             out[k] = val is True or str(val).strip().lower() in ("1", "true", "yes", "on")
             continue
+        if k == "selections":
+            if not isinstance(val, dict):
+                raise RegisterError(f"{where}: selections must be {{element: {{material, make}}}}.")
+            picks = {}
+            for element, pick in val.items():
+                if not isinstance(pick, dict) or set(pick) - {"material", "make"}:
+                    raise RegisterError(f"{where}: the choice for '{element}' may only set material and make.")
+                pick = {a: str(b).strip() for a, b in pick.items() if str(b or "").strip()}
+                if pick:
+                    picks[str(element)] = pick
+            if picks:
+                out[k] = picks
+            continue
         n = _num(val, f"{where}: {TOOL_INPUTS[k].lower()}", int, required=True)
         if n < (1 if k == "cavities" else 0) or n > 256:
             raise RegisterError(f"{where}: {TOOL_INPUTS[k].lower()} must be between {1 if k == 'cavities' else 0} and 256.")
@@ -1519,7 +1548,8 @@ def _tool_master_hash(part_type: str) -> str:
                      if r["scope"] in costing_setup.TOOL_SCOPES + ("mhr", "labour")],
         "machines": setup["machines"], "grades": setup["labour_grades"],
         "mould": {k: [r for r in mdb[k] if r.get("part_type", part_type) == part_type]
-                  for k in ("mould_bases", "bom_elements", "sizing_rules", "time_parameters", "tool_processes", "tool_materials")},
+                  for k in ("mould_bases", "bom_elements", "sizing_rules", "time_parameters", "tool_processes", "tool_materials",
+                            "grade_rules", "makes", "standard_parts")},
         "parameters": master_data.parameters(part_type),
     }
     return hashlib.sha1(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()[:12]
@@ -1566,7 +1596,8 @@ def _tool_compute(part_id: int, country: str | None = None) -> dict:
         slides_per_cavity=typed.get("slides_per_cavity", 0),
         lifters_per_cavity=typed.get("lifters_per_cavity", 0) if part_type == "plastic" else 0,
         inserts_per_cavity=typed.get("inserts_per_cavity", 0), warranty=typed.get("warranty", True),
-        tools_count=cap["tool_sets_over_programme"], country=country, as_of=as_of, material=d["material"])
+        tools_count=cap["tool_sets_over_programme"], country=country, as_of=as_of, material=d["material"],
+        annual_volume=cap["inputs"]["annual_volume"], selections=typed.get("selections") or {})
     stage_c = (f"Stage C for {cap['inputs']['annual_volume']:,} parts/yr ({volume_note}), cycle "
                f"{cap['inputs']['cycle_time_s']:g} s, OEE {cap['inputs']['oee_pct']:g} %, "
                f"{cap['inputs']['programme_years']} programme years")
@@ -1585,6 +1616,7 @@ def _tool_compute(part_id: int, country: str | None = None) -> dict:
     for k in ("hot_runner", "slides_per_cavity", "lifters_per_cavity", "inserts_per_cavity"):
         sources[k] = you if k in typed else {"type": "register", "note": "Default (none); set it under Tool features"}
     sources["warranty_on"] = you if "warranty" in typed else {"type": "register", "note": "Default: included"}
+    sources["annual_volume"] = {"type": "register", "note": stage_c}
     r = tool_cost.run(inp, sources)
     r["key"] = {"revision_id": rev["id"], "part_type": part_type, "material": d["material"], "country": country,
                 "as_of": as_of, "inputs": typed, "cavities": inp.cavities, "tools_count": inp.tools_count,
@@ -1868,10 +1900,13 @@ def tool_cost_excel(tr: dict, part: dict | None = None) -> bytes:
           [[nodes[s["node"]]["label"], nodes[s["node"]]["formula"], v(s["node"]), nodes[s["node"]]["unit"]] for s in tr["steps"]])
     sheet("BOM & processes", ["Element", "Category", "Qty", "Material", "Steel weight each (kg)", f"Steel ({cur})",
                               f"Bought-out ({cur})", "Process", "Priced by", "Hours", "Amount", f"Process ({cur})",
-                              f"Line total ({cur})", ""],
+                              f"Line total ({cur})", "", "Make", "Recommended grade / make", "Choice"],
           [[l["element"], l["category"], l["quantity"], l["material"], l["weight_each_kg"], l["material_cost"],
             l["bought_out_cost"], l["process"], l["pricing"].replace("_", " "), l["hours"], l["amount"], l["process_cost"],
-            l["total"], "EXAMPLE" if l["is_example"] else ""] for l in tr["lines"]])
+            l["total"], "EXAMPLE" if l["is_example"] else "", l.get("make", ""),
+            l.get("recommended_material") or l.get("recommended_make") or "",
+            ("yours" if l.get("material_chosen") or l.get("make_chosen") else "recommended")
+            if l.get("recommended_material") or l.get("recommended_make") else ""] for l in tr["lines"]])
     sheet("Steps", ["Step", "Formula", "Value", "Unit"],
           [[n["label"], n["formula"], n["value"], n["unit"]] for n in nodes.values() if n["kind"] == "calculated"])
     sheet("Inputs", ["Input", "Value", "Unit", "Comes from", ""],

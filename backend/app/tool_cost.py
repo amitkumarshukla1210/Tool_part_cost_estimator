@@ -12,7 +12,12 @@
 No number and no formula is written here: rules, rates, machines and formulas all come from master data or the
 rate library (latest APPROVED version up to the costing month, in the tool country). The MHR and labour rate are
 the rate engine's own traces, so every hour opens to depreciation, power, labour and the rest. Catalogue prices
-(mould bases, standard parts) are kept in INR in master data and converted with that month's forex.
+(mould bases, standard parts without makes) are kept in INR in master data and converted with that month's forex.
+
+Grades and makes: each made BOM element gets a RECOMMENDED tool material (the first Grade rule of the element that
+applies, else the element's own material) and each bought-out element with rows in Standard parts a recommended make.
+`selections` ({element: {"material": grade, "make": make}}) replaces them with your choice from the master lists; the
+price of a make is the library rate "standard_part / <element> · <make>" of the tool country × the row's size factor.
 
 A missing rate does not stop the calculation: it is shown as missing (value 0) and the result is marked as not priced.
 """
@@ -49,6 +54,7 @@ FEATURE_VARS = {
     "slides_per_cavity": ("Slides per cavity", "pcs"),
     "lifters_per_cavity": ("Lifters per cavity", "pcs"),
     "inserts_per_cavity": ("Small inserts per cavity", "pcs"),
+    "annual_volume": ("Annual volume of the part", "parts/yr"),
 }
 SUM_CHUNK = 30  # terms per sum formula (formulas are limited to 500 characters)
 
@@ -65,6 +71,8 @@ class ToolInput(mould.MouldInput):
     part_surface_cm2: float = Field(0, ge=0)
     warranty: bool = True
     tools_count: int = Field(1, ge=1, le=1000)
+    annual_volume: float = Field(0, ge=0)
+    selections: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 def default_country() -> str:
@@ -89,6 +97,7 @@ class _Run:
         self.machines = {m["machine_id"]: m for m in self.setup["machines"]}
         self.processes = {p["code"]: p for p in self.db["tool_processes"]}
         self.cache: dict = {}
+        self.warnings: list[str] = []
 
     # ---------- inputs ----------
 
@@ -292,6 +301,38 @@ class _Run:
         self.trace.compute(nid, label, " + ".join(names), unit, money=money, names=names, description=description)
         return nid
 
+    # ---------- recommended and chosen grades / makes ----------
+
+    def recommend_grade(self, el: dict) -> dict:
+        """The first Grade rule of the element that applies, else the element's own material."""
+        rules = sorted((r for r in self.db["grade_rules"] if r["part_type"] == self.inp.part_type
+                        and r["element"] == el["element"]), key=lambda r: r["step"])
+        for r in rules:
+            try:
+                env = {n: self.trace.value(self.var(n)) for n in formula.names(r["condition"])}
+                hit = formula.evaluate(r["condition"], env)
+            except formula.FormulaError as exc:
+                raise ToolCostError(f"Grade rules ({el['element']}, order {r['step']}): {exc}") from None
+            if hit:
+                return {"code": r["material_code"], "reason": r["reason"] or f"Grade rule: {r['condition']}",
+                        "sheet": "Grade rules", "row": f"{el['element']} / {r['step']:g}", "is_example": r["is_example"]}
+        return {"code": el["material_code"], "reason": "Default material of the BOM element", "sheet": "BOM elements",
+                "row": el["element"], "is_example": el["is_example"]}
+
+    def chosen(self, element: str, kind: str, recommended: str, allowed, list_name: str) -> str:
+        """Your choice for the element when it is in the master list, else the recommended one (with a warning)."""
+        pick = ((self.inp.selections or {}).get(element) or {}).get(kind) or ""
+        if not pick or pick == recommended:
+            return recommended
+        if pick not in allowed:
+            self.warnings.append(f"{element}: your {kind} '{pick}' is no longer in {list_name}; "
+                                 f"the recommended '{recommended}' is used.")
+            return recommended
+        return pick
+
+    def makes_of(self, element: str) -> list[dict]:
+        return [r for r in self.db["standard_parts"] if r["element"] == element]
+
     # ---------- the calculation ----------
 
     def bom(self) -> list[dict]:
@@ -325,19 +366,49 @@ class _Run:
                     "is_example": bool(el["is_example"]), "nodes": {"qty": q}}
             parts = []
             density = None
-            mat = materials.get(el["material_code"])
+            mat = None
+            if el["material_code"]:
+                rec = self.recommend_grade(el)
+                code = self.chosen(name, "material", rec["code"], materials, "Tool materials")
+                mat = materials.get(code)
+                line |= {"material": code, "recommended_material": rec["code"], "material_reason": rec["reason"],
+                         "material_chosen": code != rec["code"]}
+                if not mat:
+                    raise ToolCostError(f"BOM element '{name}': grade '{code}' is not in Tool materials.")
             if mat:
                 density = self.master(f"den:{mat['code']}", f"Density of {mat['code']}", mat["density_g_cm3"], "g/cm³",
                                       "Mould & die database → Tool materials", mat["code"], mat["is_example"])
                 line["weight_each_kg"] = self.rule(f"{tag}:wt", f"{name} · weight each", el["weight_rule"], "kg", name,
                                                    "weight_rule", density)
                 steel = self.rate(f"steel:{mat['code']}", f"Steel rate · {mat['code']}", "tool_material", mat["code"])
+                why = (f"Grade {mat['code']}: your choice (recommended {line['recommended_material']}: "
+                       f"{line['material_reason']})." if line["material_chosen"]
+                       else f"Grade {mat['code']}: recommended ({line['material_reason']}; {rec['sheet']} → {rec['row']}).")
                 line["material_cost"] = t.compute(f"{tag}:mat", f"{name} · steel", "qty * weight * rate", cur, money=True,
-                                                  names={"qty": q, "weight": f"{tag}:wt", "rate": steel})
+                                                  names={"qty": q, "weight": f"{tag}:wt", "rate": steel}, description=why)
                 t.compute(f"{tag}:kg", f"{name} · steel weight", "qty * weight", "kg", names={"qty": q, "weight": f"{tag}:wt"})
                 line["nodes"] |= {"mat": f"{tag}:mat", "made_kg": f"{tag}:kg"}
                 parts.append(f"{tag}:mat")
-            if el["unit_cost_rule"] not in ("", "0"):
+            makes = self.makes_of(name) if el["category"] == "bought_out" else []
+            if makes:
+                rec_row = next((r for r in makes if r["recommended"]), makes[0])
+                make = self.chosen(name, "make", rec_row["make"], {r["make"] for r in makes}, f"Standard parts ({name})")
+                row = next(r for r in makes if r["make"] == make)
+                line |= {"make": make, "recommended_make": rec_row["make"], "make_chosen": make != rec_row["make"],
+                         "catalogue_ref": row["catalogue_ref"]}
+                price = self.rate(f"sp:{name}:{make}", f"Price each · {name} · {make}", "standard_part", f"{name} · {make}")
+                self.rule(f"{tag}:size", f"{name} · size factor", row["size_rule"] or "1", "", name, "size_rule")
+                t.nodes[f"{tag}:size"]["description"] = f"Size factor rule of Standard parts → {name} · {make}"
+                t.compute(f"{tag}:each", f"{name} · price each ({make})", "price * size", cur, money=True,
+                          names={"price": price, "size": f"{tag}:size"},
+                          description=(f"Make {make}: your choice (recommended {rec_row['make']})." if line["make_chosen"]
+                                       else f"Make {make}: recommended (Standard parts).")
+                          + (f" Catalogue {row['catalogue_ref']}." if row["catalogue_ref"] else ""))
+                line["bought_out_cost"] = t.compute(f"{tag}:bo", f"{name} · bought-out", "qty * each", cur, money=True,
+                                                    names={"qty": q, "each": f"{tag}:each"})
+                line["nodes"]["bo"] = f"{tag}:bo"
+                parts.append(f"{tag}:bo")
+            elif el["unit_cost_rule"] not in ("", "0"):
                 self.rule(f"{tag}:each", f"{name} · catalogue price each", el["unit_cost_rule"], "INR", name,
                           "unit_cost_rule", density, money=True)
                 each = self.from_inr(f"{tag}:each", f"{name} · price each")
@@ -529,9 +600,31 @@ class _Run:
             "steps": [{"name": r["name"], "node": f"calc:{r['name']}", "is_result": bool(r["is_result"])} for r in order],
             "trial": {"force_node": trial["force_node"], "force_t": trial["force_t"], "process": trial["process"],
                       "machine": trial["machine"], "machine_node": "trial:machine"},
-            "missing": self.missing, "priced": not self.missing, "warnings": self.sized["warnings"], "example": example,
+            "missing": self.missing, "priced": not self.missing, "warnings": self.sized["warnings"] + self.warnings,
+            "example": example, "selections": self.selections_used(lines), "choices": self.choices(lines),
         }
         return out
+
+    def selections_used(self, lines: list[dict]) -> dict:
+        """Only the choices that differ from the recommendation (what a part stores)."""
+        out = {}
+        for l in lines:
+            pick = {}
+            if l.get("material_chosen"):
+                pick["material"] = l["material"]
+            if l.get("make_chosen"):
+                pick["make"] = l["make"]
+            if pick:
+                out[l["element"]] = pick
+        return out
+
+    def choices(self, lines: list[dict]) -> dict:
+        """The master lists the BOM table offers in its drop-downs."""
+        names = {l["element"] for l in lines}
+        return {"materials": [{"code": m["code"], "type": m.get("material_type") or "", "application": m["application"],
+                               "density": m["density_g_cm3"], "hardness": m["hardness"]} for m in self.db["tool_materials"]],
+                "makes": {e: [{"make": r["make"], "catalogue_ref": r["catalogue_ref"], "recommended": r["recommended"]}
+                              for r in self.makes_of(e)] for e in sorted(names) if self.makes_of(e)}}
 
 
 def examples(tr: dict, lines: list[dict] | None = None) -> dict:

@@ -28,7 +28,9 @@ const DATASETS = {
         title: "Materials",
         columns: [
           { key: "part_type", label: "Part type", kind: "part_type" },
-          { key: "material", label: "Material", kind: "text" },
+          { key: "material", label: "Material (grade)", kind: "text" },
+          { key: "material_type", label: "Material type", kind: "text" },
+          { key: "recommended", label: "Recommended grade of its type", kind: "yesno" },
           { key: "density_g_cm3", label: "Density (g/cm³)", kind: "number" },
           { key: "notes", label: "Notes", kind: "wide" },
         ],
@@ -172,6 +174,17 @@ function cell(col, row, i) {
       return `<select ${attrs}>${options(data.tool_materials.map((m) => m.code), v, true)}</select>`;
     case "category":
       return `<select ${attrs}>${options(["made", "bought_out", "process"], v)}</select>`;
+    case "bom_element": {
+      // grade rules: made elements with a material of the row's part type; standard parts: bought-out elements
+      const made = col.key === "element" && "material_code" in row;
+      const names = data.bom_elements.filter((b) => (made ? b.category === "made" && b.material_code && b.part_type === row.part_type
+        : b.category === "bought_out")).map((b) => b.element);
+      return `<select ${attrs}>${options([...new Set(names)], v, true)}</select>`;
+    }
+    case "make":
+      return `<select ${attrs}>${options(data.makes.map((m) => m.make), v, true)}</select>`;
+    case "yesno":
+      return `<select ${attrs}>${options(["", "yes"], v)}</select>`;
     case "process":
       return `<select ${attrs}>${options(data.tool_processes.filter((p) => p.cost_group !== "trial").map((p) => p.code), v, true)}</select>`;
     case "bool":

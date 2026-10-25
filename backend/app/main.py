@@ -21,7 +21,7 @@ from .geometry import PART_TYPES, analyze, blank_estimate, load_step, sheet_thic
 from . import bom_extract as bom_extract_mod
 from . import (capacity, costing_setup, country_rates, file_store, gross_weight, master_data, mould, mould_db, rate_engine, rates,
                register, register_setup, rm_cost, tool_cost, example_values)
-from . import projects_db
+from . import price_master, projects_db
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 THEME_DIR = Path(__file__).resolve().parents[2] / "theme"
@@ -402,6 +402,84 @@ async def rates_upload(file: UploadFile = File(...)):
     _require_xlsx(file)
     created = rates.import_excel(await file.read())
     return {"drafts_created": len(created)}
+
+
+# ---------- price master (roadmap stage 20) ----------
+
+class PriceIn(BaseModel):
+    group: str
+    item: str
+    country: str
+    month: str
+    value: float
+    approve: bool = True
+    comment: str = ""
+
+
+class PriceItemIn(BaseModel):
+    group: str
+    country: str = ""
+    month: Optional[str] = None
+    price: Optional[float] = None
+    scrap_price: Optional[float] = None
+    approve: bool = True
+    code: str = ""              # tool material: grade
+    material_type: str = ""
+    application: str = ""
+    density: Optional[float] = None
+    hardness: str = ""
+    element: str = ""           # standard part
+    make: str = ""
+    origin_country: str = ""
+    catalogue_ref: str = ""
+    size_rule: str = ""
+    part_type: str = ""         # part material
+    material: str = ""
+    notes: str = ""
+
+
+@app.get("/api/price-master/meta")
+def price_master_meta():
+    db = mould_db.tables()
+    return {"groups": {k: v["title"] for k, v in price_master.GROUPS.items()}, "month": rates.current_month(),
+            "base": country_rates.base_country()["code"],
+            "countries": [{"code": c["code"], "name": c["name"], "currency": c["currency"]}
+                          for c in costing_setup.tables()["countries"]],
+            "part_types": list(master_data.PART_TYPES),
+            "tool_material_types": sorted({r.get("material_type") or "" for r in db["tool_materials"]} - {""}),
+            "applications": sorted({r["application"] for r in db["tool_materials"]}),
+            "elements": sorted({r["element"] for r in db["bom_elements"] if r["category"] == "bought_out"}),
+            "makes": [m["make"] for m in db["makes"]],
+            "part_material_types": sorted({r["material_type"] for r in master_data.tables()["Materials"]} - {""})}
+
+
+@app.get("/api/price-master/grid")
+def price_master_grid(group: str, country: str, end: Optional[str] = None, months: int = price_master.HISTORY_MONTHS):
+    return price_master.grid(group, country, end, max(1, min(months, 120)))
+
+
+@app.post("/api/price-master/price")
+def price_master_price(inp: PriceIn):
+    return price_master.set_price(inp.group, inp.item, inp.country, inp.month, inp.value, inp.approve, inp.comment)
+
+
+@app.post("/api/price-master/item")
+def price_master_item(inp: PriceItemIn):
+    data = inp.model_dump()
+    return price_master.add_item(data.pop("group"), data, data.pop("approve"))
+
+
+@app.get("/api/price-master/export.xlsx")
+def price_master_export(group: str, country: str, end: Optional[str] = None, months: int = price_master.HISTORY_MONTHS):
+    return _xlsx(price_master.to_excel(group, country, end, max(1, min(months, 120))),
+                 f"price_master_{group}_{country.upper()}.xlsx")
+
+
+@app.post("/api/price-master/upload")
+async def price_master_upload(group: str = Form(...), country: str = Form(...), approve: bool = Form(True),
+                              file: UploadFile = File(...)):
+    _require_xlsx(file)
+    return price_master.import_excel(group, country, await file.read(), approve)
 
 
 # ---------- machine hour rates and labour rates ----------
@@ -1027,6 +1105,7 @@ def _require_xlsx(file: UploadFile) -> None:
         raise HTTPException(400, "Please upload an Excel .xlsx file.")
 
 
+@app.exception_handler(price_master.PriceError)
 @app.exception_handler(rm_cost.RMError)
 @app.exception_handler(tool_cost.ToolCostError)
 @app.exception_handler(example_values.ExampleError)
@@ -1049,6 +1128,11 @@ def index():
 @app.get("/master-data/examples")
 def examples_page():
     return FileResponse(FRONTEND_DIR / "examples.html")
+
+
+@app.get("/master-data/prices")
+def prices_page():
+    return FileResponse(FRONTEND_DIR / "prices.html")
 
 
 @app.get("/master-data")

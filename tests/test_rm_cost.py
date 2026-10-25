@@ -270,7 +270,7 @@ def test_estimate_api_takes_the_rate_from_the_library_and_marks_typed_rates():
 
 def test_materials_no_longer_carry_rates_and_old_workbooks_still_upload():
     mats = client.get("/api/master-data").json()["Materials"]
-    assert set(mats[0]) == {"part_type", "material", "density_g_cm3", "notes"}
+    assert set(mats[0]) == {"part_type", "material", "material_type", "recommended", "density_g_cm3", "notes"}
     xlsx = client.get("/api/master-data/download").content
     wb = load_workbook(io.BytesIO(xlsx))
     ws = wb["Materials"]

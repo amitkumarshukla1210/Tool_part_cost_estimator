@@ -127,6 +127,17 @@ function weightRows() {
     <tr class="total"><td>Total part weight</td><td class="calc num">${tv("total_weight") ?? "—"}${warn}</td></tr>`;
 }
 
+// The recommended grade of the material's type (Master data → Materials); the material stays your choice.
+function materialHint(p) {
+  const r = p.material_recommendation;
+  if (!r) return "";
+  return r.is_recommended
+    ? `<p class="note span2">★ ${esc(r.material)} is the recommended ${esc(r.material_type)} grade.</p>`
+    : `<p class="note span2">Recommended ${esc(r.material_type)} grade: <b>★ ${esc(r.material)}</b>
+        <button type="button" class="btn btn-outline small" id="useMaterialRec" data-material="${esc(r.material)}">Use it</button>
+        (other grades of this type: ${r.grades.filter((g) => g !== r.material).map(esc).join(", ")})</p>`;
+}
+
 // Material choices: estimator materials, then bought-out insert materials.
 function materialOptions(value) {
   const opt = (m) => `<option value="${esc(m)}" ${m === value ? "selected" : ""}>${esc(m)}</option>`;
@@ -288,6 +299,7 @@ function toolBlock(p) {
       <label>Small inserts per cavity <input type="number" min="0" step="1" name="inserts_per_cavity" value="${typed.inserts_per_cavity ?? ""}" placeholder="0" /></label>
       <label class="check"><input type="checkbox" name="warranty" ${typed.warranty === false ? "" : "checked"} /> Warranty / spares</label>
       <p class="note span2">${esc(live.stage_c?.note ?? "")}. Leave cavities empty to follow Stage C.</p>
+      ${gradePicks(tr)}
       <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary">Save and calculate</button></div>
       <p class="status span2" id="toolStatus"></p>
     </form></details>`;
@@ -314,6 +326,32 @@ function toolBlock(p) {
       <p class="note">Old versions are never changed. Click a version to see its full trace. • = uses EXAMPLE values.</p></details>`;
   }
   return html;
+}
+
+// Grades of the steel parts and makes of the standard parts: the recommendation (★) or your choice from the master lists.
+function gradePicks(tr) {
+  const lines = (tr?.lines || []).filter((l) => l.recommended_material || l.recommended_make);
+  if (!lines.length || !tr.choices) return "";
+  const byType = {};
+  for (const m of tr.choices.materials) (byType[m.type || "Other"] ||= []).push(m);
+  const pick = (l) => {
+    if (l.recommended_material) {
+      return `<select name="pick" data-element="${esc(l.element)}" data-kind="material" data-rec="${esc(l.recommended_material)}">` +
+        Object.entries(byType).map(([type, list]) => `<optgroup label="${esc(type)}">` + list.map((m) =>
+          `<option value="${esc(m.code)}" ${m.code === l.material ? "selected" : ""}>${m.code === l.recommended_material ? "★ " : ""}${esc(m.code)}</option>`).join("") +
+          "</optgroup>").join("") + "</select>";
+    }
+    return `<select name="pick" data-element="${esc(l.element)}" data-kind="make" data-rec="${esc(l.recommended_make)}">` +
+      (tr.choices.makes[l.element] || []).map((m) => `<option value="${esc(m.make)}" ${m.make === l.make ? "selected" : ""}>` +
+        `${m.recommended ? "★ " : ""}${esc(m.make)}${m.catalogue_ref ? " · " + esc(m.catalogue_ref) : ""}</option>`).join("") + "</select>";
+  };
+  return `<div class="span2"><h4 class="block-title">Grades and makes <span class="note">★ = recommended</span></h4>
+    <div class="table-wrap"><table class="cost-table"><thead><tr><th>BOM element</th><th>Grade / make</th><th>Recommended because</th></tr></thead><tbody>
+    ${lines.map((l) => `<tr><td>${esc(l.element)}</td><td>${pick(l)}</td>
+      <td class="note">${l.recommended_material ? esc(l.material_reason) : "Recommended make (Master data → Standard parts)"}</td></tr>`).join("")}
+    </tbody></table></div>
+    <p class="note">Choose another grade or make and click <b>Save and calculate</b>. Prices per country and month:
+      <a class="link" href="/master-data/prices">Price master</a>.</p></div>`;
 }
 
 function suggestionBox(p) {
@@ -379,6 +417,7 @@ function renderPart() {
         <form id="partForm" class="grid2">
           <label class="span2">Part name <input name="name" value="${esc(p.name)}" /></label>
           <label>Material <select name="material">${materialOptions(p.material)}</select></label>
+          ${materialHint(p)}
           <label>Process ${sel("process", meta.processes, p.process)}</label>
           <label>Sourcing ${sel("sourcing", meta.sourcing, p.sourcing)}</label>
           <label>Status ${sel("status", meta.statuses, p.status)}</label>
@@ -482,6 +521,11 @@ $("panelBody").addEventListener("submit", async (e) => {
     for (const k of ["cavities", "slides_per_cavity", "lifters_per_cavity", "inserts_per_cavity"]) if (f.get(k)) inputs[k] = Number(f.get(k));
     if (inputs.warranty) delete inputs.warranty; // the default
     if (!inputs.hot_runner) delete inputs.hot_runner;
+    const selections = {};
+    for (const sel of e.target.querySelectorAll('select[name="pick"]')) {
+      if (sel.value !== sel.dataset.rec) (selections[sel.dataset.element] ||= {})[sel.dataset.kind] = sel.value;
+    }
+    if (Object.keys(selections).length) inputs.selections = selections;
     status($("toolStatus"), "Calculating…");
     try {
       const res = await api(`/api/parts/${part.id}/tool-cost`, { method: "POST", body: JSON.stringify({
@@ -631,6 +675,10 @@ $("panelBody").addEventListener("click", async (e) => {
   }
   if (e.target.id === "useSuggestion") {
     $("partForm").elements.namedItem("process").value = part.suggestion.process;
+    $("partForm").requestSubmit();
+  }
+  if (e.target.id === "useMaterialRec") {
+    $("partForm").elements.namedItem("material").value = e.target.dataset.material;
     $("partForm").requestSubmit();
   }
 });

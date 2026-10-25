@@ -3,7 +3,13 @@
 Holds the data that sizes a mould or die and builds its BOM:
 
     mould_bases     standard mould base / die holder sizes, plates, weight, cost
-    tool_materials  core/cavity and plate steels, density, rate per kg
+    tool_materials  tool steels and other tool materials: type, grade, density, rate per kg (India)
+    grade_rules     which grade the engine recommends for a made BOM element (first rule that applies, else the
+                    element's own material); you can still choose any grade per part
+    makes           makers of standard parts (HASCO, MISUMI, DME, ...) and their home country
+    standard_parts  which makes are offered for a bought-out BOM element, the recommended make, catalogue reference,
+                    India price and a size factor rule; the prices per country and month are library rates
+                    (category standard_part, item "<element> · <make>")
     bom_elements    BOM lines with formula rules for quantity, cost, weight, hours
     process_rates   machining and other process rates per hour (India values; other countries are in the rate library)
     process_unit_rates  heat treatment per kg, wire cut per cm², polishing per cm², painting per m², transport per kg, ...
@@ -67,10 +73,37 @@ TABLES = {
     ]},
     "tool_materials": {"title": "Tool materials", "unique": ("code",), "columns": [
         col("code", "Steel / material"),
+        col("material_type", "Material type", required=False),
         col("application", "Used for"),
         col("density_g_cm3", "Density (g/cm³)", "number"),
         col("rate_per_kg", "Rate / kg (India)", "number"),
         col("hardness", "Hardness"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "grade_rules": {"title": "Grade rules", "unique": ("part_type", "element", "step"), "columns": [
+        col("part_type", "Part type", "part_type", PART_TYPES),
+        col("element", "BOM element (made)", "bom_element"),
+        col("step", "Order", "number"),
+        col("condition", "Applies when (rule)", "formula"),
+        col("material_code", "Recommended grade", "material"),
+        col("reason", "Why (shown with the recommendation)"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "makes": {"title": "Makes", "unique": ("make",), "columns": [
+        col("make", "Make"),
+        col("origin_country", "Home country", required=False),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    "standard_parts": {"title": "Standard parts", "unique": ("element", "make"), "columns": [
+        col("element", "BOM element (bought-out)", "bom_element"),
+        col("make", "Make", "make"),
+        col("catalogue_ref", "Catalogue reference", required=False),
+        col("recommended", "Recommended make", "bool"),
+        col("india_price", "Price each (India, INR)", "number", required=False),
+        col("size_rule", "Size factor (rule)", "formula"),
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
     ]},
@@ -299,6 +332,37 @@ def _check(clean: dict) -> None:
                 formula.evaluate(r[c], env)
             except formula.FormulaError as exc:
                 raise MouldDbError(f"{where}, {c}: {exc}") from None
+    elements = {}
+    for r in clean["bom_elements"]:
+        elements.setdefault(r["element"], set()).add((r["part_type"], r["category"], bool(r["material_code"])))
+    for i, r in enumerate(clean["grade_rules"], start=2):
+        where = f"Grade rules row {i}"
+        if (r["part_type"], "made", True) not in elements.get(r["element"], set()):
+            raise MouldDbError(f"{where}: '{r['element']}' is not a made BOM element with a material for {r['part_type']}.")
+        if r["material_code"] not in materials:
+            raise MouldDbError(f"{where}: grade '{r['material_code']}' is not in Tool materials.")
+        try:
+            formula.evaluate(r["condition"], env)
+        except formula.FormulaError as exc:
+            raise MouldDbError(f"{where}, condition: {exc}") from None
+    makes = {r["make"] for r in clean["makes"]}
+    recommended = {}
+    for i, r in enumerate(clean["standard_parts"], start=2):
+        where = f"Standard parts row {i}"
+        if not any(cat == "bought_out" for _, cat, _ in elements.get(r["element"], set())):
+            raise MouldDbError(f"{where}: '{r['element']}' is not a bought-out BOM element.")
+        if r["make"] not in makes:
+            raise MouldDbError(f"{where}: make '{r['make']}' is not in Makes.")
+        if r["size_rule"] == "":
+            r["size_rule"] = "1"
+        try:
+            formula.evaluate(r["size_rule"], env)
+        except formula.FormulaError as exc:
+            raise MouldDbError(f"{where}, size factor: {exc}") from None
+        if r["recommended"]:
+            if r["element"] in recommended:
+                raise MouldDbError(f"{where}: '{r['element']}' already has a recommended make ({recommended[r['element']]}).")
+            recommended[r["element"]] = r["make"]
     for i, r in enumerate(clean["mould_bases"], start=2):
         if r["max_insert_length_mm"] > r["length_mm"] or r["max_insert_width_mm"] > r["width_mm"]:
             raise MouldDbError(f"Mould bases row {i}: insert pocket is larger than the mould base.")
