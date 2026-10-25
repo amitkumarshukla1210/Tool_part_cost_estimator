@@ -1102,19 +1102,23 @@ def _rm_compute(part_id: int, country: str | None = None) -> dict:
         wall = g.get("wall_mm") or 0
         if wall <= 0 and "thickness_mm" not in overrides:
             raise RMNotApplicable("The sheet thickness could not be found in the 3D model. Type it under RM inputs.")
-        blank = blank_estimate(g["volume_mm3"], g["bbox_mm"], wall or overrides["thickness_mm"])
+        blank = _developed_blank(rev, g, wall or overrides["thickness_mm"])
         part["thickness_mm"] = {"value": wall, "unit": "mm",
                                 "source": cad | {"note": "Most common wall (sheet thickness) found in the 3D model"}}
+        chosen = next((o for o in blank.get("options") or [] if o["name"] == blank.get("chosen")), None)
+        how = blank["method"] + (f" ({chosen['yield_pct']:g} % material yield)" if chosen else "")
         part["blank_length_mm"] = {"value": blank["length"], "unit": "mm", "source": cad | {
-            "note": "Estimated from the 3D model: flat length, or developed length for a bent part"}}
+            "note": f"Developed blank from the 3D model: {how}"}}
         part["blank_width_mm"] = {"value": blank["width"], "unit": "mm", "source": cad | {
-            "note": "Estimated from the 3D model: part width"}}
+            "note": f"Developed blank from the 3D model: {how}"}}
     country = (country or d["country"] or register_setup.settings()["default_country"]).upper()
     as_of = d["costing_month"] or rates.current_month()
     t.overrides = (d.get("trace_overrides") or {}).get("rm") or {}
     r = rm_cost.run(family, country=country, as_of=as_of, material=d["material"], part=part, given=overrides,
                     given_source={"type": "user", "note": f"Typed in the part register for {d['part_code']}"}, trace=t)
-    r["key"] = {"overrides": t.overrides, "revision_id": rev["id"], "material": d["material"], "family": family, "country": country,
+    r["blank"] = blank if family == "sheet_metal" else None
+    r["key"] = {"blank": [blank["length"], blank["width"]] if family == "sheet_metal" else None,
+                "overrides": t.overrides, "revision_id": rev["id"], "material": d["material"], "family": family, "country": country,
                 "as_of": as_of, "inputs": overrides, "net_weight_g": round(t.value("weight"), 6),
                 "rates": sorted(x["id"] for x in r["rates_used"]), "formulas": _formula_hash(family)}
     r["revision"] = {"id": rev["id"], "rev": rev["rev"]}
@@ -1385,6 +1389,33 @@ def _sheet_inputs(v, where):
     return out or None
 
 
+def _developed_blank(rev: dict, g: dict, thickness: float, shape=None) -> dict:
+    """The developed blank of a sheet-metal revision (best material yield, geometry.developed_blank), worked out
+    once from the 3D file and kept in the revision's geometry; the old estimate if the file is not there."""
+    from .geometry import blank_estimate, developed_blank, load_step
+    key = f"{thickness:g}"
+    cached = (g.get("dev_blank") or {}).get(key)
+    if cached:
+        return cached
+    try:
+        if shape is None:
+            with db.engine().connect() as conn:
+                row = conn.execute(select(db.files).where(db.files.c.id == rev["file_id"])).mappings().first()
+            path = file_store.path_of(dict(row)) if row else None
+            if not path or not path.exists():
+                raise FileNotFoundError
+            shape = load_step(str(path))
+        blank = developed_blank(shape, g["volume_mm3"], g["bbox_mm"], thickness)
+    except Exception:  # no file: the estimate from volume and size
+        b = blank_estimate(g["volume_mm3"], g["bbox_mm"], thickness)
+        return b | {"method": "estimate from volume and size (3D file not found)", "options": [], "bends": g.get("bend_count") or 0}
+    geo = dict(g)
+    geo["dev_blank"] = dict(g.get("dev_blank") or {}) | {key: blank}
+    with db.engine().begin() as conn:
+        conn.execute(db.revisions.update().where(db.revisions.c.id == rev["id"]).values(geometry=geo))
+    return blank
+
+
 def _sheet_context(part_id: int):
     """(part detail, revision, 3D shape, blank, sheet-tools result) of a sheet-metal part's current revision."""
     from . import sheet_tools
@@ -1405,16 +1436,16 @@ def _sheet_context(part_id: int):
     if not density:
         raise ToolNotApplicable("Set the part's material (with a density in Master data → Materials).")
     g, typed = rev["geometry"], d["sheet_inputs"] or {}
-    blank = blank_estimate(g["volume_mm3"], g["bbox_mm"], g.get("wall_mm") or 1.0)
     volume, _ = _annual_volume(d)
     shape = load_step(str(path))
+    blank = _developed_blank(rev, g, g.get("wall_mm") or 1.0, shape)
     feat = sheet_tools.features(shape, g, blank, typed, density, volume, d["programme_life_years"])
     try:
         by_process = {"sheet_metal_progressive": "progressive", "sheet_metal_multistage": "multi_stage"}.get(d["process"], "")
         res = sheet_tools.run(feat, d["material"], typed, by_process)
     except ValueError as exc:
         raise ToolNotApplicable(str(exc)) from None
-    res = res | {"part_id": part_id, "rev": rev["rev"], "typed": typed, "process": d["process"]}
+    res = res | {"part_id": part_id, "rev": rev["rev"], "typed": typed, "process": d["process"], "blank": blank}
     return d, rev, shape, blank, res
 
 
@@ -1804,7 +1835,8 @@ def _die_compute(part_id, d, rev, t, g, cap, volume, volume_note, typed, country
         raise tool_cost.ToolCostError(str(exc)) from None
     r["key"] = {"revision_id": rev["id"], "part_type": "sheet_metal", "material": d["material"], "country": country,
                 "as_of": as_of, "inputs": typed, "sheet_inputs": d["sheet_inputs"] or {}, "mode": sheet["mode"],
-                "dies": [x["key"] for x in r["dies"]], "tools_count": inp.tools_count, "weight_g": round(t.value("weight"), 6),
+                "dies": [x["key"] for x in r["dies"]], "blank": [sheet["blank"]["length"], sheet["blank"]["width"]],
+                "tools_count": inp.tools_count, "weight_g": round(t.value("weight"), 6),
                 "rates": sorted(x["id"] for x in r["rates_used"]), "master": _tool_master_hash("sheet_metal"), "learned": learned,
                 "overrides": inp.overrides}
     r["revision"] = {"id": rev["id"], "rev": rev["rev"]}

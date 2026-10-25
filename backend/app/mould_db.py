@@ -62,6 +62,8 @@ TABLES = {
         col("stack_height_mm", "Stack height (mm)", "number"),
         col("weight_kg", "Weight (kg)", "number"),
         col("cost", "Cost", "number"),
+        col("material", "Plate material (grade from Tool materials)", "material", required=False),
+        col("make", "Make", required=False),
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
     ]},
@@ -351,6 +353,8 @@ def _check(clean: dict) -> None:
         except formula.FormulaError as exc:
             raise MouldDbError(f"{where}, condition: {exc}") from None
     for i, r in enumerate(clean["mould_bases"], start=2):
+        if r.get("material") and r["material"] not in materials:
+            raise MouldDbError(f"Mould bases row {i}: plate material '{r['material']}' is not in Tool materials.")
         if r["max_insert_length_mm"] > r["length_mm"] or r["max_insert_width_mm"] > r["width_mm"]:
             raise MouldDbError(f"Mould bases row {i}: insert pocket is larger than the mould base.")
 

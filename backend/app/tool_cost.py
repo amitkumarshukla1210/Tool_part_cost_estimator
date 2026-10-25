@@ -291,6 +291,11 @@ class _Run:
             t.compute(nid, "Shots (strokes) over the programme per tool", "annual_volume * programme_years / cavities", "shots",
                       names={k: self.var(k) for k in ("annual_volume", "programme_years", "cavities")},
                       description="Basis of the grade rules (Mould & die database → Grade rules)")
+        elif any(r["part_type"] == i.part_type and r["parameter"] == name for r in self.db["sizing_rules"]):
+            r = next(r for r in self.db["sizing_rules"] if r["part_type"] == i.part_type and r["parameter"] == name)
+            self.master(nid, r["description"] or name, r["value"], r["unit"], "Mould & die database → Sizing rules",
+                        f"{i.part_type} / {name}", r["is_example"],
+                        ref=_ref("mould_db", "sizing_rules", {"part_type": i.part_type, "parameter": name}, "value"))
         elif name in self.time:
             r = self.time[name]
             self.master(nid, r["description"] or name, r["value"], r["unit"],
@@ -381,27 +386,59 @@ class _Run:
         base_key = self.line_key("__base__")
         ov_base = self.override(base_key)
         base_label = self.base_label()
+        materials = {m["code"]: m for m in self.db["tool_materials"]}
+        base_ref = _ref("mould_db", "mould_bases", {"part_type": b["part_type"], "series": b["series"], "size_code": b["size_code"]},
+                        "cost", choose_base=True, line_key=base_key, part_type=b["part_type"])
+        # plate material of the base: Mould bases → material (C45, EN8, ...), or your choice; traced with weight and steel value
+        grade = ov_base.get("grade") or b.get("material") or ""
+        reason = "your choice" if ov_base.get("grade") else ("Mould bases → plate material" if grade else "")
+        bmat = materials.get(grade)
+        steel_node = None
+        if bmat:
+            den = self.master(f"den:{bmat['code']}", f"Density of {bmat['code']}", bmat["density_g_cm3"], "g/cm³",
+                              "Mould & die database → Tool materials", bmat["code"], bmat["is_example"],
+                              ref=_ref("mould_db", "tool_materials", {"code": bmat["code"]}, "density_g_cm3"))
+            wt = self.var("base_weight_kg")
+            rate = self.rate(f"steel:{bmat['code']}", f"Steel rate · {bmat['code']}", "tool_material", bmat["code"])
+            steel_node = f"{base_key}:steel"
+            t.compute(steel_node, f"{base_label} · plate steel {bmat['code']} (value)", "weight * rate", cur, money=True,
+                      names={"weight": wt, "rate": rate},
+                      description=f"Plate material {bmat['code']} ({bmat.get('hardness') or ''}): {reason}. Steel value of the base = "
+                                  "its weight × the steel rate; the base is priced by its catalogue price when it has one.")
+            t.nodes[steel_node]["grade"] = {"line_key": base_key, "element": base_label, "grade": bmat["code"], "reason": reason,
+                                            "suggested": b.get("material") or "", "rule_default": b.get("material") or ""}
         if ov_base.get("price_each") is not None:
             base_inr = f"{base_key}:you"
             t.add_input(base_inr, f"{base_label} · your price", float(ov_base["price_each"]), "INR",
                         {"type": "user", "note": "Your price (Tool cost → BOM, changed by you)"}, money=True)
+            base_cost = self.from_inr(base_inr, f"{base_label} price")
+        elif not b["cost"] and steel_node:   # no catalogue price: plate steel × make factor (machining, pillars, screws)
+            try:
+                factor = self.var("base_make_factor")
+            except ToolCostError:
+                raise ToolCostError(f"{base_label} has no catalogue price: add a price in Mould bases, "
+                                    "or the sizing rule base_make_factor.") from None
+            base_cost = f"{base_key}:by_weight"
+            t.compute(base_cost, f"{base_label} · priced by weight", "steel * factor", cur, money=True,
+                      names={"steel": steel_node, "factor": factor},
+                      description="The base has no catalogue price (Mould bases → cost 0): plate steel value × base_make_factor.")
+            t.nodes[base_cost]["ref"] = base_ref
         else:
-            base_inr = self.master(f"{base_key}:cost_inr", f"{base_label} · catalogue price", b["cost"], "INR",
-                                   "Mould & die database → Mould bases", f"{b['series']} {b['size_code']}", b["is_example"],
-                                   ref=_ref("mould_db", "mould_bases", {"part_type": b["part_type"], "series": b["series"],
-                                                                        "size_code": b["size_code"]}, "cost",
-                                            choose_base=True, line_key=base_key, part_type=b["part_type"]))
-        self.trace.nodes[base_inr]["money"] = True
-        base_cost = self.from_inr(base_inr, f"{base_label} price")
+            base_inr = self.master(f"{base_key}:cost_inr", f"{base_label} · {grade + ' · ' if grade else ''}catalogue price",
+                                   b["cost"], "INR", "Mould & die database → Mould bases", f"{b['series']} {b['size_code']}",
+                                   b["is_example"], ref=base_ref)
+            self.trace.nodes[base_inr]["money"] = True
+            base_cost = self.from_inr(base_inr, f"{base_label} price")
         lines = [{"key": base_key, "element": base_label, "category": "bought_out", "quantity": 1,
-                  "material": "", "grade": "", "grade_reason": "", "suggested_grade": "",
+                  "material": grade, "grade": grade, "grade_reason": reason, "suggested_grade": b.get("material") or "",
                   "make": ov_base.get("make") or b.get("make") or "", "suggested_make": b.get("make") or "",
                   "weight_each_kg": b["weight_kg"], "material_cost": 0, "bought_out_cost": t.value(base_cost),
                   "process": "", "pricing": "", "cost_group": "", "hours": 0, "amount": 0, "process_cost": 0,
                   "total": t.value(base_cost), "is_example": bool(b["is_example"]), "is_base": True,
                   "std_part": "", "part_number": "", "learned": "",
                   "changed": sorted(k for k in ov_base if ov_base[k] not in (None, "")),
-                  "nodes": {"bo": base_cost, "total": base_cost, "made_kg": None, "mat": None, "proc": None}}]
+                  "nodes": {"bo": base_cost, "total": base_cost, "made_kg": None, "mat": None, "proc": None,
+                            "steel": steel_node}}]
         materials = {m["code"]: m for m in self.db["tool_materials"]}
         k = 0
         for el in self.elements():

@@ -144,3 +144,5 @@ label.check.small { font-size: .75rem; display: inline-flex; gap: 4px; align-ite
 /* full screen part panel and traceability panel (stage 24) */
 .part-panel.full { width: 100vw; }
 .part-panel.full .panel-body { max-width: 1400px; margin: 0 auto; }
+.sim-result { margin: 8px 0; }
+.sim-result .sim-list { margin: 6px 0 8px 18px; font-size: .92rem; }

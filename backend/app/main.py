@@ -72,7 +72,10 @@ async def analyze_part(
     wall = sheet_thickness(shape)
     sheet = None
     if part_type == "sheet_metal":
-        sheet = {"thickness_mm": wall, "blank_mm": blank_estimate(metrics.volume_mm3, metrics.bbox_mm, wall)}
+        from .geometry import developed_blank
+        db_ = developed_blank(shape, metrics.volume_mm3, metrics.bbox_mm, wall)
+        sheet = {"thickness_mm": wall, "blank_mm": {"length": db_["length"], "width": db_["width"]},
+                 "blank_method": db_["method"], "blank_options": db_["options"]}
 
     # Part size across the parting plane, i.e. the two axes other than the pull.
     across = sorted((v for a, v in metrics.bbox_axes_mm.items() if a != metrics.pull_direction), reverse=True)

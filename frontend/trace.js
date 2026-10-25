@@ -298,7 +298,7 @@
         <span data-grade-price class="note"></span></div>
         <div class="row"><button type="button" class="btn btn-primary small" data-grade-apply>Use this grade for the ticked lines</button></div>
         <p class="note">The price per kg is the approved rate of the tool country (${esc(trace.country || "")}, ${esc(trace.as_of || "")}). The tool cost is
-          recalculated and stored; the choice is learned for the next parts. A grade not in the list: + New grade on the Tool BOM.</p>
+          recalculated and stored; the choice is learned for the next parts. A grade not in the list: open "Tool BOM table" on the part → + New grade.</p>
         <p class="status" data-grade-status></p>` : '<p class="note">Open this from a part (Parts → Tool cost) to change the grade.</p>'}</div>`;
   }
 

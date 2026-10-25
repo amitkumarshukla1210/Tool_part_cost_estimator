@@ -84,8 +84,10 @@ def features(shape, geometry: dict, blank: dict, typed: dict, density: float, an
         radius = min((x["inner_radius_mm"] for x in bends), default=None)
     if radius is None:
         radius = params.get("default_bend_radius_factor", 1.0) * t
-    n_bends = max(len(bends), geometry.get("bend_count") or 0)
-    bend_len = sum(x["length_mm"] for x in bends) or n_bends * b["width"]
+    n_bends = max(len(bends), geometry.get("bend_count") or 0, blank.get("bends") or 0)
+    # bend line length: from the bend cylinders, else bends × strip width of the developed blank
+    strip_w = blank["width"] if str(blank.get("method", "")).startswith("Developed") else b["width"]
+    bend_len = sum(x["length_mm"] for x in bends) or n_bends * strip_w
     depth = typed.get("draw_depth_mm")
     if depth is None:
         depth = (b["height"] - t) if (b["height"] > params.get("draw_height_ratio", 5) * t and not n_bends) else 0.0

@@ -118,3 +118,32 @@ def test_steel_grade_traced_and_changed_for_several_lines():
     assert all(l["grade_reason"] == "your choice" for l in tr2["lines"] if l["key"] in keys)
     assert tr2["value"] > tr["value"]                                                   # SKD11 costs more per kg than D2
     assert client.put(f"/api/parts/{pid}/tool-bom/grade", json={"keys": keys, "grade": "Unobtainium"}).status_code == 400
+
+
+def test_base_plate_material_traced_and_changeable_en8():
+    pid = bracket()
+    tr = tool(pid)
+    base = next(l for l in tr["lines"] if l.get("is_base"))
+    assert base["grade"] == "C45 / S50C" and base["grade_reason"] == "Mould bases → plate material"
+    steel = tr["nodes"][base["nodes"]["steel"]]
+    assert steel["grade"]["line_key"] == base["key"] and steel["value"] > 0
+    assert "EN8 (080M40)" in client.get("/api/tool-bom/grade-prices", params={"country": "IN"}).json()
+    assert client.get("/api/tool-bom/grade-prices", params={"country": "CN"}).json()["EN8 (080M40)"]["value"] > 0
+    r = client.put(f"/api/parts/{pid}/tool-bom/grade", json={"keys": [base["key"]], "grade": "EN8 (080M40)"})
+    assert r.status_code == 200, r.text
+    b2 = next(l for l in tool(pid)["lines"] if l.get("is_base"))
+    assert b2["grade"] == "EN8 (080M40)" and b2["grade_reason"] == "your choice"
+    assert b2["total"] == pytest.approx(base["total"])                                # catalogue price: material is information
+
+
+def test_base_without_catalogue_price_is_priced_by_weight():
+    db = mould_db.tables()
+    for b in db["mould_bases"]:
+        if b["part_type"] == "sheet_metal":
+            b["cost"] = 0
+    mould_db.write(db)
+    pid = bracket()
+    tr = tool(pid)
+    base = next(l for l in tr["lines"] if l.get("is_base"))
+    node = tr["nodes"][base["nodes"]["total"]]
+    assert node["formula"] == "steel * factor" and base["total"] == pytest.approx(tr["nodes"][base["nodes"]["steel"]]["value"] * 2.2)
