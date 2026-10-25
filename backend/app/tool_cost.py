@@ -501,8 +501,14 @@ class _Run:
                 continue
             if mat:
                 steel = self.rate(f"steel:{mat['code']}", f"Steel rate · {mat['code']}", "tool_material", mat["code"])
-                line["material_cost"] = t.compute(f"{tag}:mat", f"{name} · steel", "qty * weight * rate", cur, money=True,
-                                                  names={"qty": q, "weight": f"{tag}:wt", "rate": steel})
+                line["material_cost"] = t.compute(f"{tag}:mat", f"{name} · steel {mat['code']}", "qty * weight * rate", cur, money=True,
+                                                  names={"qty": q, "weight": f"{tag}:wt", "rate": steel},
+                                                  description=f"Grade {mat['code']} ({mat.get('hardness') or ''}): {reason}"
+                                                              + (f"; suggested {suggested}" if suggested and suggested != mat["code"] else "")
+                                                              + ". Change the grade here or on the Tool BOM.")
+                # traceability up to the grade selection: why this grade, and which line to change
+                t.nodes[f"{tag}:mat"]["grade"] = {"line_key": key, "element": name, "grade": mat["code"], "reason": reason,
+                                                  "suggested": suggested, "rule_default": el["material_code"]}
                 line["nodes"]["mat"] = f"{tag}:mat"
                 parts.append(f"{tag}:mat")
             if el["unit_cost_rule"] not in ("", "0"):

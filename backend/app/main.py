@@ -1418,6 +1418,17 @@ def parts_tool_bom(part_id: int, data: dict):
     return register.save_bom_line(part_id, key, data.get("line") or {}, bool(data.get("as_default")))
 
 
+@app.put("/api/parts/{part_id}/tool-bom/grade")
+def parts_tool_bom_grade(part_id: int, data: dict):
+    """{keys: [BOM line keys], grade}: one steel grade for these lines (other changes of the lines stay)."""
+    return register.set_bom_grade(part_id, data.get("keys") or [], str(data.get("grade") or "").strip())
+
+
+@app.get("/api/tool-bom/grade-prices")
+def tool_bom_grade_prices(country: str = "IN", as_of: Optional[str] = None):
+    return register.grade_prices(country.upper(), as_of)
+
+
 @app.post("/api/tool-materials")
 def tool_material_add(data: dict):
     return register.add_tool_material(data)

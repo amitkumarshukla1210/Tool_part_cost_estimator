@@ -100,3 +100,21 @@ def test_rm_value_for_this_part():
     before = rm["value"]
     override(pid, "rm", node, value=rm["nodes"][node]["value"] * 2)
     assert client.get(f"/api/parts/{pid}/rm-cost/trace").json()["value"] != before
+
+
+def test_steel_grade_traced_and_changed_for_several_lines():
+    pid = bracket()
+    tr = tool(pid)
+    mat = next(n for k, n in tr["nodes"].items() if k.endswith("Die plate (cutting):mat"))
+    assert mat["grade"]["grade"] == "D2 (1.2379)" and "D2" in mat["description"] and mat["grade"]["reason"]
+    keys = [l["key"] for l in tr["lines"] if l["grade"] == "D2 (1.2379)"]
+    assert len(keys) >= 2                                                              # die plate, punch, bending steels ...
+    prices = client.get("/api/tool-bom/grade-prices", params={"country": "IN"}).json()
+    assert prices["SKD11 (JIS)"]["value"] > 0 and prices["D2 (1.2379)"]["unit"] == "INR/kg"
+    r = client.put(f"/api/parts/{pid}/tool-bom/grade", json={"keys": keys, "grade": "SKD11 (JIS)"})
+    assert r.status_code == 200, r.text
+    tr2 = tool(pid)
+    assert all(l["grade"] == "SKD11 (JIS)" for l in tr2["lines"] if l["key"] in keys)
+    assert all(l["grade_reason"] == "your choice" for l in tr2["lines"] if l["key"] in keys)
+    assert tr2["value"] > tr["value"]                                                   # SKD11 costs more per kg than D2
+    assert client.put(f"/api/parts/{pid}/tool-bom/grade", json={"keys": keys, "grade": "Unobtainium"}).status_code == 400

@@ -1877,6 +1877,50 @@ def save_bom_line(part_id: int, key: str, data: dict, as_default: bool = False) 
     return res | {"part": part_detail(part_id)}
 
 
+def set_bom_grade(part_id: int, keys: list[str], grade: str) -> dict:
+    """One steel grade for several tool BOM lines at once (from the traceability window); other changes of the lines stay."""
+    d = part_detail(part_id, with_rm=False)
+    if tool_eligibility(d):
+        raise RegisterError(tool_eligibility(d))
+    if grade not in {m["code"] for m in mould_db.tables()["tool_materials"]}:
+        raise RegisterError(f"Grade '{grade}' is not in Tool materials. Add it first (+ New grade).")
+    keys = [str(k) for k in keys or [] if str(k).strip()]
+    if not keys:
+        raise RegisterError("Which BOM lines? (keys)")
+    part_type = register_setup.processes()[d["process"]]["part_type"]
+    typed = dict(d["tool_inputs"] or {})
+    bom = {k: dict(v) for k, v in (typed.get("bom") or {}).items()}
+    for k in keys:
+        bom.setdefault(k, {})["grade"] = grade
+    typed["bom"] = bom
+    update_part(part_id, {"tool_inputs": typed}, refresh=False)
+    with db.engine().begin() as conn:
+        for k in keys:
+            conn.execute(db.bom_learning.insert().values(
+                part_type=part_type, element=k.split("|", 1)[-1], part_material=d["material"] or "", grade=grade,
+                make=bom[k].get("make", ""), std_part=bom[k].get("std_part", ""), part_id=part_id, part_code=d["part_code"], user=user()))
+        _log(conn, "part", part_id, "tool_bom_changed", {"lines": ", ".join(keys), "grade": grade})
+    try:
+        res = compute_tool(part_id, f"steel grade {grade} chosen for {len(keys)} line(s)")
+    except RegisterError as exc:
+        res = {"stored": False, "version": None, "message": str(exc)}
+    return res
+
+
+def grade_prices(country: str, as_of: str | None = None) -> dict:
+    """Approved price per kg of every tool steel grade in a country (for the grade drop-down)."""
+    out = {}
+    for m in mould_db.tables()["tool_materials"]:
+        try:
+            r = rates.lookup("tool_material", m["code"], country, as_of or rates.current_month())
+            out[m["code"]] = {"value": r["value"], "unit": r["unit"], "month": r["month"], "is_example": r["is_example"],
+                              "hardness": m["hardness"], "make": m.get("make") or "", "application": m["application"]}
+        except rates.RateMissing:
+            out[m["code"]] = {"value": None, "unit": "", "missing": True, "hardness": m["hardness"], "make": m.get("make") or "",
+                              "application": m["application"]}
+    return out
+
+
 def set_bom_default(part_type: str, element: str, grade: str | None, make: str | None) -> None:
     """Make your grade / make the master-data default of a BOM element (Mould & die database → BOM elements)."""
     mdb = mould_db.tables()
