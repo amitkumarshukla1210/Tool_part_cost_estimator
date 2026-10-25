@@ -71,6 +71,7 @@ TABLES = {
         col("density_g_cm3", "Density (g/cm³)", "number"),
         col("rate_per_kg", "Rate / kg (India)", "number"),
         col("hardness", "Hardness"),
+        col("make", "Make / mill (suggested)", required=False),
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
     ]},
@@ -85,6 +86,33 @@ TABLES = {
         col("process_code", "Process", "process"),
         col("hours_rule", "Hours each (rule)", "formula"),
         col("amount_rule", "Amount each, in the process unit (rule)", "formula", required=False),
+        col("make", "Make (suggested brand / supplier)", required=False),
+        col("operations", "Sheet-metal dies: operations it belongs to (codes, comma-separated; blank = every die)", required=False),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    # Standard parts catalogue (roadmap stage 23): pick one on a BOM line; its price, currency and make are used.
+    "standard_parts": {"title": "Standard parts", "unique": ("code",), "columns": [
+        col("code", "Code"),
+        col("part_number", "Part number (maker's catalogue no.)"),
+        col("description", "Description"),
+        col("element", "BOM element it fits (blank = any bought-out line)", required=False),
+        col("make", "Make"),
+        col("country", "Country of the price", required=False),
+        col("currency", "Currency"),
+        col("price", "Price each", "number"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes"),
+    ]},
+    # Grade suggestion (roadmap stage 23): the first rule (lowest order) of an element that applies gives its steel grade.
+    "grade_rules": {"title": "Grade rules", "unique": ("part_type", "element", "step"), "columns": [
+        col("part_type", "Part type", "part_type", PART_TYPES),
+        col("element", "BOM element"),
+        col("step", "Order", "number"),
+        col("condition", "Applies when (rule)", "formula"),
+        col("material_contains", "Part material contains (comma-separated; blank = any)", required=False),
+        col("material_code", "Suggested grade", "material"),
+        col("reason", "Reason shown"),
         col("is_example", "Example", "bool"),
         col("notes", "Notes"),
     ]},
@@ -281,7 +309,8 @@ def _check(clean: dict) -> None:
                                "(letters, digits and _), so the rules can use it.")
         if r["parameter"] in reserved:
             raise MouldDbError(f"Process time parameters row {i}: '{r['parameter']}' is already a rule variable.")
-    env = formula.SAMPLE | {r["parameter"]: 1.0 for r in clean["time_parameters"]}
+    env = formula.SAMPLE | {r["parameter"]: 1.0 for r in clean["time_parameters"]} \
+        | {r["parameter"]: 1.0 for r in clean["sizing_rules"]} | {f"op_{r['code']}": 1.0 for r in clean["sheet_operations"]}
     for i, r in enumerate(clean["bom_elements"], start=2):
         where = f"BOM elements row {i}"
         if r["material_code"] and r["material_code"] not in materials:
@@ -299,6 +328,22 @@ def _check(clean: dict) -> None:
                 formula.evaluate(r[c], env)
             except formula.FormulaError as exc:
                 raise MouldDbError(f"{where}, {c}: {exc}") from None
+    ops = {r["code"] for r in clean.get("sheet_operations", [])}
+    for i, r in enumerate(clean["bom_elements"], start=2):
+        bad = [c for c in (r.get("operations") or "").replace(" ", "").split(",") if c and c not in ops]
+        if bad:
+            raise MouldDbError(f"BOM elements row {i}: operation '{bad[0]}' is not in Sheet operations ({', '.join(sorted(ops))}).")
+    elements = {(r["part_type"], r["element"]) for r in clean["bom_elements"]}
+    for i, r in enumerate(clean.get("grade_rules", []), start=2):
+        where = f"Grade rules row {i}"
+        if (r["part_type"], r["element"]) not in elements:
+            raise MouldDbError(f"{where}: '{r['element']}' is not a BOM element of {r['part_type']}.")
+        if r["material_code"] not in materials:
+            raise MouldDbError(f"{where}: grade '{r['material_code']}' is not in Tool materials.")
+        try:
+            formula.evaluate(r["condition"], env)
+        except formula.FormulaError as exc:
+            raise MouldDbError(f"{where}, condition: {exc}") from None
     for i, r in enumerate(clean["mould_bases"], start=2):
         if r["max_insert_length_mm"] > r["length_mm"] or r["max_insert_width_mm"] > r["width_mm"]:
             raise MouldDbError(f"Mould bases row {i}: insert pocket is larger than the mould base.")

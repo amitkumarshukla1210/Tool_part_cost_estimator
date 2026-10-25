@@ -45,6 +45,38 @@ VARIABLE_HELP = {
     "part_volume_cm3": "Volume of one part (cm³), from the 3D file",
     "part_surface_cm2": "Surface area of one part (cm²), from the 3D file: the moulding surface of core + cavity",
     "part_box_cm3": "Bounding box of one part = part_l × part_w × part_h ÷ 1000 (cm³): basis of the steel removed per cavity",
+    "annual_volume": "Annual volume of the part (parts/yr)",
+    "programme_years": "Programme life (years)",
+    "programme_shots": "Shots / strokes per tool over the programme = annual_volume × programme_years ÷ cavities",
+    # sheet-metal dies (roadmap stage 23)
+    "t": "Sheet-metal dies: sheet thickness (mm)",
+    "blank_l": "Sheet-metal dies: blank length (mm)",
+    "blank_w": "Sheet-metal dies: blank width (mm)",
+    "blank_perimeter": "Sheet-metal dies: blank perimeter (mm)",
+    "hole_count": "Sheet-metal dies: pierced holes",
+    "hole_perimeter": "Sheet-metal dies: total hole perimeter (mm)",
+    "bends": "Sheet-metal dies: bends",
+    "bend_len": "Sheet-metal dies: total bend length (mm)",
+    "draw_depth": "Sheet-metal dies: draw depth (mm)",
+    "draw_dia": "Sheet-metal dies: equivalent draw punch diameter (mm)",
+    "die_ops": "Sheet-metal dies: operations in this die",
+    "progressive": "Sheet-metal dies: 1 for a progressive die, else 0",
+    "stations": "Sheet-metal dies: stations (progressive), else 1",
+    "pitch": "Sheet-metal dies: pitch, feed per stroke (mm)",
+    "strip_w": "Sheet-metal dies: strip width (mm)",
+    "die_force_t": "Sheet-metal dies: force of this die (t)",
+    "work_l": "Sheet-metal dies: work area length (blank, or strip for a progressive die) (mm)",
+    "work_w": "Sheet-metal dies: work area width (mm)",
+    "die_l": "Sheet-metal dies: die plate length = work_l + 2 × die_wall_mm",
+    "die_w": "Sheet-metal dies: die plate width = work_w + 2 × die_wall_mm",
+    "die_h": "Sheet-metal dies: die plate height = max(die_plate_min_mm, die_plate_t_factor × t)",
+    "cut_len": "Sheet-metal dies: cutting length in this die (blank / trim outline + hole perimeters) (mm)",
+    "punches": "Sheet-metal dies: cutting punches in this die",
+    "op_blank": "Sheet-metal dies: 1 when the die blanks (op_<code> for every Sheet operation code)",
+    "op_pierce": "Sheet-metal dies: piercing operations in the die",
+    "op_bend": "Sheet-metal dies: bending operations in the die",
+    "op_draw": "Sheet-metal dies: drawing operations in the die",
+    "op_trim": "Sheet-metal dies: trimming operations in the die",
 }
 # The rules may also use the names in Mould & die database → Process time parameters of the part type
 # (removal rates, set-up hours, shares), e.g. setup_h + part_box_cm3 / 2 / cnc_rough_cm3_per_h.
@@ -135,6 +167,9 @@ SAMPLE = {name: 1.0 for name in VARIABLE_HELP} | {
     "insert_half_h": 40, "pocket_l": 310, "pocket_w": 230, "base_l": 400, "base_w": 350,
     "base_stack_h": 350, "base_weight_kg": 300, "hot_runner": 1, "density": 7.85,
     "part_volume_cm3": 40, "part_surface_cm2": 400, "part_box_cm3": 180,
+    "annual_volume": 100000, "programme_years": 5, "programme_shots": 125000, "t": 2, "blank_l": 120, "blank_w": 60,
+    "blank_perimeter": 360, "hole_count": 2, "hole_perimeter": 60, "bend_len": 60, "die_l": 200, "die_w": 140,
+    "die_h": 25, "work_l": 120, "work_w": 60, "cut_len": 420, "punches": 3, "die_force_t": 40, "pitch": 125, "strip_w": 70,
 }
 
 

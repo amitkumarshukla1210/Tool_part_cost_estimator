@@ -44,7 +44,8 @@ PERMISSIONS = {
 }
 # Pure calculations that change nothing: anyone logged in may run them.
 CALC_PATHS = ("/api/analyze", "/api/gross-weight", "/api/capacity", "/api/mould/estimate", "/api/tool-cost", "/api/suggest-process")
-MASTER_PATHS = ("/api/master-data", "/api/mould-db", "/api/costing-setup", "/api/register-setup", "/api/examples")
+MASTER_PATHS = ("/api/master-data", "/api/mould-db", "/api/costing-setup", "/api/register-setup", "/api/examples",
+                "/api/tool-materials", "/api/standard-parts")
 RATE_PATHS = ("/api/rates", "/api/settings")
 
 _user: contextvars.ContextVar = contextvars.ContextVar("dtc_user", default=None)

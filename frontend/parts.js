@@ -93,6 +93,7 @@ async function openPart(id) {
   if (part.file_id && !part.is_assembly) part.trace = await api(`/api/parts/${id}/trace`).catch(() => null);
   part.rmTrace = part.rm?.applicable && !part.rm.problem ? await api(`/api/parts/${id}/rm-cost/trace`).catch(() => null) : null;
   part.rmVersions = part.rm?.versions ? await api(`/api/parts/${id}/rm-cost`).catch(() => []) : [];
+  bomChoices = bomChoices || (await api("/api/tool-bom/choices").catch(() => null));
   part.toolTrace = part.tool?.versions || (part.tool?.applicable && !part.tool.problem)
     ? await api(`/api/parts/${id}/tool-cost/trace`).catch(() => null) : null;
   part.toolVersions = part.tool?.versions ? await api(`/api/parts/${id}/tool-cost`).catch(() => []) : [];
@@ -260,6 +261,7 @@ function toolBlock(p) {
       ${capex ? `<tr class="total"><td>${esc(capex.n.label)} (× ${tr.tools_count} tool${tr.tools_count === 1 ? "" : "s"} over the programme)</td>
         <td class="calc num">${money(capex.node, cur)}${inrNote(tr.capex_inr)}</td></tr>` : ""}
     </tbody></table></div>
+    ${tr.dies ? diesTable(tr) : ""}
     <h4 class="block-title">Cost build-up</h4>
     <div class="table-wrap"><table class="cost-table"><tbody>
       <tr><td>Cavities · tools over the programme</td><td class="calc num">${tv("v:cavities", tr.cavities)} · ${tv("tools_count", tr.tools_count)}</td></tr>
@@ -277,6 +279,7 @@ function toolBlock(p) {
       ${stored ? `<a class="link" href="/api/parts/${p.id}/tool-cost/export.xlsx">Excel</a> · <a class="link" href="/api/parts/${p.id}/tool-cost/export.pdf">PDF</a>` : ""}
       ${p.file_id ? ` · <a class="link" href="/?part=${p.id}">Open in Estimate (full BOM)</a>` : ""}</p>`;
   }
+  if (tr?.lines) html += bomEditor(p, tr);
   const typed = p.tool_inputs || {};
   const live = t.live || {};
   html += `<details class="card add-insert" ${Object.keys(typed).length || p.tool_country ? "open" : ""}>
@@ -860,6 +863,116 @@ $("panelBody").addEventListener("click", async (e) => {
   if (pv) {
     const tr = await api(`/api/parts/${part.id}/piece-cost/trace?version=${pv.dataset.pieceversion}`);
     window.TracePanel.open(tr, tr.root);
+  }
+});
+
+// ---------- tool BOM (stage 23): dies, grade / make / qty / price / standard part per line, learning ----------
+let bomChoices = null;
+function diesTable(tr) {
+  const cur = tr.currency;
+  const tv = (id, text) => (tr.nodes[id] ? `<button type="button" class="tv" data-tooltrace="${id}">${text}</button>` : text);
+  return `<h4 class="block-title">Dies suggested (${tr.mode === "progressive" ? "progressive die" : "one die per operation"})</h4>
+    <div class="table-wrap"><table class="cost-table" data-nofilter><thead><tr><th>Die</th><th>Operations</th><th>Die set</th><th>Die plate (mm)</th>
+      <th>Press (force)</th><th class="num">Tool cost (${esc(cur)})</th></tr></thead><tbody>
+    ${tr.dies.map((d) => `<tr><td><b>${esc(d.name)}</b></td><td>${esc(d.op_names.join(", "))}</td>
+      <td>${esc(d.base.series)} ${esc(d.base.size_code)}</td><td>${fmt(d.die_plate.die_l, 0)} × ${fmt(d.die_plate.die_w, 0)} × ${fmt(d.die_plate.die_h, 0)}</td>
+      <td>${d.press ? tv(d.machine_node, esc(d.press.machine_id)) : '<span class="badge missing">none</span>'} (${tv(d.force_node, `${fmt(d.force_t, 1)} t`)})</td>
+      <td class="calc num">${tv(d.node, fmt(d.value, 0))}</td></tr>`).join("")}
+      <tr class="total"><td colspan="5">All dies</td><td class="calc num">${tv(tr.root, fmt(tr.value, 0))}</td></tr></tbody></table></div>
+    <p class="note">The die split follows the operations in order and the die type (Sheet-metal tools). Change them there; the dies follow.</p>`;
+}
+
+function bomEditor(p, tr) {
+  const ch = bomChoices || { grades: [], standard_parts: [], makes: [] };
+  const cur = tr.currency;
+  const typed = p.tool_inputs?.bom || {};
+  const gradeOpts = (sel) => ch.grades.map((g) => `<option value="${esc(g.code)}" ${g.code === sel ? "selected" : ""}>${esc(g.code)}${g.hardness ? ` · ${esc(g.hardness)}` : ""}</option>`).join("");
+  const spOpts = (l) => {
+    const list = ch.standard_parts.filter((x) => !x.element || x.element === l.element);
+    return `<option value="">— calculated —</option>` + list.map((x) => `<option value="${esc(x.code)}" ${x.code === l.std_part ? "selected" : ""}>${esc(x.make)} ${esc(x.part_number)} · ${esc(x.description)} · ${fmt(x.price, 2)} ${esc(x.currency)}</option>`).join("");
+  };
+  const rows = tr.lines.map((l) => {
+    const own = typed[l.key] || {};
+    const tags = [l.changed?.length ? '<span class="badge status">changed by you</span>' : "", l.learned ? `<span class="badge">learned · ${esc(l.learned)}</span>` : ""].join(" ");
+    return `<tr data-bomkey="${esc(l.key)}">${tr.dies ? `<td>${esc(l.die)}</td>` : ""}<td><b>${esc(l.element)}</b> ${tags}<div class="note">${esc(l.category.replace("_", "-"))}${l.process ? ` · ${esc(l.process)}` : ""}</div></td>
+      <td><input type="number" min="0" step="any" data-bf="qty" value="${own.qty ?? ""}" placeholder="${fmt(l.quantity, 2)}" /></td>
+      <td>${l.grade ? `<select data-bf="grade">${gradeOpts(l.grade)}</select><div class="note">${esc(l.grade_reason)}${l.suggested_grade && l.suggested_grade !== l.grade ? ` · suggested ${esc(l.suggested_grade)}` : ""}</div>` : "—"}</td>
+      <td><input list="makeList" data-bf="make" value="${esc(l.make)}" placeholder="make" /></td>
+      <td>${l.category === "bought_out" || l.std_part ? `<select data-bf="std_part">${spOpts(l)}</select>` : "—"}</td>
+      <td><input type="number" min="0" step="any" data-bf="price_each" value="${own.price_each ?? ""}" placeholder="calculated" /></td>
+      <td class="calc num">${fmt(l.total, 0)}</td>
+      <td class="row-actions"><button type="button" class="btn btn-outline small" data-bomsave>Save</button>
+        ${Object.keys(own).length ? '<button type="button" class="btn btn-outline small" data-bomreset title="Back to the suggestion">Reset</button>' : ""}
+        <label class="check small" title="Use this grade and make for this element on every new tool (master data)"><input type="checkbox" data-bf="as_default" /> my default</label></td></tr>`;
+  }).join("");
+  return `<h4 class="block-title">Tool BOM · grade, make, standard part, price</h4>
+    <p class="note">Suggested by the software: grade from Grade rules (or learned from your earlier parts), make from master data. Change any line and
+      click Save: the tool cost is recalculated and your choice is remembered for the next parts. Price each is in INR and replaces the calculated cost of the line.</p>
+    <datalist id="makeList">${ch.makes.map((m) => `<option value="${esc(m)}"></option>`).join("")}</datalist>
+    <div class="table-wrap tall"><table class="cost-table bom-edit" id="bomTable"><thead><tr>${tr.dies ? "<th>Die</th>" : ""}<th>Element</th><th>Qty</th><th>Grade</th><th>Make</th>
+      <th>Standard part (part no.)</th><th>Price each (INR)</th><th class="num">Line (${esc(cur)})</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="status" id="bomStatus"></p>
+    <details class="card add-insert"><summary class="btn btn-outline small">+ New grade</summary>
+      <form id="newGrade" class="grid2">
+        <label>Grade name <input name="code" required placeholder="e.g. OHNS (O1)" /></label>
+        <label>Make / mill <input name="make" list="makeList" /></label>
+        <label>Price per kg <input type="number" step="any" min="0" name="price_per_kg" required /></label>
+        <label>Country of the price <select name="country">${(rmMeta?.countries || []).map((c) => `<option value="${esc(c.code)}" ${c.code === (p.tool_country || p.effective_country) ? "selected" : ""}>${esc(c.name)} (${esc(c.currency)})</option>`).join("")}</select></label>
+        <label>Density (g/cm³) <input type="number" step="any" min="0" name="density_g_cm3" value="7.85" required /></label>
+        <label>Hardness <input name="hardness" placeholder="e.g. 58-60 HRC" /></label>
+        <label>Used for <select name="application"><option value="die_insert">die / punch steel</option><option value="core_cavity">core / cavity</option>
+          <option value="hot_work">hot work</option><option value="base_plate">plates</option></select></label>
+        <div class="span2 dialog-actions"><button class="btn btn-primary small" type="submit">Save grade</button></div></form></details>
+    <details class="card add-insert"><summary class="btn btn-outline small">+ New standard part</summary>
+      <form id="newStd" class="grid2">
+        <label>Code <input name="code" required placeholder="e.g. MIS-GP-32" /></label>
+        <label>Part number (maker's) <input name="part_number" required placeholder="e.g. GPN32-200" /></label>
+        <label class="span2">Description <input name="description" required placeholder="e.g. Guide pillar Ø32 × 200" /></label>
+        <label>Make <input name="make" list="makeList" required /></label>
+        <label>For BOM element <select name="element"><option value="">any bought-out line</option>${[...new Set(tr.lines.filter((l) => l.category === "bought_out" && !l.is_base).map((l) => l.element))].map((e) => `<option>${esc(e)}</option>`).join("")}</select></label>
+        <label>Price each <input type="number" step="any" min="0" name="price" required /></label>
+        <label>Country of the price <select name="country">${(rmMeta?.countries || []).map((c) => `<option value="${esc(c.code)}" ${c.code === (p.tool_country || p.effective_country) ? "selected" : ""}>${esc(c.name)} (${esc(c.currency)})</option>`).join("")}</select></label>
+        <div class="span2 dialog-actions"><button class="btn btn-primary small" type="submit">Save standard part</button></div></form></details>`;
+}
+
+$("panelBody").addEventListener("click", async (e) => {
+  const tr = e.target.closest("tr[data-bomkey]");
+  if (!tr || !(e.target.matches("[data-bomsave]") || e.target.matches("[data-bomreset]"))) return;
+  const line = {};
+  let asDefault = false;
+  if (e.target.matches("[data-bomsave]")) {
+    const l = part.toolTrace.lines.find((x) => x.key === tr.dataset.bomkey);
+    tr.querySelectorAll("[data-bf]").forEach((el) => {
+      if (el.dataset.bf === "as_default") return (asDefault = el.checked);
+      const v = el.value.trim();
+      if (!v) return;
+      if (el.dataset.bf === "grade" && v === l.grade && !l.changed.includes("grade")) return;   // unchanged suggestion
+      if (el.dataset.bf === "make" && v === l.make && !l.changed.includes("make") && !asDefault) return;
+      if (el.dataset.bf === "std_part" && v === l.std_part && !l.changed.includes("std_part")) return;
+      line[el.dataset.bf] = v;
+    });
+    if (asDefault) { line.grade ??= l.grade || undefined; line.make ??= l.make || undefined; }
+  }
+  status($("bomStatus"), "Recalculating the tool cost…");
+  try {
+    const r = await api(`/api/parts/${part.id}/tool-bom`, { method: "PUT", body: JSON.stringify({ key: tr.dataset.bomkey, line, as_default: asDefault }) });
+    await openPart(part.id);
+    status($("bomStatus"), r.message || "Saved.", "ok");
+  } catch (err) {
+    status($("bomStatus"), err.message, "error");
+  }
+});
+$("panelBody").addEventListener("submit", async (e) => {
+  if (e.target.id !== "newGrade" && e.target.id !== "newStd") return;
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  try {
+    const r = await api(e.target.id === "newGrade" ? "/api/tool-materials" : "/api/standard-parts", { method: "POST", body: JSON.stringify(data) });
+    bomChoices = null;
+    await openPart(part.id);
+    status($("bomStatus"), r.message, r.approved === false ? "error" : "ok");
+  } catch (err) {
+    status($("bomStatus"), err.message, "error");
   }
 });
 

@@ -19,6 +19,7 @@ A missing rate does not stop the calculation: it is shown as missing (value 0) a
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from pydantic import Field
@@ -28,7 +29,7 @@ from .rm_cost import _parameter_row
 from .trace import EXAMPLE_WARNING, Trace
 
 PART_TYPES = ("plastic", "die_casting", "eps", "blow")
-LATER = {"sheet_metal": "Tool cost of sheet-metal dies comes with roadmap stages 9 and 10.",
+LATER = {"sheet_metal": "Sheet-metal dies are costed die by die on the part: Parts → the part → Tool cost.",
          "foundry": "Tool cost of foundry patterns and core boxes comes in a later stage."}
 GROUP_LABEL = {"cutting": "Raw material cutting", "machining": "Machining (CNC, EDM, wire cut, grinding, drilling)",
                "polishing": "Polishing", "treatment": "Heat & surface treatment", "assembly": "Fitting & assembly",
@@ -64,6 +65,10 @@ class ToolInput(mould.MouldInput):
     part_surface_cm2: float = Field(0, ge=0)
     warranty: bool = True
     tools_count: int = Field(1, ge=1, le=1000)
+    annual_volume: float = Field(0, ge=0)          # for the grade rules (0 = Parameters default)
+    programme_years: float = Field(0, ge=0)
+    bom: dict = Field(default_factory=dict)        # your changes per BOM line: {line key: {grade, make, qty, price_each, std_part}}
+    learned: dict = Field(default_factory=dict)    # learned from your earlier parts: {element: {grade, make, std_part, note}}
 
 
 def default_country() -> str:
@@ -252,6 +257,20 @@ class _Run:
             t.compute(nid, "Part bounding box", "part_l * part_w * part_h / 1000", "cm³",
                       names={k: self.var(k) for k in ("part_l", "part_w", "part_h")},
                       description="Basis of the steel removed to form one cavity")
+        elif name in ("annual_volume", "programme_years"):
+            v = getattr(i, name)
+            if v:
+                t.add_input(nid, "Annual volume" if name == "annual_volume" else "Programme years", v,
+                            "parts/yr" if name == "annual_volume" else "years",
+                            self.sources.get(name) or {"type": "user", "note": "Tool features"})
+            else:
+                row = _parameter_row(i.part_type, name)
+                self.master(nid, row["description"] if row else name, (row or {}).get("value") or 0,
+                            (row or {}).get("unit") or "", "Parameters", f"{(row or {}).get('part_type', 'all')} / {name}")
+        elif name == "programme_shots":
+            t.compute(nid, "Shots (strokes) over the programme per tool", "annual_volume * programme_years / cavities", "shots",
+                      names={k: self.var(k) for k in ("annual_volume", "programme_years", "cavities")},
+                      description="Basis of the grade rules (Mould & die database → Grade rules)")
         elif name in self.time:
             r = self.time[name]
             self.master(nid, r["description"] or name, r["value"], r["unit"],
@@ -293,48 +312,157 @@ class _Run:
 
     # ---------- the calculation ----------
 
+    # ---------- BOM: suggested grade and make, your changes ----------
+
+    def elements(self) -> list[dict]:
+        """BOM elements of this tool (the sheet-metal die engine keeps the ones of the die's operations)."""
+        return [el for el in self.db["bom_elements"] if el["part_type"] == self.inp.part_type]
+
+    def line_key(self, element: str) -> str:
+        return element
+
+    def base_label(self) -> str:
+        b = self.sized["base"]
+        return f"Mould base {b['series']} {b['size_code']}"
+
+    def suggest_grade(self, el: dict) -> tuple[str, str, int | None]:
+        """(grade, reason, grade rule row) from Grade rules: the first rule of the element that applies."""
+        material = (self.inp.material or "").lower()
+        tokens = set(re.split(r"[^a-z0-9]+", material))
+        rules = sorted((r for r in self.db.get("grade_rules", []) if r["part_type"] == self.inp.part_type
+                        and r["element"] == el["element"]), key=lambda r: r["step"])
+        for r in rules:
+            words = [w.strip().lower() for w in (r["material_contains"] or "").split(",") if w.strip()]
+            # a short keyword (GF, PC) matches the start of a word of the material (GF30, PC/ABS); a longer one anywhere
+            if words and not any(any(tok.startswith(w) for tok in tokens) if len(w) <= 3 else (w in material) for w in words):
+                continue
+            env = {}
+            try:
+                for n in formula.names(r["condition"]):
+                    env[n] = self.trace.value(self.var(n))
+                if not formula.evaluate(r["condition"], env):
+                    continue
+            except (formula.FormulaError, ToolCostError) as exc:
+                raise ToolCostError(f"Grade rules, {el['element']} order {r['step']:g}: {exc}") from None
+            return r["material_code"], r["reason"], r
+        return el["material_code"], "BOM element default", None
+
+    def override(self, key: str) -> dict:
+        return (self.inp.bom or {}).get(key) or {}
+
     def bom(self) -> list[dict]:
         t, cur = self.trace, self.cur
         b = self.sized["base"]
-        base_inr = self.master("base:cost_inr", f"Mould base {b['series']} {b['size_code']} · catalogue price",
-                               b["cost"], "INR", "Mould & die database → Mould bases", f"{b['series']} {b['size_code']}",
-                               b["is_example"])
+        base_key = self.line_key("__base__")
+        ov_base = self.override(base_key)
+        base_label = self.base_label()
+        if ov_base.get("price_each") is not None:
+            base_inr = f"{base_key}:you"
+            t.add_input(base_inr, f"{base_label} · your price", float(ov_base["price_each"]), "INR",
+                        {"type": "user", "note": "Your price (Tool cost → BOM, changed by you)"}, money=True)
+        else:
+            base_inr = self.master(f"{base_key}:cost_inr", f"{base_label} · catalogue price", b["cost"], "INR",
+                                   "Mould & die database → Mould bases", f"{b['series']} {b['size_code']}", b["is_example"])
         self.trace.nodes[base_inr]["money"] = True
-        base_cost = self.from_inr(base_inr, "Mould base price")
-        lines = [{"element": f"Mould base {b['series']} {b['size_code']}", "category": "bought_out", "quantity": 1,
-                  "material": "", "weight_each_kg": b["weight_kg"], "material_cost": 0, "bought_out_cost": t.value(base_cost),
+        base_cost = self.from_inr(base_inr, f"{base_label} price")
+        lines = [{"key": base_key, "element": base_label, "category": "bought_out", "quantity": 1,
+                  "material": "", "grade": "", "grade_reason": "", "suggested_grade": "",
+                  "make": ov_base.get("make") or b.get("make") or "", "suggested_make": b.get("make") or "",
+                  "weight_each_kg": b["weight_kg"], "material_cost": 0, "bought_out_cost": t.value(base_cost),
                   "process": "", "pricing": "", "cost_group": "", "hours": 0, "amount": 0, "process_cost": 0,
                   "total": t.value(base_cost), "is_example": bool(b["is_example"]), "is_base": True,
+                  "std_part": "", "part_number": "", "learned": "",
+                  "changed": sorted(k for k in ov_base if ov_base[k] not in (None, "")),
                   "nodes": {"bo": base_cost, "total": base_cost, "made_kg": None, "mat": None, "proc": None}}]
         materials = {m["code"]: m for m in self.db["tool_materials"]}
         k = 0
-        for el in self.db["bom_elements"]:
-            if el["part_type"] != self.inp.part_type:
-                continue
+        for el in self.elements():
             k += 1
             tag, name = f"bom:{k}", el["element"]
-            qty = self.rule(f"{tag}:qty", f"{name} · quantity", el["quantity_rule"], "pcs", name, "quantity_rule")
+            key = self.line_key(name)
+            ov = self.override(key)
+            if ov.get("qty") is not None:
+                t.add_input(f"{tag}:qty", f"{name} · quantity", float(ov["qty"]), "pcs",
+                            {"type": "user", "note": "Your quantity (Tool cost → BOM, changed by you)"})
+                qty = float(ov["qty"])
+            else:
+                qty = self.rule(f"{tag}:qty", f"{name} · quantity", el["quantity_rule"], "pcs", name, "quantity_rule")
             if qty <= 0:
                 del t.nodes[f"{tag}:qty"]
                 continue
             q = f"{tag}:qty"
-            line = {"element": name, "category": el["category"], "quantity": qty, "material": el["material_code"],
+            grade, reason, _ = self.suggest_grade(el) if el["material_code"] else ("", "", None)
+            learned = (self.inp.learned or {}).get(name) or {}
+            if learned and not ov:
+                ov = {k: learned[k] for k in ("grade", "make", "std_part") if learned.get(k)}
+                if learned.get("grade") and learned["grade"] in materials:
+                    grade, reason = learned["grade"], f"learned from your earlier parts ({learned.get('note', '')})".replace(" ()", "")
+                ov.pop("grade", None)
+                ov["_learned"] = learned.get("note") or "earlier parts"
+            suggested = grade
+            if ov.get("grade"):
+                if ov["grade"] not in materials:
+                    raise ToolCostError(f"BOM line '{name}': grade '{ov['grade']}' is not in Tool materials.")
+                grade, reason = ov["grade"], "your choice"
+            mat = materials.get(grade)
+            line = {"key": key, "element": name, "category": el["category"], "quantity": qty, "material": grade,
+                    "grade": grade, "grade_reason": reason, "suggested_grade": suggested,
+                    "make": ov.get("make") or el.get("make") or (mat or {}).get("make") or "",
+                    "suggested_make": el.get("make") or (mat or {}).get("make") or "",
                     "weight_each_kg": 0, "material_cost": 0, "bought_out_cost": 0, "process": el["process_code"],
                     "pricing": "", "cost_group": "", "hours": 0, "amount": 0, "process_cost": 0,
-                    "is_example": bool(el["is_example"]), "nodes": {"qty": q}}
+                    "is_example": bool(el["is_example"]),
+                    "changed": sorted(k2 for k2 in ov if ov[k2] not in (None, "") and not k2.startswith("_")),
+                    "learned": ov.get("_learned") or "", "std_part": "", "part_number": "", "nodes": {"qty": q}}
             parts = []
             density = None
-            mat = materials.get(el["material_code"])
             if mat:
                 density = self.master(f"den:{mat['code']}", f"Density of {mat['code']}", mat["density_g_cm3"], "g/cm³",
                                       "Mould & die database → Tool materials", mat["code"], mat["is_example"])
                 line["weight_each_kg"] = self.rule(f"{tag}:wt", f"{name} · weight each", el["weight_rule"], "kg", name,
                                                    "weight_rule", density)
+                t.compute(f"{tag}:kg", f"{name} · steel weight", "qty * weight", "kg", names={"qty": q, "weight": f"{tag}:wt"})
+                line["nodes"]["made_kg"] = f"{tag}:kg"
+            sp = None
+            if ov.get("std_part") and ov.get("price_each") is None:
+                sp = next((x for x in self.db.get("standard_parts", []) if x["code"] == ov["std_part"]), None)
+                if not sp:
+                    raise ToolCostError(f"BOM line '{name}': standard part '{ov['std_part']}' is not in Standard parts.")
+                line["std_part"], line["make"] = sp["code"], ov.get("make") or sp["make"]
+                line["part_number"] = sp.get("part_number") or ""
+                node = self.master(f"{tag}:sp", f"{name} · {sp['make']} {sp.get('part_number') or sp['code']} · {sp['description']}", sp["price"],
+                                   sp["currency"], "Mould & die database → Standard parts", sp["code"], sp["is_example"])
+                t.nodes[node]["money"] = True
+                try:
+                    each = rate_engine._convert(t, node, f"{name} · {sp['code']}", sp["currency"], cur, self.as_of)
+                except rates.RateMissing as exc:
+                    each = self.miss(f"{tag}:sp:fx", f"{name} · {sp['code']} (currency)", str(exc), money=True)
+                line["bought_out_cost"] = t.compute(f"{tag}:bo", f"{name} · {sp['code']}", "qty * each", cur, money=True,
+                                                    names={"qty": q, "each": each})
+                line["nodes"]["bo"] = f"{tag}:bo"
+                line["is_example"] = bool(sp["is_example"])
+                self.total(tag, name, [f"{tag}:bo"], cur)
+                line["nodes"]["total"] = tag
+                lines.append(line)
+                continue
+            if ov.get("price_each") is not None:
+                # your price per piece replaces the calculated cost of the whole line (steel, bought-out and processes)
+                t.add_input(f"{tag}:you", f"{name} · your price each", float(ov["price_each"]), "INR",
+                            {"type": "user", "note": "Your price per piece in INR (Tool cost → BOM, changed by you)"}, money=True)
+                each = self.from_inr(f"{tag}:you", f"{name} · your price each")
+                line["bought_out_cost"] = t.compute(f"{tag}:bo", f"{name} · your price", "qty * each", cur, money=True,
+                                                    names={"qty": q, "each": each})
+                line["nodes"]["bo"] = f"{tag}:bo"
+                line["price_each_inr"] = float(ov["price_each"])
+                self.total(tag, name, [f"{tag}:bo"], cur)
+                line["nodes"]["total"] = tag
+                lines.append(line)
+                continue
+            if mat:
                 steel = self.rate(f"steel:{mat['code']}", f"Steel rate · {mat['code']}", "tool_material", mat["code"])
                 line["material_cost"] = t.compute(f"{tag}:mat", f"{name} · steel", "qty * weight * rate", cur, money=True,
                                                   names={"qty": q, "weight": f"{tag}:wt", "rate": steel})
-                t.compute(f"{tag}:kg", f"{name} · steel weight", "qty * weight", "kg", names={"qty": q, "weight": f"{tag}:wt"})
-                line["nodes"] |= {"mat": f"{tag}:mat", "made_kg": f"{tag}:kg"}
+                line["nodes"]["mat"] = f"{tag}:mat"
                 parts.append(f"{tag}:mat")
             if el["unit_cost_rule"] not in ("", "0"):
                 self.rule(f"{tag}:each", f"{name} · catalogue price each", el["unit_cost_rule"], "INR", name,
@@ -384,14 +512,21 @@ class _Run:
             lines.append(line)
         return lines
 
+    def size(self) -> dict:
+        return mould.size(self.inp)
+
     def trial(self) -> dict:
         """Clamp force (formulas of tool_clamp) -> try-out machine -> its MHR and the try-out crew per hour."""
-        t, part_type = self.trace, self.inp.part_type
         names = self.scope_inputs("tool_clamp")
         try:
-            force_node, _, _ = rate_engine.evaluate_scope(t, self.setup, "tool_clamp", names, self.cur, self.as_of, inr=False)
+            force_node, _, _ = rate_engine.evaluate_scope(self.trace, self.setup, "tool_clamp", names, self.cur, self.as_of, inr=False)
         except (rate_engine.EngineError, formula.FormulaError) as exc:
             raise ToolCostError(str(exc)) from None
+        return self.trial_machine(force_node, "clamp force")
+
+    def trial_machine(self, force_node: str, what: str) -> dict:
+        """Smallest try-out machine (Parameters → trial_machine_process) whose tonnage takes the force; its MHR and crew."""
+        t, part_type = self.trace, self.inp.part_type
         force = t.value(force_node)
         process = master_data.parameters(part_type).get("trial_machine_process")
         out = {"force_node": force_node, "force_t": force, "process": process, "machine": None}
@@ -412,8 +547,8 @@ class _Run:
                 m = fits[0]
                 out["machine"] = m
                 t.add_derived("trial:machine", f"Try-out machine: {m['machine_id']} · {m['name']}", m["tonnage_t"], "t",
-                              f"smallest '{process}' machine in Master data → Machines whose tonnage ≥ the clamp force",
-                              {"clamp_force": force_node},
+                              f"smallest '{process}' machine in Master data → Machines whose tonnage ≥ the {what}",
+                              {what.replace(" ", "_"): force_node},
                               description=f"{m['tonnage_t']:g} t ≥ {force:.1f} t. Rule: Parameters → trial_machine_process.")
                 mhr_node = self.mhr(m["machine_id"])
         if trial:
@@ -460,7 +595,7 @@ class _Run:
     def run(self) -> dict:
         inp, t, cur = self.inp, self.trace, self.cur
         try:
-            self.sized = mould.size(inp)
+            self.sized = self.size()
         except ValueError as exc:
             raise ToolCostError(str(exc)) from None
         lines = self.bom()

@@ -325,6 +325,23 @@ part_suppliers = Table(
     UniqueConstraint("part_id", "supplier_id"),
 )
 
+# What you chose on tool BOM lines (grade, make, standard part): the next new parts of the same type are suggested the same.
+bom_learning = Table(
+    "bom_learning", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_type", String(30), nullable=False),
+    Column("element", String(200), nullable=False),
+    Column("part_material", String(200), default=""),
+    Column("grade", String(100), default=""),
+    Column("make", String(200), default=""),
+    Column("std_part", String(100), default=""),
+    Column("part_id", Integer),
+    Column("part_code", String(80), default=""),
+    Column("user", String(100), default=""),
+    Column("at", DateTime, default=now),
+    Index("ix_bom_learning", "part_type", "element"),
+)
+
 # Admin: the lowest role allowed for each action (rows missing = the default in auth.PERMISSIONS).
 role_permissions = Table(
     "role_permissions", meta,

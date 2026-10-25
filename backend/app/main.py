@@ -1364,6 +1364,34 @@ def suppliers_delete(sid: int):
     return suppliers.delete(sid)
 
 
+# ---------- tool BOM: grades, standard parts, your changes (roadmap stage 23) ----------
+
+@app.get("/api/tool-bom/choices")
+def tool_bom_choices():
+    return register.bom_choices()
+
+
+@app.put("/api/parts/{part_id}/tool-bom")
+def parts_tool_bom(part_id: int, data: dict):
+    """One BOM line: {key, line: {grade, make, qty, price_each, std_part}, as_default}. An empty line = back to suggested."""
+    key = str(data.get("key") or "").strip()
+    if not key:
+        raise HTTPException(400, "Which BOM line? (key)")
+    if data.get("as_default"):
+        auth.require_perm("edit_master_data")
+    return register.save_bom_line(part_id, key, data.get("line") or {}, bool(data.get("as_default")))
+
+
+@app.post("/api/tool-materials")
+def tool_material_add(data: dict):
+    return register.add_tool_material(data)
+
+
+@app.post("/api/standard-parts")
+def standard_part_add(data: dict):
+    return register.add_standard_part(data)
+
+
 @app.get("/api/parts/{part_id}/suppliers")
 def part_suppliers_get(part_id: int):
     from . import suppliers

@@ -1541,7 +1541,12 @@ def _tool_inputs(v, where):
             raise RegisterError(f"{where}: tool inputs are not readable.") from None
     out = {}
     for k, val in v.items():
-        if val in (None, ""):
+        if val in (None, "", {}):
+            continue
+        if k == "bom":
+            bom = _bom_overrides(val, where)
+            if bom:
+                out["bom"] = bom
             continue
         if k not in TOOL_INPUTS:
             raise RegisterError(f"{where}: '{k}' is not a tool input ({', '.join(TOOL_INPUTS)}).")
@@ -1555,6 +1560,33 @@ def _tool_inputs(v, where):
     return out or None
 
 
+BOM_FIELDS = ("grade", "make", "qty", "price_each", "std_part")
+
+
+def _bom_overrides(v, where) -> dict:
+    """{line key: {grade, make, qty, price_each (INR), std_part}}: your changes to the tool BOM."""
+    if not isinstance(v, dict):
+        raise RegisterError(f"{where}: tool BOM changes are not readable.")
+    out = {}
+    for key, line in v.items():
+        if not isinstance(line, dict):
+            raise RegisterError(f"{where}: BOM line '{key}' is not readable.")
+        clean = {}
+        for f, val in line.items():
+            if val in (None, ""):
+                continue
+            if f not in BOM_FIELDS:
+                raise RegisterError(f"{where}: '{f}' cannot be changed on a BOM line ({', '.join(BOM_FIELDS)}).")
+            if f in ("qty", "price_each"):
+                n = _num(val, f"{where}: {key} {f.replace('_', ' ')}")
+                clean[f] = n
+            else:
+                clean[f] = str(val).strip()
+        if clean:
+            out[str(key)] = clean
+    return out
+
+
 def tool_eligibility(p: dict) -> str:
     """Why there is no tool cost for this part, or "" when there is."""
     if p["is_assembly"]:
@@ -1565,7 +1597,7 @@ def tool_eligibility(p: dict) -> str:
     proc = register_setup.processes().get(p["process"])
     if not proc:
         return "Set the process first."
-    if proc["part_type"] not in tool_cost.PART_TYPES:
+    if proc["part_type"] not in tool_cost.PART_TYPES + ("sheet_metal",):
         return tool_cost.LATER.get(proc["part_type"], f"Tool cost for {proc['name']} parts comes in a later stage.")
     return ""
 
@@ -1596,7 +1628,8 @@ def _tool_master_hash(part_type: str) -> str:
                      if r["scope"] in costing_setup.TOOL_SCOPES + ("mhr", "labour")],
         "machines": setup["machines"], "grades": setup["labour_grades"],
         "mould": {k: [r for r in mdb[k] if r.get("part_type", part_type) == part_type]
-                  for k in ("mould_bases", "bom_elements", "sizing_rules", "time_parameters", "tool_processes", "tool_materials")},
+                  for k in ("mould_bases", "bom_elements", "sizing_rules", "time_parameters", "tool_processes", "tool_materials",
+                            "grade_rules", "standard_parts", "sheet_operations")},
         "parameters": master_data.parameters(part_type),
     }
     return hashlib.sha1(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()[:12]
@@ -1634,7 +1667,12 @@ def _tool_compute(part_id: int, country: str | None = None) -> dict:
     typed = d["tool_inputs"] or {}
     country = (country or d["tool_country"] or d["country"] or register_setup.settings()["default_country"]).upper()
     as_of = d["costing_month"] or rates.current_month()
+    learned = _learned_for(part_id, part_type, d["material"])
+    if part_type == "sheet_metal":
+        return _die_compute(part_id, d, rev, t, g, cap, volume, volume_note, typed, country, as_of, learned)
     inp = tool_cost.ToolInput(
+        annual_volume=cap["inputs"]["annual_volume"], programme_years=cap["inputs"]["programme_years"],
+        bom=typed.get("bom") or {}, learned=learned,
         part_type=part_type, cavities=typed.get("cavities") or cap["cavities_per_tool"],
         part_length_mm=across[0], part_width_mm=across[1], part_height_mm=g["bbox_axes_mm"][pull],
         projected_area_cm2=g["projected_area_mm2"][pull] / 100, part_weight_g=t.value("weight"),
@@ -1666,12 +1704,213 @@ def _tool_compute(part_id: int, country: str | None = None) -> dict:
     r["key"] = {"revision_id": rev["id"], "part_type": part_type, "material": d["material"], "country": country,
                 "as_of": as_of, "inputs": typed, "cavities": inp.cavities, "tools_count": inp.tools_count,
                 "weight_g": round(t.value("weight"), 6), "rates": sorted(x["id"] for x in r["rates_used"]),
-                "master": _tool_master_hash(part_type)}
+                "master": _tool_master_hash(part_type), "learned": learned}
     r["revision"] = {"id": rev["id"], "rev": rev["rev"]}
     r["process"] = d["process"]
     r["stage_c"] = {k: cap[k] for k in ("cavities_needed", "cavities_per_tool", "tools_for_capacity", "tools_for_life",
                                         "tool_sets_over_programme", "limited_by")} | {"note": stage_c}
     return r
+
+
+def _die_compute(part_id, d, rev, t, g, cap, volume, volume_note, typed, country, as_of, learned) -> dict:
+    """Sheet-metal dies, stage-wise (roadmap stage 23): the dies of the operations in order, each with its BOM and cost."""
+    from . import die_cost
+    try:
+        sheet = sheet_tools_result(part_id)
+    except (ToolNotApplicable, ValueError) as exc:
+        raise ToolNotApplicable(f"Sheet-metal tools: {exc}") from None
+    try:
+        layout = sheet_layout_result(part_id) if sheet["mode"] == "progressive" else None
+    except (ToolNotApplicable, ValueError):
+        layout = None
+    f = sheet["features"]
+    inp = tool_cost.ToolInput(
+        part_type="sheet_metal", cavities=1, part_length_mm=max(f["part_l"], 1), part_width_mm=max(f["part_w"], 1),
+        part_height_mm=max(f["part_h"], 0.1), part_weight_g=t.value("weight"), part_volume_cm3=g["volume_cm3"],
+        part_surface_cm2=g["surface_area_mm2"] / 100, warranty=typed.get("warranty", True),
+        tools_count=cap["tool_sets_over_programme"], country=country, as_of=as_of, material=d["material"],
+        annual_volume=cap["inputs"]["annual_volume"], programme_years=cap["inputs"]["programme_years"],
+        bom=typed.get("bom") or {}, learned=learned)
+    stage_c = (f"Stage C for {cap['inputs']['annual_volume']:,} parts/yr ({volume_note}), "
+               f"{cap['inputs']['programme_years']} programme years")
+    cad = {"type": "cad", "file": rev["original_name"], "rev": rev["rev"], "sha256": rev["sha256"],
+           "note": "Sheet-metal tools (stage 9) from the 3D model"}
+    sources = {k: cad for k in die_cost.FEATURES}
+    sources["part_weight_g"] = {"type": "register", "note": "Net weight = CAD volume × material density (Materials)"}
+    sources["tools_count"] = {"type": "register", "note": f"{stage_c}: max(tools for capacity {cap['tools_for_capacity']}, "
+                                                          f"tools for tool life {cap['tools_for_life']})"}
+    sources["annual_volume"] = sources["programme_years"] = {"type": "register", "note": stage_c}
+    sources["warranty_on"] = {"type": "user", "note": "Tool features"} if "warranty" in typed else {"type": "register", "note": "Default: included"}
+    try:
+        r = die_cost.run(inp, sheet, layout, sources)
+    except ValueError as exc:
+        raise tool_cost.ToolCostError(str(exc)) from None
+    r["key"] = {"revision_id": rev["id"], "part_type": "sheet_metal", "material": d["material"], "country": country,
+                "as_of": as_of, "inputs": typed, "sheet_inputs": d["sheet_inputs"] or {}, "mode": sheet["mode"],
+                "dies": [x["key"] for x in r["dies"]], "tools_count": inp.tools_count, "weight_g": round(t.value("weight"), 6),
+                "rates": sorted(x["id"] for x in r["rates_used"]), "master": _tool_master_hash("sheet_metal"), "learned": learned}
+    r["revision"] = {"id": rev["id"], "rev": rev["rev"]}
+    r["process"] = d["process"]
+    r["stage_c"] = {k: cap[k] for k in ("cavities_needed", "cavities_per_tool", "tools_for_capacity", "tools_for_life",
+                                        "tool_sets_over_programme", "limited_by")} | {"note": stage_c}
+    return r
+
+
+# ---------- tool BOM: your changes, learning, new grades and standard parts (roadmap stage 23) ----------
+
+def _learned_for(part_id: int, part_type: str, material: str) -> dict:
+    """What you chose on earlier parts, per BOM element (latest; the same part material first).
+    A part that already has a tool cost keeps the choices it was costed with, so its cost does not move."""
+    with db.engine().connect() as conn:
+        last = conn.execute(select(db.tool_costs.c.key).where(db.tool_costs.c.part_id == part_id)
+                            .order_by(db.tool_costs.c.version.desc()).limit(1)).scalar()
+        if last is not None:
+            return (last or {}).get("learned") or {}
+        rows = conn.execute(select(db.bom_learning).where((db.bom_learning.c.part_type == part_type)
+                                                          & (db.bom_learning.c.part_id != part_id))
+                            .order_by(db.bom_learning.c.at.desc(), db.bom_learning.c.id.desc())).mappings().all()
+    out = {}
+    for same_material in (True, False):
+        for r in rows:
+            if r["element"] in out or (same_material and (r["part_material"] or "") != (material or "")):
+                continue
+            n = sum(1 for x in rows if x["element"] == r["element"] and x["grade"] == r["grade"] and x["make"] == r["make"]
+                    and x["std_part"] == r["std_part"])
+            out[r["element"]] = {"grade": r["grade"], "make": r["make"], "std_part": r["std_part"],
+                                 "note": f"{n}× · last on {r['part_code']}" + ("" if same_material else " (other material)")}
+    return out
+
+
+def save_bom_line(part_id: int, key: str, data: dict, as_default: bool = False) -> dict:
+    """Change one tool BOM line of the part (grade, make, qty, price each, standard part; empty = back to suggested),
+    remember the choice for the next parts, optionally make it the master-data default of the element, recalculate."""
+    d = part_detail(part_id, with_rm=False)
+    if tool_eligibility(d):
+        raise RegisterError(tool_eligibility(d))
+    part_type = register_setup.processes()[d["process"]]["part_type"]
+    element = key.split("|", 1)[-1]
+    typed = dict(d["tool_inputs"] or {})
+    bom = dict(typed.get("bom") or {})
+    line = _bom_overrides({key: data}, "BOM line").get(key, {})
+    mdb = mould_db.tables()
+    if line.get("grade") and line["grade"] not in {m["code"] for m in mdb["tool_materials"]}:
+        raise RegisterError(f"Grade '{line['grade']}' is not in Tool materials. Add it first (+ New grade).")
+    if line.get("std_part") and line["std_part"] not in {x["code"] for x in mdb["standard_parts"]}:
+        raise RegisterError(f"Standard part '{line['std_part']}' is not in Standard parts. Add it first (+ New standard part).")
+    if line:
+        bom[key] = line
+    else:
+        bom.pop(key, None)
+    typed["bom"] = bom
+    update_part(part_id, {"tool_inputs": typed}, refresh=False)
+    with db.engine().begin() as conn:
+        if line and any(line.get(k) for k in ("grade", "make", "std_part")):
+            conn.execute(db.bom_learning.insert().values(
+                part_type=part_type, element=element, part_material=d["material"] or "", grade=line.get("grade", ""),
+                make=line.get("make", ""), std_part=line.get("std_part", ""), part_id=part_id, part_code=d["part_code"],
+                user=user()))
+        _log(conn, "part", part_id, "tool_bom_changed", {"line": key, **({k: v for k, v in line.items()} or {"reset": "back to suggested"})})
+    if as_default and line:
+        set_bom_default(part_type, element, line.get("grade"), line.get("make"))
+    try:
+        res = compute_tool(part_id, f"tool BOM changed: {element}")
+    except RegisterError as exc:
+        res = {"stored": False, "version": None, "message": str(exc)}
+    return res | {"part": part_detail(part_id)}
+
+
+def set_bom_default(part_type: str, element: str, grade: str | None, make: str | None) -> None:
+    """Make your grade / make the master-data default of a BOM element (Mould & die database → BOM elements)."""
+    mdb = mould_db.tables()
+    row = next((r for r in mdb["bom_elements"] if r["part_type"] == part_type and r["element"] == element), None)
+    if not row:
+        return
+    old = {"material_code": row["material_code"], "make": row.get("make") or ""}
+    if grade and row["material_code"]:
+        row["material_code"] = grade
+    if make:
+        row["make"] = make
+    if old != {"material_code": row["material_code"], "make": row.get("make") or ""}:
+        mould_db.write(mdb)
+        with db.engine().begin() as conn:
+            _log(conn, "master_data", 0, "saved", {"table": "mould-db/bom_elements", "element": f"{part_type} / {element}",
+                                                    "default": {"old": old, "new": {"material_code": row["material_code"], "make": row.get("make")}}})
+
+
+def add_tool_material(data: dict) -> dict:
+    """A new steel / material grade for tool BOMs: Tool materials row + its price as a rate of the country
+    (approved when you may approve rates, else a draft for the approver)."""
+    from . import auth
+    code = str(data.get("code") or "").strip()
+    if not code:
+        raise RegisterError("New grade: give the grade name, e.g. 'OHNS (O1)'.")
+    density = _num(data.get("density_g_cm3"), "New grade: density", required=True)
+    price = _num(data.get("price_per_kg"), "New grade: price per kg", required=True)
+    if not density or not price:
+        raise RegisterError("New grade: density and price per kg must be more than 0.")
+    country = str(data.get("country") or register_setup.settings()["default_country"]).strip().upper()
+    countries = {c["code"]: c for c in costing_setup.tables()["countries"]}
+    if country not in countries:
+        raise RegisterError(f"New grade: country '{country}' is not in Master data → Countries.")
+    cur = countries[country]["currency"]
+    mdb = mould_db.tables()
+    if any(m["code"].lower() == code.lower() for m in mdb["tool_materials"]):
+        raise RegisterError(f"Grade '{code}' already exists. Pick it from the list.")
+    inr = price if cur == "INR" else None
+    mdb["tool_materials"].append({"code": code, "application": str(data.get("application") or "").strip() or "die_insert",
+                                  "density_g_cm3": density, "rate_per_kg": inr or 0, "hardness": str(data.get("hardness") or "").strip(),
+                                  "make": str(data.get("make") or "").strip(), "is_example": False,
+                                  "notes": str(data.get("notes") or "").strip() or f"Added from a tool BOM by {user()}"})
+    mould_db.write(mdb)
+    approve = auth.may("approve_rates") and (auth.server_mode() or bool(rates.settings()["approver_name"].strip()))
+    rate = rates.create({"category": "tool_material", "item": code, "country": country, "value": price, "unit": f"{cur}/kg",
+                         "currency": cur, "month": rates.current_month(), "source": str(data.get("source") or "your price"),
+                         "comment": f"New grade added from a tool BOM by {user()}"}, approve=approve)
+    with db.engine().begin() as conn:
+        _log(conn, "master_data", 0, "saved", {"table": "mould-db/tool_materials", "added": code, "rate": rate["id"],
+                                                "status": rate["status"]})
+    return {"grade": code, "rate": rate, "approved": rate["status"] == "approved",
+            "message": f"Grade {code} added with {price:g} {cur}/kg for {country}"
+                       + ("" if rate["status"] == "approved" else " as a DRAFT rate: an approver approves it on Rates → Rate review.")}
+
+
+def add_standard_part(data: dict) -> dict:
+    """A new standard part (catalogue item) for tool BOMs: code, maker's part number, description, make, price."""
+    code = str(data.get("code") or "").strip().upper()
+    desc = str(data.get("description") or "").strip()
+    make = str(data.get("make") or "").strip()
+    pn = str(data.get("part_number") or "").strip()
+    if not (code and desc and make and pn):
+        raise RegisterError("New standard part: code, part number, description and make are all needed.")
+    price = _num(data.get("price"), "New standard part: price", required=True)
+    country = str(data.get("country") or "").strip().upper()
+    countries = {c["code"]: c for c in costing_setup.tables()["countries"]}
+    if country and country not in countries:
+        raise RegisterError(f"New standard part: country '{country}' is not in Master data → Countries.")
+    cur = str(data.get("currency") or (countries[country]["currency"] if country else "INR")).strip().upper()
+    mdb = mould_db.tables()
+    if any(x["code"] == code for x in mdb["standard_parts"]):
+        raise RegisterError(f"Standard part '{code}' already exists. Pick it from the list.")
+    row = {"code": code, "part_number": pn, "description": desc, "element": str(data.get("element") or "").strip(),
+           "make": make, "country": country, "currency": cur, "price": price, "is_example": False,
+           "notes": str(data.get("notes") or "").strip() or f"Added from a tool BOM by {user()}"}
+    mdb["standard_parts"].append(row)
+    mould_db.write(mdb)
+    with db.engine().begin() as conn:
+        _log(conn, "master_data", 0, "saved", {"table": "mould-db/standard_parts", "added": f"{code} {make} {pn}"})
+    return {"standard_part": row, "message": f"Standard part {code} ({make} {pn}) added: {price:g} {cur}."}
+
+
+def bom_choices() -> dict:
+    """Drop-down lists for the tool BOM: grades (Tool materials) and standard parts."""
+    mdb = mould_db.tables()
+    return {"grades": [{"code": m["code"], "application": m["application"], "hardness": m["hardness"], "make": m.get("make") or "",
+                        "is_example": m["is_example"]} for m in mdb["tool_materials"]],
+            "standard_parts": [{k: x.get(k) for k in ("code", "part_number", "description", "element", "make", "country", "currency",
+                                                      "price", "is_example")} for x in mdb["standard_parts"]],
+            "makes": sorted({x for m in mdb["tool_materials"] for x in [m.get("make")] if x}
+                            | {x for e in mdb["bom_elements"] for x in [e.get("make")] if x}
+                            | {x["make"] for x in mdb["standard_parts"] if x.get("make")})}
 
 
 def _concept_inputs(part_id: int):
@@ -1854,7 +2093,12 @@ def recalculate_project_tools(project_id: int, reason: str = "recalculated with 
 
 def set_tool_inputs(part_id: int, tool_inputs: dict | None, tool_country: str | None = None,
                     reason: str = "tool inputs saved") -> dict:
-    data = {"tool_inputs": tool_inputs or {}}
+    tool_inputs = dict(tool_inputs or {})
+    if "bom" not in tool_inputs:  # the Tool features form does not carry the BOM changes: keep them
+        old_bom = (part_detail(part_id, with_rm=False)["tool_inputs"] or {}).get("bom")
+        if old_bom:
+            tool_inputs["bom"] = old_bom
+    data = {"tool_inputs": tool_inputs}
     if tool_country is not None:
         data["tool_country"] = tool_country
     update_part(part_id, data, refresh=False)
@@ -1943,10 +2187,13 @@ def tool_cost_excel(tr: dict, part: dict | None = None) -> bytes:
     sheet("Cost build-up", ["Step", "Formula", "Value", "Unit"],
           [[nodes[g["node"]]["label"], "Σ BOM lines of the group", v(g["node"]), cur] for g in tr["groups"]] +
           [[nodes[s["node"]]["label"], nodes[s["node"]]["formula"], v(s["node"]), nodes[s["node"]]["unit"]] for s in tr["steps"]])
-    sheet("BOM & processes", ["Element", "Category", "Qty", "Material", "Steel weight each (kg)", f"Steel ({cur})",
+    sheet("BOM & processes", ["Die", "Element", "Category", "Qty", "Grade", "Grade from", "Make", "Standard part", "Part number",
+                              "Changed by you", "Steel weight each (kg)", f"Steel ({cur})",
                               f"Bought-out ({cur})", "Process", "Priced by", "Hours", "Amount", f"Process ({cur})",
                               f"Line total ({cur})", ""],
-          [[l["element"], l["category"], l["quantity"], l["material"], l["weight_each_kg"], l["material_cost"],
+          [[l.get("die", ""), l["element"], l["category"], l["quantity"], l.get("grade", l["material"]), l.get("grade_reason", ""),
+            l.get("make", ""), l.get("std_part", ""), l.get("part_number", ""), ", ".join(l.get("changed") or []) or
+            (f"learned ({l['learned']})" if l.get("learned") else ""), l["weight_each_kg"], l["material_cost"],
             l["bought_out_cost"], l["process"], l["pricing"].replace("_", " "), l["hours"], l["amount"], l["process_cost"],
             l["total"], "EXAMPLE" if l["is_example"] else ""] for l in tr["lines"]])
     sheet("Steps", ["Step", "Formula", "Value", "Unit"],
