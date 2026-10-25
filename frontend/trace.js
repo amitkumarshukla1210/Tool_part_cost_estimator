@@ -9,6 +9,7 @@
   const STATUS = { approved: "Approved", reviewed: "Reviewed", draft: "Draft", rejected: "Rejected" };
   let stack = [];
   let panel;
+  let panelClick = () => {};
 
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
@@ -44,6 +45,7 @@
     try { setFull(localStorage.getItem("dtc-trace-full") === "1"); } catch { setFull(false); }
     full.addEventListener("click", () => setFull(!panel.classList.contains("full")));
     panel.addEventListener("click", onEditClick);
+    panel.addEventListener("click", (e) => panelClick(e));
     panel.querySelector(".trace-back").addEventListener("click", () => {
       stack.pop();
       render();
@@ -90,6 +92,7 @@
     const n = trace.nodes[id];
     let html = `<h3>${esc(n.label)}</h3><p class="trace-value">${fmtNode(n)}</p>`;
     if (n.description) html += `<p class="note">${esc(n.description)}</p>`;
+    html += gradeBox(n, trace, stack.at(-1).ctx);       // steel grade first: why it was chosen, and another with its price
 
     if (n.kind === "calculated") {
       html += `<p class="trace-label">Formula${n.override ? ' <span class="badge badge-override">changed for this part</span>' : ""}</p>
@@ -144,6 +147,8 @@
     body.innerHTML = html;
     const holder = body.querySelector("[data-rate]");
     if (holder) loadHistory(holder, n.source.rate);
+    const grades = body.querySelector("[data-grades]");
+    if (grades) loadGrades(grades, trace);
     const bases = body.querySelector("[data-bases]");
     if (bases) loadBases(bases, n, stack.at(-1).ctx);
   }
@@ -268,6 +273,82 @@
     if (!formula && ref?.choose_base && n.source?.type === "override") html += `<div data-bases></div>`;
     return html;
   }
+
+  // ---------- steel grade: why this grade, and choose another with its price (tool BOM lines) ----------
+  function gradeInfo(n, trace) {
+    if (n.grade) return { current: n.grade.grade, lines: [n.grade] };
+    const src = n.source?.type === "override" ? n.source.was_source : n.source;
+    if (src?.type !== "rate" || src.rate.category !== "tool_material") return null;
+    const current = src.rate.item;
+    const lines = (trace.lines || []).filter((l) => l.grade === current)
+      .map((l) => ({ line_key: l.key, element: (l.die ? l.die + " · " : "") + l.element, grade: l.grade, reason: l.grade_reason, suggested: l.suggested_grade }));
+    return { current, lines };
+  }
+
+  function gradeBox(n, trace, ctx) {
+    const g = gradeInfo(n, trace);
+    if (!g || !g.lines.length) return "";
+    const editable = ctx && ctx.scope === "tool";
+    return `<div class="trace-edit grade-box" data-grades><p class="trace-label">Steel grade · ${esc(g.current)}</p>
+      <div class="table-wrap"><table class="cost-table" data-nofilter><thead><tr>${editable ? "<th></th>" : ""}<th>BOM line</th><th>Why this grade</th></tr></thead><tbody>
+      ${g.lines.map((l) => `<tr>${editable ? `<td><input type="checkbox" data-gline="${esc(l.line_key)}" checked /></td>` : ""}
+        <td>${esc(l.element)}</td><td>${esc(l.reason || "")}${l.suggested && l.suggested !== l.grade ? ` · suggested ${esc(l.suggested)}` : ""}</td></tr>`).join("")}
+      </tbody></table></div>
+      ${editable ? `<div class="row"><label>Grade <select data-grade-pick><option value="${esc(g.current)}">${esc(g.current)} (loading prices…)</option></select></label>
+        <span data-grade-price class="note"></span></div>
+        <div class="row"><button type="button" class="btn btn-primary small" data-grade-apply>Use this grade for the ticked lines</button></div>
+        <p class="note">The price per kg is the approved rate of the tool country (${esc(trace.country || "")}, ${esc(trace.as_of || "")}). The tool cost is
+          recalculated and stored; the choice is learned for the next parts. A grade not in the list: + New grade on the Tool BOM.</p>
+        <p class="status" data-grade-status></p>` : '<p class="note">Open this from a part (Parts → Tool cost) to change the grade.</p>'}</div>`;
+  }
+
+  let gradePrices = null;
+  async function loadGrades(holder, trace) {
+    const sel = holder.querySelector("[data-grade-pick]");
+    if (!sel) return;
+    const cur = sel.value;
+    try {
+      gradePrices = await (await fetch(`/api/tool-bom/grade-prices?country=${encodeURIComponent(trace.country || "IN")}&as_of=${encodeURIComponent(trace.as_of || "")}`)).json();
+      const fmt = (code) => { const p = gradePrices[code]; return p?.value != null ? `${num(p.value)} ${p.unit}` : "no approved price"; };
+      sel.innerHTML = Object.keys(gradePrices).map((code) => `<option value="${esc(code)}" ${code === cur ? "selected" : ""}>${esc(code)} · ${esc(gradePrices[code].hardness || "")} · ${fmt(code)}${code === cur ? " (now)" : ""}</option>`).join("");
+      const show = () => {
+        const a = gradePrices[cur]?.value, b = gradePrices[sel.value]?.value;
+        holder.querySelector("[data-grade-price]").innerHTML = sel.value === cur ? "" : b == null ? "<b>No approved price for this grade in this country.</b>"
+          : `${num(b)} ${esc(gradePrices[sel.value].unit)} instead of ${num(a)}${a ? ` (${b >= a ? "+" : ""}${num(((b - a) / a) * 100, 1)} %)` : ""} · make ${esc(gradePrices[sel.value].make || "—")}`;
+      };
+      sel.addEventListener("change", show);
+      show();
+    } catch (err) {
+      holder.querySelector("[data-grade-price]").textContent = err.message;
+    }
+  }
+
+  panelClick = async (e) => {
+    const b = e.target.closest("[data-grade-apply]");
+    if (!b) return;
+    const box = b.closest(".grade-box");
+    const st = box.querySelector("[data-grade-status]");
+    const keys = [...box.querySelectorAll("[data-gline]:checked")].map((c) => c.dataset.gline);
+    const grade = box.querySelector("[data-grade-pick]").value;
+    const { trace, node: id, ctx } = stack.at(-1);
+    try {
+      if (!keys.length) throw new Error("Tick at least one BOM line.");
+      st.textContent = "Recalculating the tool cost…"; st.className = "status";
+      const r = await call(`/api/parts/${ctx.partId}/tool-bom/grade`, "PUT", { keys, grade });
+      const fresh = await ctx.reload();
+      if (fresh) {
+        // the steel rate node of the new grade, else the same node
+        const pre = id.includes(":steel:") ? id.slice(0, id.indexOf("steel:")) : "";
+        const next = fresh.nodes[`${pre}steel:${grade}`] ? `${pre}steel:${grade}` : fresh.nodes[id] ? id : fresh.root;
+        stack = [{ trace: fresh, node: next, ctx }];
+        render();
+      }
+      const st2 = panel.querySelector("[data-grade-status]") || panel.querySelector('.trace-edit [data-ed="status"]');
+      if (st2) { st2.textContent = r.message || `Grade ${grade} used.`; st2.className = "status ok"; }
+    } catch (err) {
+      st.textContent = err.message; st.className = "status error";
+    }
+  };
 
   async function call(url, method, body) {
     const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });

@@ -603,6 +603,12 @@ element's rule in master data. The numbers in it are its constants (here a base 
 plate), the names are the inputs listed below it, and the notes of the element are shown. Change it for this part, or save it
 for every tool.
 
+**Steel grade from the trace:** clicking a steel rate (e.g. *Steel rate · D2*) or a line's steel cost shows at the top
+**why this grade** for every BOM line using it (Grade rule with its reason, learned from your earlier parts, your choice or the
+element default) and a **grade drop-down with the approved price per kg** of each grade in the tool country, showing the
+difference (e.g. 520 INR/kg instead of 500, +4 %) and the make. Tick the lines, click **Use this grade for the ticked lines**:
+the tool cost is recalculated and stored and the choice is learned for the next parts. Works for every mould and die.
+
 **Mould base / die set:** clicking the mould base or die set price shows every base of that part type (size, usable area,
 stack height, weight, price) with **Use for this part** (instead of the smallest that fits; a smaller one is warned) and
 **+ Add a row** (saved to Master data → Mould bases, then selectable).
