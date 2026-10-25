@@ -579,6 +579,65 @@ Two more part types run through the same stages as injection moulding; pick the 
 All new rows are EXAMPLE values (machines EPS-1000/1400/1800 and ISBM-2C/4C/6C/8C, materials, aluminium 7075 / 6061, bases, BOM rules, cycle times, steam and resin rates for 9 countries, HS 3923). The country comparison and landed cost, the part cost and the project view work
 for them unchanged. The concept and simulation cards (opening direction, undercuts, wall and draft maps) are for plastic injection and die casting only.
 
+## Sheet-metal dies and the tool BOM: grade, make, standard parts, learning (roadmap stage 23)
+
+**Sheet-metal dies, stage-wise.** A sheet-metal part's tool cost (Parts → the part → Tool cost) suggests its dies from
+the operations in order and the die type (Sheet-metal tools):
+- **Multi-stage**: one die per operation (*Die 1: Blanking*, *Die 2: Piercing*, *Die 3: Bending (V)*…).
+- **Progressive**: one die holding every station.
+
+Each die is sized as follows:
+
+| Value | Rule |
+|---|---|
+| Die plate length / width | Work area (blank, or strip pitch × stations) + 2 × `die_wall_mm` |
+| Die plate height | max(`die_plate_min_mm`, `die_plate_t_factor` × thickness) |
+| Die set | The smallest one in *Mould bases* (part type `sheet_metal`) that takes the die plate |
+
+Each die then gets the BOM elements of its operations (*BOM elements → operations*):
+- die plate and blanking punch (D2, from *Grade rules*);
+- piercing punches (standard), punch holder, stripper and hardened backing plates;
+- bending punch and V-block, pressure pad, draw punch, draw ring and blank holder;
+- pilots (progressive), springs, screws and dowels;
+- wire cut of the die profile and the punches, CNC, grinding, heat treatment, fitting and design.
+
+Each die is priced like a mould: steel rates, machine hour rate (MHR) + labour, try-out on the smallest *Press* that takes the die's force × `press_safety_factor`, then overhead, profit, packing, transport and warranty. The part shows a table of the dies (operations, die set, die plate, press, cost each) and the total. CAPEX = Σ dies × tools over the programme.
+
+**Tool BOM on the part** (every mould and die). Each line shows:
+- **Grade**, suggested in this order:
+  1. your change on the part;
+  2. **learned from your earlier parts**;
+  3. *Grade rules*;
+  4. the element default.
+- **Make** (from the element, the grade or the standard part).
+- **Standard part** with the maker's **part number**.
+- **Price each** and the line cost.
+
+Change any of them and click **Save**: the tool cost is recalculated and stored as a new version, and the line is marked *changed by you*. *Price each* (INR) replaces the calculated cost of the line; *Reset* goes back to the suggestion. Tick **my default** to make the grade and make the master-data default of that element for every new tool (needs *Edit master data*).
+
+**Learning.**
+- Every grade, make or standard part you choose on a line is remembered per part type and element, the same part material first.
+- The **next new parts** get it as their suggestion, shown as *learned · 2× · last on RF220CRLRL002*.
+- A part that already has a tool cost keeps the choices it was costed with, so its cost does not move on its own.
+
+**New grade / new standard part** (on the BOM):
+- **+ New grade**: name, make / mill, price per kg and its country, density, hardness. This adds a *Tool materials* row and its price as a rate of that country. The rate is approved when you may approve rates; otherwise it is a draft for the approver.
+- **+ New standard part**: code, **part number**, description, make, BOM element it fits, price and country. This adds a *Standard parts* row.
+
+From then on both are in the drop-downs.
+
+**Grade rules** (*Mould & die database → Grade rules*): per part type and BOM element, the first rule that applies (by order) gives the grade and the reason shown. Each rule has a condition on e.g. `programme_shots`, `annual_volume` or `t`, plus *part material contains* keywords. Examples:
+
+| Element | Material / condition | Grade |
+|---|---|---|
+| Cavity / core insert | PVC, or PC / PMMA / clear | S136 ESR |
+| Cavity / core insert | Glass-filled (GF) | H13 |
+| Cavity / core insert | Over 1 million shots | H13 |
+| Die-casting inserts | Over 150,000 shots | 1.2343 ESR |
+| Die plate, blanking punch | Thickness ≥ 3 mm or over 2 million strokes | SKD11 |
+
+Otherwise an element keeps its default grade (2738 for plastic inserts, D2 for cutting steels). All of these are EXAMPLE values to replace with your tooling standard.
+
 ## Logins, admin control and suppliers (roadmap stage 22)
 
 **Logins are always on.** Everybody uses their own login ID; every change, approval and backup is recorded under that ID.
@@ -793,7 +852,8 @@ All planned stages are built: Stages A–C, the rate library and MHR engine, the
 (2), rates by country (3), tool cost (4, 4b), mould concept (5), simulation (6), design loop (7), part cost (8),
 sheet-metal tools (9, 10), country comparison (11), monthly rate update (12), project leader view (13), harness & PCB
 (14–16), server mode (17), EPS and PET blow moulding (18, 19), backup and the Windows update kit (20), the corrections
-from use (21) and logins with admin control and the supplier master (22). The original requirement sets **A** sheet-metal tools, **B** tool / mould / die cost, **C** country
+from use (21), logins with admin control and the supplier master (22), and sheet-metal dies stage-wise with the
+editable, learning tool BOM (23). The original requirement sets **A** sheet-metal tools, **B** tool / mould / die cost, **C** country
 rate library, **D** country comparison and **E** monthly rate update with approval are all covered.
 
 ### Ground rules for everything that follows

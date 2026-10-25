@@ -124,7 +124,7 @@ def test_missing_rate_marks_the_result_not_priced():
 
 
 def test_sheet_metal_and_foundry_tools_come_later():
-    for pt, msg in (("sheet_metal", "stages 9 and 10"), ("foundry", "later stage")):
+    for pt, msg in (("sheet_metal", "costed die by die on the part"), ("foundry", "later stage")):
         with pytest.raises(tool_cost.ToolCostError, match=msg):
             run(part_type=pt)
 
@@ -277,7 +277,7 @@ def test_parts_without_a_tool_say_why():
     p = project()
     sm = add_part(p, "sheet_metal_bracket.step", "Mild steel CRCA / HR", "sheet_metal_multistage", "SM-1")
     t = detail(sm)["tool"]
-    assert not t["applicable"] and "stages 9 and 10" in t["problem"]
+    assert t["applicable"] and t["latest"]                                   # sheet-metal dies are costed (stage 23)
     bo = add_part(p, code="BO-1")
     client.put(f"/api/parts/{bo}", json={"sourcing": "bought_out"})
     assert "bought ready-made" in detail(bo)["tool"]["problem"]
@@ -286,7 +286,7 @@ def test_parts_without_a_tool_say_why():
 def test_search_dashboard_and_exports_show_the_tool_cost():
     p = project(budget=2_000_000)
     pid = add_part(p)
-    add_part(p, "sheet_metal_bracket.step", "Mild steel CRCA / HR", "sheet_metal_multistage", "SM-1")
+    add_part(p, material="Grey cast iron FG260", process="foundry", code="FD-1")   # foundry patterns: no tool cost yet
     d = detail(pid)
     rows = client.get("/api/parts", params={"project_id": p["id"], "tool_min": 1}).json()["rows"]
     assert [r["id"] for r in rows] == [pid] and rows[0]["tool_is_example"]
