@@ -232,4 +232,6 @@ def allowed(user: dict, method: str, path: str) -> str | None:
         return None
     if not has_role("engineer", user):
         return "Your role 'viewer' can read but not change anything."
+    if method == "DELETE" and path.startswith("/api/projects/") and not has_role("admin", user):
+        return "Deleting a project needs the role 'admin'."
     return None

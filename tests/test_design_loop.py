@@ -49,3 +49,16 @@ def test_bad_status_code_in_setup_is_rejected():
     t["part_statuses"][0]["next_statuses"] = "no_such_status"
     r = client.put("/api/register-setup", json=t)
     assert r.status_code == 400 and "not a status code" in r.text
+
+
+def test_step_back_to_a_forgotten_status_needs_a_comment():
+    pid = add_part(project("DL3"))
+    for s in ("concept_tool", "simulation"):
+        assert move(pid, s).status_code == 200
+    loop = client.get(f"/api/parts/{pid}/design-loop").json()
+    assert loop["back"] == ["concept_tool", "uploaded"]                  # earlier statuses, nearest first
+    r = move(pid, "concept_tool")
+    assert r.status_code == 400 and "needs a comment" in r.json()["detail"]
+    loop = move(pid, "concept_tool", "concept tool review forgotten").json()
+    assert loop["status"] == "concept_tool" and loop["timeline"][-1]["step_back"] is True
+    assert move(pid, "simulation").status_code == 200                     # and on again as normal

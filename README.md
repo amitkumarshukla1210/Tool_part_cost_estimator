@@ -58,7 +58,7 @@ chosen part type, with typical starting values filled in, and recalculates as yo
 | Plastic | Runner weight % of net (15 %), purge / start-up loss (2 %) | Net × (1 + runner %) |
 | Die casting | Casting yield % (60 %): biscuit, runners, overflows. Melt loss (3 %) | Net ÷ yield % |
 | Foundry | Casting yield % (65 %): gating, risers. Melt loss (4 %) | Net ÷ yield % |
-| Sheet metal | Thickness and flat blank L × W (estimated from the 3D model), sheet size (2500 × 1250), gap between blanks (5 mm), sheet edge trim (5 mm) | Sheet weight ÷ blanks per sheet |
+| Sheet metal | Thickness and flat blank L × W (**calculated** from the 3D model, can be typed over), gap between blanks (5 mm); sheet size (2500 × 1250) and edge trim (5 mm) for the nesting information | (Blank L + gap) × (blank W + gap) × thickness × density. Blanks per sheet and sheet utilisation are shown as information |
 
 All part types also use a **material rate per kg** and a **scrap / regrind / returns value per kg**. Both are **approved rates of the
 producing country** from the rate library (categories `material` and `material_scrap`, item = the material name), for the costing month.
@@ -264,7 +264,14 @@ big changes.
 ## Part register & project dashboard (roadmap stage 1)
 
 **Dashboard → + New project** (code, name, customer, CAPEX budget) and **+ Variant** (e.g. STD, with target BOM
-cost and annual volume). Then bring in the parts on **Import**:
+cost and annual volume). **Edit project → Delete project** removes a project with its variants, BOM, parts, revisions,
+cost versions and CAPEX lines: type the project code to confirm. It is refused while one of its parts is used by another
+project (in its BOM or moulded into its part), a backup ZIP `dtc-before-delete-<code>-<time>.zip` is made first (restore
+it with `backup.py --restore` or `DTC_Restore.bat`), and in server mode only an admin may delete.
+
+**Every table has column filters:** the ▾ in a column header opens a search box and the column's values as tick boxes
+(multi-select, with Select all, Clear all and Reset). Filters on several columns combine; *Clear all filters* above the
+table shows every row again. Then bring in the parts on **Import**:
 
 - **3D file (part or assembly):** upload a STEP file. An assembly is split into its parts automatically:
   - The tree shows every part with a thumbnail, its quantity in the parent and its total quantity.
@@ -458,7 +465,8 @@ it, Parameters and Insert moulding rules; `log` and `exp` are allowed). All rows
 
 ## Design loop (roadmap stage 7)
 
-Each part's panel has a **Design loop** card: the status flow, *Move to* (only the allowed next statuses) with a comment,
+Each part's panel has a **Design loop** card: the status flow, *Move to* (the allowed next statuses, plus **↩ Back to** any
+earlier status, e.g. a forgotten Concept tool step; a step back always needs a comment and shows as ↩ in the timeline) with a comment,
 and the timeline of status changes and revisions (who, when, why, days in each status). The rules are columns of
 **Part register setup → Part statuses**: *Allowed next statuses*, *Comment required to enter* and *Status after a new
 revision upload* (e.g. Corrections required → Revised when the corrected model is uploaded). In the Simulation card,
@@ -745,10 +753,12 @@ would use the example data inside the app folder.
 
 ## Full roadmap
 
-Stages A–C, the rate library and MHR engine, the part register (stages 1 and 1b), the RM cost on the register (stage 2), the material & process rates by country (stage 3) and the tool cost engine (stage 4) are done.
-Next come five requirement sets, built one PR at a time:
-**A** sheet-metal tools, **B** tool / mould / die cost, **C** country rate library,
-**D** country comparison for parts, and **E** dynamic rate library with monthly update and approval.
+All planned stages are built: Stages A–C, the rate library and MHR engine, the part register (stages 1 and 1b), RM cost
+(2), rates by country (3), tool cost (4, 4b), mould concept (5), simulation (6), design loop (7), part cost (8),
+sheet-metal tools (9, 10), country comparison (11), monthly rate update (12), project leader view (13), harness & PCB
+(14–16), server mode (17), EPS and PET blow moulding (18, 19), backup and the Windows update kit, and the corrections
+from use (stage 21). The original requirement sets **A** sheet-metal tools, **B** tool / mould / die cost, **C** country
+rate library, **D** country comparison and **E** monthly rate update with approval are all covered.
 
 ### Ground rules for everything that follows
 - **No hard-coded values.** Every number comes from master data or from a formula stored in master data.

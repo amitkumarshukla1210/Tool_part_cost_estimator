@@ -111,7 +111,7 @@
               <tr><td>Plastic</td><td class="calc">Net × (1 + runner %)</td><td class="calc">Gross × (1 + purge / start-up loss %)</td></tr>
               <tr><td>Die casting</td><td class="calc">Net ÷ casting yield %</td><td class="calc">Gross × (1 + melt loss %)</td></tr>
               <tr><td>Foundry</td><td class="calc">Net ÷ casting yield %</td><td class="calc">Gross × (1 + melt loss %)</td></tr>
-              <tr><td>Sheet metal</td><td class="calc">Sheet weight ÷ blanks nested per sheet</td><td class="calc">= gross</td></tr>
+              <tr><td>Sheet metal</td><td class="calc">(Blank L + gap) × (blank W + gap) × thickness × density</td><td class="calc">= gross</td></tr>
               <tr class="total"><td>Net RM cost</td><td class="calc" colspan="2">Material used × rate/kg − (gross − net) × scrap value/kg</td></tr>
             </tbody>
           </table>
@@ -256,5 +256,6 @@
     <div class="container"><p class="footnote">© Design to Cost</p></div>
   </footer>
   <script src="/static/auth.js"></script>
+  <script src="/static/table-filter.js"></script>
 </body>
 </html>

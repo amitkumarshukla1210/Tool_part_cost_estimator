@@ -106,6 +106,9 @@
         <label class="span2">Description <input name="description" /></label>
         <p class="status error span2" id="projectStatus"></p>
         <div class="span2 dialog-actions">
+          <button type="button" class="btn btn-outline btn-danger" id="deleteProject" hidden
+                  title="Delete this project with its variants, BOM, parts, revisions and costs (a backup is made first)">Delete project</button>
+          <span class="spacer"></span>
           <button type="button" class="btn btn-outline" data-close>Cancel</button>
           <button type="submit" class="btn btn-primary" value="save">Save</button>
         </div>
@@ -136,5 +139,6 @@
   <script src="/static/common.js"></script>
   <script src="/static/dashboard.js"></script>
   <script src="/static/auth.js"></script>
+  <script src="/static/table-filter.js"></script>
 </body>
 </html>

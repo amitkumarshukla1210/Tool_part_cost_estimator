@@ -116,3 +116,26 @@ footer { margin-top: 0; }
 /* ===== Tool cost (stage 4) ===== */
 .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .cost-table td.how { font-size: 12px; color: var(--grey); }
+
+/* column filters on every table (table-filter.js) */
+.tf-btn { margin-left: 4px; padding: 0 4px; border: 1px solid transparent; border-radius: 4px; background: transparent;
+  color: inherit; opacity: .55; cursor: pointer; font-size: .85em; line-height: 1.4; vertical-align: middle; }
+.tf-btn:hover { opacity: 1; border-color: currentColor; }
+.tf-btn.on { opacity: 1; background: #f5b400; color: #111; border-color: #f5b400; }
+tr.tf-hidden { display: none; }
+.tf-bar { margin: 6px 0; font-size: .85rem; color: #555; }
+.tf-bar .tf-clear { margin-left: 6px; border: 1px solid #c0392b; color: #c0392b; background: #fff; border-radius: 4px;
+  padding: 1px 8px; cursor: pointer; }
+.tf-pop { position: fixed; z-index: 10000; width: 280px; max-width: calc(100vw - 16px); background: #fff; color: #111;
+  border: 1px solid #ccd; border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.18); padding: 8px; font-size: .88rem;
+  text-transform: none; letter-spacing: normal; font-weight: normal; text-align: left; }
+.tf-pop .tf-search { width: 100%; box-sizing: border-box; padding: 5px 8px; border: 1px solid #ccd; border-radius: 6px; }
+.tf-pop .tf-actions { display: flex; gap: 6px; margin: 6px 0; }
+.tf-pop .tf-actions button { flex: 1; padding: 3px 4px; border: 1px solid #ccd; background: #f6f7fa; border-radius: 5px; cursor: pointer; font-size: .82rem; }
+.tf-pop .tf-actions button:hover { background: #e8ebf2; }
+.tf-pop .tf-list { max-height: 260px; overflow: auto; border-top: 1px solid #eee; padding-top: 4px; }
+.tf-pop .tf-list label { text-transform: none; letter-spacing: normal; font-size: .86rem; color: #111; display: flex; align-items: center; gap: 6px; padding: 2px 2px; cursor: pointer; font-weight: normal; margin: 0; }
+.tf-pop .tf-list label span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-pop .tf-list label em { color: #888; font-style: normal; font-size: .78rem; }
+.tf-pop .tf-note, .tf-pop .tf-hint { margin: 4px 0 0; color: #888; font-size: .8rem; }
+.tf-pop .tf-hint:empty { display: none; }
