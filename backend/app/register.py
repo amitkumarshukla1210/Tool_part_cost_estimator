@@ -209,6 +209,62 @@ def delete_project(pid: int, confirm_code: str = "", backup: bool = True) -> dic
     return {"deleted": p["code"], "parts": len(part_ids), "variants": len(variant_ids), "backup": backup_file}
 
 
+def remove_from_bom(part_id: int) -> dict:
+    """Take the part out of the BOM of every variant of its project (the part stays in the register).
+    BOM lines under it (its children, if it is an assembly) are removed too; the child parts stay."""
+    with db.engine().begin() as conn:
+        p = conn.execute(select(db.parts).where(db.parts.c.id == part_id)).mappings().first()
+        if not p:
+            raise RegisterError(f"Part {part_id} does not exist.")
+        bl = db.bom_lines
+        rows = conn.execute(select(bl.c.id, db.variants.c.code).join(db.variants, bl.c.variant_id == db.variants.c.id)
+                            .where((bl.c.child_part_id == part_id) | (bl.c.parent_part_id == part_id))).all()
+        if not rows:
+            raise RegisterError(f"{p['part_code']} is not in the BOM of any variant.")
+        conn.execute(bl.delete().where(bl.c.id.in_([r[0] for r in rows])))
+        variants = sorted({r[1] for r in rows})
+        _log(conn, "part", part_id, "removed_from_bom", {"variants": ", ".join(variants), "lines": len(rows)})
+    return {"part_code": p["part_code"], "variants": variants, "lines": len(rows),
+            "message": f"{p['part_code']} removed from the BOM of {', '.join(variants)} ({len(rows)} line(s)). The part stays in the register."}
+
+
+def delete_part(part_id: int, confirm_code: str = "", backup: bool = True) -> dict:
+    """Delete a part from the register: its revisions, RM / tool / part cost versions, suppliers, BOM lines and its
+    tool CAPEX line. You type the part code to confirm; refused while it is moulded into another part; a backup
+    ZIP is made first; CAD files stay in storage (shared by checksum); the history keeps a 'deleted' record."""
+    with db.engine().connect() as conn:
+        p = conn.execute(select(db.parts).where(db.parts.c.id == part_id)).mappings().first()
+        if not p:
+            raise RegisterError(f"Part {part_id} does not exist.")
+        if str(confirm_code or "").strip().upper() != p["part_code"].upper():
+            raise RegisterError(f"To delete part {p['part_code']}, type its code {p['part_code']} to confirm.")
+        body = db.parts.alias("body")
+        used = [c for (c,) in conn.execute(select(body.c.part_code).select_from(
+            db.part_inserts.join(body, db.part_inserts.c.part_id == body.c.id))
+            .where((db.part_inserts.c.insert_part_id == part_id) & (db.part_inserts.c.part_id != part_id)))]
+    if used:
+        raise RegisterError(f"{p['part_code']} is moulded into {', '.join(used)}. Unlink it there first (Moulded-in inserts).")
+    backup_file = ""
+    if backup:
+        from . import backup_tools
+        backup_file = backup_tools.make_backup(label=f"dtc-before-delete-{p['part_code']}").name
+    with db.engine().begin() as conn:
+        bl = db.bom_lines
+        n_bom = conn.execute(bl.delete().where((bl.c.child_part_id == part_id) | (bl.c.parent_part_id == part_id))).rowcount
+        conn.execute(db.part_inserts.delete().where((db.part_inserts.c.part_id == part_id) | (db.part_inserts.c.insert_part_id == part_id)))
+        conn.execute(db.part_suppliers.delete().where(db.part_suppliers.c.part_id == part_id))
+        for t in (db.rm_costs, db.tool_costs, db.piece_costs):
+            conn.execute(t.delete().where(t.c.part_id == part_id))
+        conn.execute(db.capex_items.delete().where((db.capex_items.c.project_id == p["project_id"])
+                                                   & (db.capex_items.c.source_key == f"tool:{part_id}")))
+        conn.execute(db.revisions.delete().where(db.revisions.c.part_id == part_id))
+        conn.execute(db.parts.delete().where(db.parts.c.id == part_id))
+        _log(conn, "part", part_id, "deleted", {"code": p["part_code"], "name": p["name"], "bom_lines": n_bom, "backup": backup_file})
+    return {"deleted": p["part_code"], "bom_lines": n_bom, "backup": backup_file,
+            "message": f"Part {p['part_code']} deleted" + (f" (removed from {n_bom} BOM line(s))" if n_bom else "")
+                       + (f". Backup: {backup_file}" if backup_file else ".")}
+
+
 def list_projects() -> list[dict]:
     with db.engine().connect() as conn:
         counts = dict(conn.execute(select(db.parts.c.project_id, func.count()).group_by(db.parts.c.project_id)).all())

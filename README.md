@@ -269,6 +269,14 @@ cost versions and CAPEX lines: type the project code to confirm. It is refused w
 project (in its BOM or moulded into its part), a backup ZIP `dtc-before-delete-<code>-<time>.zip` is made first (restore
 it with `backup.py --restore` or `DTC_Restore.bat`), and in server mode only an admin may delete.
 
+**Remove or delete a part** (Parts → open the part → bottom of the details form):
+- **Remove from project BOM:** takes the part out of the BOM of every variant of its project. The part stays in the parts list with its files and costs.
+- **Delete part:** removes it from the register: revisions, RM / tool / part cost versions, suppliers, BOM lines and its tool CAPEX line.
+  - Type the part code to confirm.
+  - A backup ZIP `dtc-before-delete-<code>-<time>.zip` is made first.
+  - It is refused while the part is moulded into another part.
+  - Who may do it: *Admin → Permissions → Delete parts* (approver by default).
+
 **Every table has column filters:** the ▾ in a column header opens a search box and the column's values as tick boxes
 (multi-select, with Select all, Clear all and Reset). Filters on several columns combine; *Clear all filters* above the
 table shows every row again. Then bring in the parts on **Import**:

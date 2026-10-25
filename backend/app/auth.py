@@ -38,6 +38,7 @@ PERMISSIONS = {
     "edit_rates": ("engineer", "Edit rates", "Create, change, upload and fetch rate drafts; rate settings"),
     "approve_rates": ("approver", "Approve rates", "Approve rate drafts (only approved rates are used in costing)"),
     "manage_suppliers": ("engineer", "Manage suppliers", "Supplier master and the suppliers / quotes of parts"),
+    "delete_part": ("approver", "Delete parts", "Delete a part from the register (a backup is made first); taking it out of a BOM is 'Change project data'"),
     "delete_project": ("admin", "Delete projects", "Delete a project with its parts and costs (a backup is made first)"),
     "view_activity": ("approver", "See the activity log", "Admin → Activity log: who changed what, when"),
     "backups": ("admin", "Backups", "Admin → Backups: list, make and download backups"),
@@ -335,6 +336,8 @@ def action_for(method: str, path: str) -> str | None:
         return "backups"
     if method == "DELETE" and path.startswith("/api/projects/"):
         return "delete_project"
+    if method == "DELETE" and path.startswith("/api/parts/") and path.count("/") == 3:
+        return "delete_part"
     if path.startswith("/api/suppliers") or (path.startswith("/api/parts/") and "/suppliers" in path):
         return "manage_suppliers"
     if path.startswith(MASTER_PATHS):

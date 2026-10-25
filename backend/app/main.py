@@ -731,6 +731,17 @@ def parts_get(part_id: int):
     return register.part_detail(part_id)
 
 
+@app.delete("/api/parts/{part_id}")
+def parts_delete(part_id: int, confirm: str = ""):
+    """Delete a part from the register; `confirm` must be the part code. A backup ZIP is made first."""
+    return register.delete_part(part_id, confirm)
+
+
+@app.post("/api/parts/{part_id}/remove-from-bom")
+def parts_remove_from_bom(part_id: int):
+    return register.remove_from_bom(part_id)
+
+
 @app.put("/api/parts/{part_id}")
 def parts_update(part_id: int, data: dict):
     return register.update_part(part_id, data)
