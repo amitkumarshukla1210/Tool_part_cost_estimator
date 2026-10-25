@@ -1111,9 +1111,10 @@ def _rm_compute(part_id: int, country: str | None = None) -> dict:
             "note": "Estimated from the 3D model: part width"}}
     country = (country or d["country"] or register_setup.settings()["default_country"]).upper()
     as_of = d["costing_month"] or rates.current_month()
+    t.overrides = (d.get("trace_overrides") or {}).get("rm") or {}
     r = rm_cost.run(family, country=country, as_of=as_of, material=d["material"], part=part, given=overrides,
                     given_source={"type": "user", "note": f"Typed in the part register for {d['part_code']}"}, trace=t)
-    r["key"] = {"revision_id": rev["id"], "material": d["material"], "family": family, "country": country,
+    r["key"] = {"overrides": t.overrides, "revision_id": rev["id"], "material": d["material"], "family": family, "country": country,
                 "as_of": as_of, "inputs": overrides, "net_weight_g": round(t.value("weight"), 6),
                 "rates": sorted(x["id"] for x in r["rates_used"]), "formulas": _formula_hash(family)}
     r["revision"] = {"id": rev["id"], "rev": rev["rev"]}
@@ -1616,7 +1617,7 @@ def _tool_inputs(v, where):
     return out or None
 
 
-BOM_FIELDS = ("grade", "make", "qty", "price_each", "std_part")
+BOM_FIELDS = ("grade", "make", "qty", "price_each", "std_part", "base")
 
 
 def _bom_overrides(v, where) -> dict:
@@ -1728,7 +1729,7 @@ def _tool_compute(part_id: int, country: str | None = None) -> dict:
         return _die_compute(part_id, d, rev, t, g, cap, volume, volume_note, typed, country, as_of, learned)
     inp = tool_cost.ToolInput(
         annual_volume=cap["inputs"]["annual_volume"], programme_years=cap["inputs"]["programme_years"],
-        bom=typed.get("bom") or {}, learned=learned,
+        bom=typed.get("bom") or {}, learned=learned, overrides=(d.get("trace_overrides") or {}).get("tool") or {},
         part_type=part_type, cavities=typed.get("cavities") or cap["cavities_per_tool"],
         part_length_mm=across[0], part_width_mm=across[1], part_height_mm=g["bbox_axes_mm"][pull],
         projected_area_cm2=g["projected_area_mm2"][pull] / 100, part_weight_g=t.value("weight"),
@@ -1760,7 +1761,7 @@ def _tool_compute(part_id: int, country: str | None = None) -> dict:
     r["key"] = {"revision_id": rev["id"], "part_type": part_type, "material": d["material"], "country": country,
                 "as_of": as_of, "inputs": typed, "cavities": inp.cavities, "tools_count": inp.tools_count,
                 "weight_g": round(t.value("weight"), 6), "rates": sorted(x["id"] for x in r["rates_used"]),
-                "master": _tool_master_hash(part_type), "learned": learned}
+                "master": _tool_master_hash(part_type), "learned": learned, "overrides": inp.overrides}
     r["revision"] = {"id": rev["id"], "rev": rev["rev"]}
     r["process"] = d["process"]
     r["stage_c"] = {k: cap[k] for k in ("cavities_needed", "cavities_per_tool", "tools_for_capacity", "tools_for_life",
@@ -1786,7 +1787,7 @@ def _die_compute(part_id, d, rev, t, g, cap, volume, volume_note, typed, country
         part_surface_cm2=g["surface_area_mm2"] / 100, warranty=typed.get("warranty", True),
         tools_count=cap["tool_sets_over_programme"], country=country, as_of=as_of, material=d["material"],
         annual_volume=cap["inputs"]["annual_volume"], programme_years=cap["inputs"]["programme_years"],
-        bom=typed.get("bom") or {}, learned=learned)
+        bom=typed.get("bom") or {}, learned=learned, overrides=(d.get("trace_overrides") or {}).get("tool") or {})
     stage_c = (f"Stage C for {cap['inputs']['annual_volume']:,} parts/yr ({volume_note}), "
                f"{cap['inputs']['programme_years']} programme years")
     cad = {"type": "cad", "file": rev["original_name"], "rev": rev["rev"], "sha256": rev["sha256"],
@@ -1804,7 +1805,8 @@ def _die_compute(part_id, d, rev, t, g, cap, volume, volume_note, typed, country
     r["key"] = {"revision_id": rev["id"], "part_type": "sheet_metal", "material": d["material"], "country": country,
                 "as_of": as_of, "inputs": typed, "sheet_inputs": d["sheet_inputs"] or {}, "mode": sheet["mode"],
                 "dies": [x["key"] for x in r["dies"]], "tools_count": inp.tools_count, "weight_g": round(t.value("weight"), 6),
-                "rates": sorted(x["id"] for x in r["rates_used"]), "master": _tool_master_hash("sheet_metal"), "learned": learned}
+                "rates": sorted(x["id"] for x in r["rates_used"]), "master": _tool_master_hash("sheet_metal"), "learned": learned,
+                "overrides": inp.overrides}
     r["revision"] = {"id": rev["id"], "rev": rev["rev"]}
     r["process"] = d["process"]
     r["stage_c"] = {k: cap[k] for k in ("cavities_needed", "cavities_per_tool", "tools_for_capacity", "tools_for_life",

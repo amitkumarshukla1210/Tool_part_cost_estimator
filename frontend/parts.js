@@ -543,14 +543,14 @@ $("panelBody").addEventListener("click", async (e) => {
     }
   }
   const rt = e.target.closest("[data-rmtrace]");
-  if (rt && part.rmTrace) window.TracePanel.open(part.rmTrace, rt.dataset.rmtrace);
+  if (rt && part.rmTrace) window.TracePanel.open(part.rmTrace, rt.dataset.rmtrace, traceCtx("rm"));
   const rv = e.target.closest("[data-rmversion]");
   if (rv) {
     const tr = await api(`/api/parts/${part.id}/rm-cost/trace?version=${rv.dataset.rmversion}`);
     window.TracePanel.open(tr, tr.root);
   }
   const tt = e.target.closest("[data-tooltrace]");
-  if (tt && part.toolTrace) window.TracePanel.open(part.toolTrace, tt.dataset.tooltrace);
+  if (tt && part.toolTrace) window.TracePanel.open(part.toolTrace, tt.dataset.tooltrace, traceCtx("tool"));
   const tvn = e.target.closest("[data-toolversion]");
   if (tvn) {
     const tr = await api(`/api/parts/${part.id}/tool-cost/trace?version=${tvn.dataset.toolversion}`);
@@ -862,7 +862,7 @@ $("panelBody").addEventListener("submit", async (e) => {
 
 $("panelBody").addEventListener("click", async (e) => {
   const n = e.target.closest("[data-piecetrace]");
-  if (n) window.TracePanel.open(part.piece.live, n.dataset.piecetrace);
+  if (n) window.TracePanel.open(part.piece.live, n.dataset.piecetrace, traceCtx("piece"));
   const pv = e.target.closest("[data-pieceversion]");
   if (pv) {
     const tr = await api(`/api/parts/${part.id}/piece-cost/trace?version=${pv.dataset.pieceversion}`);
@@ -1007,6 +1007,30 @@ $("panelBody").addEventListener("click", async (e) => {
     }
   }
 });
+
+// full screen / side panel, remembered on this PC
+(function () {
+  const btn = $("panelFull");
+  const set = (on) => {
+    $("panel").classList.toggle("full", on);
+    btn.textContent = on ? "⤡ Side panel" : "⤢ Full screen";
+    try { localStorage.setItem("dtc-panel-full", on ? "1" : ""); } catch { /* private window */ }
+  };
+  try { set(localStorage.getItem("dtc-panel-full") === "1"); } catch { set(false); }
+  btn.addEventListener("click", () => set(!$("panel").classList.contains("full")));
+})();
+
+// context for editing from the traceability panel: this part, which calculation, and how to reload it after a change
+function traceCtx(scope) {
+  const id = part.id;
+  return {
+    partId: id, scope, partCode: part.part_code,
+    async reload() {
+      await openPart(id);
+      return scope === "rm" ? part.rmTrace : scope === "tool" ? part.toolTrace : part.piece?.live;
+    },
+  };
+}
 
 // suppliers of the part: main / alternates with quoted piece and tool price against our should-cost
 let supplierList = null;

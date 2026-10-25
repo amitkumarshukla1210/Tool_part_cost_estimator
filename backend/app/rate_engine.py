@@ -52,11 +52,11 @@ def _context(country: str, as_of: str):
 
 
 def run(scope: str, country: str, as_of: str | None = None, machine: dict | None = None,
-        grade: dict | None = None) -> dict:
+        grade: dict | None = None, overrides: dict | None = None) -> dict:
     as_of = as_of or rates.current_month()
     setup, c = _context(country, as_of)
     cur = c["currency"]
-    trace = Trace(cur)
+    trace = Trace(cur, overrides)
     fill = {"machine": machine["machine_id"] if machine else "", "grade": grade["grade"] if grade else ""}
 
     names = {}
@@ -68,7 +68,9 @@ def run(scope: str, country: str, as_of: str | None = None, machine: dict | None
                 raise EngineError(f"Input '{var}' needs a machine.")
             trace.add_input(nid, inp["label"] or var, machine[inp["item"]] or 0, inp["unit"], {
                 "type": "machine", "sheet": "Machines", "machine_id": machine["machine_id"],
-                "field": inp["item"], "is_example": machine["is_example"]})
+                "field": inp["item"], "is_example": machine["is_example"],
+                "ref": {"store": "costing_setup", "table": "machines", "match": {"machine_id": machine["machine_id"]},
+                        "column": inp["item"]}})
         else:
             item = inp["item"].format(**fill)
             rate = rates.lookup(inp["category"], item, country, as_of)
@@ -100,6 +102,8 @@ def evaluate_scope(trace: Trace, setup: dict, scope: str, names: dict, cur: str,
         # Units are written with {cur}, e.g. "{cur}/h"; those values are money.
         trace.compute(nid, r["label"] or r["name"], r["formula"], r["unit"].replace("{cur}", cur),
                       money="{cur}" in r["unit"], description=r["description"], names=names)
+        trace.nodes[nid]["ref"] = {"store": "costing_setup", "table": "cost_formulas",
+                                   "match": {"scope": r["scope"], "name": r["name"]}, "column": "formula"}
         names[r["name"]] = nid
         if r["is_result"]:
             result, result_unit = nid, r["unit"]
@@ -115,18 +119,18 @@ def evaluate_scope(trace: Trace, setup: dict, scope: str, names: dict, cur: str,
     return result, [names[r["name"]] for _, r in rows if not r["is_result"]], order
 
 
-def mhr(machine_id: str, country: str, as_of: str | None = None) -> dict:
+def mhr(machine_id: str, country: str, as_of: str | None = None, overrides: dict | None = None) -> dict:
     machines = {m["machine_id"]: m for m in costing_setup.tables()["machines"]}
     if machine_id not in machines:
         raise EngineError(f"Machine '{machine_id}' is not in Master data → Machines.")
-    return run("mhr", country, as_of, machine=machines[machine_id]) | {"machine": machines[machine_id]}
+    return run("mhr", country, as_of, machine=machines[machine_id], overrides=overrides) | {"machine": machines[machine_id]}
 
 
-def labour_rate(grade: str, country: str, as_of: str | None = None) -> dict:
+def labour_rate(grade: str, country: str, as_of: str | None = None, overrides: dict | None = None) -> dict:
     grades = {g["grade"]: g for g in costing_setup.tables()["labour_grades"]}
     if grade not in grades:
         raise EngineError(f"Labour grade '{grade}' is not in Master data → Labour grades.")
-    return run("labour", country, as_of, grade=grades[grade]) | {"grade": grades[grade]}
+    return run("labour", country, as_of, grade=grades[grade], overrides=overrides) | {"grade": grades[grade]}
 
 
 def overview(country: str, as_of: str | None = None) -> dict:

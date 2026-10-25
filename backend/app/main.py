@@ -1377,6 +1377,31 @@ def suppliers_delete(sid: int):
 
 # ---------- tool BOM: grades, standard parts, your changes (roadmap stage 23) ----------
 
+# ---------- editing from the traceability panel (roadmap stage 24) ----------
+
+@app.put("/api/parts/{part_id}/trace-override")
+def parts_trace_override(part_id: int, data: dict):
+    """This part only: {scope: rm | tool | piece, node, value | formula, note}; {reset: true} removes your change."""
+    from . import trace_edit
+    if data.get("reset"):
+        return trace_edit.reset_override(part_id, data.get("scope", ""), data.get("node", ""))
+    return trace_edit.set_override(part_id, data.get("scope", ""), data.get("node", ""), data.get("value"),
+                                   data.get("formula"), data.get("note", ""))
+
+
+@app.post("/api/trace/save-default")
+def trace_save_default(data: dict):
+    """For the future: {ref | rate, value | formula, note} corrects the master-data row or adds a rate version."""
+    from . import trace_edit
+    return trace_edit.save_default(data.get("ref"), data.get("rate"), data.get("value"), data.get("formula"), data.get("note", ""))
+
+
+@app.post("/api/master-rows/{store}/{table}")
+def master_row_add(store: str, table: str, data: dict):
+    from . import trace_edit
+    return trace_edit.add_row(store, table, data.get("row") or {})
+
+
 @app.get("/api/tool-bom/choices")
 def tool_bom_choices():
     return register.bom_choices()

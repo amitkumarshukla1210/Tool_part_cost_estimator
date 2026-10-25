@@ -65,7 +65,7 @@ def run(part_id: int, country: str | None = None) -> dict:
         raise PieceError("Calculate the tool cost of the current revision first (it selects the machine).")
     country, as_of, cur = rm["country"], rm["as_of"], rm["currency"]
     setup = costing_setup.tables()
-    t = Trace(cur)
+    t = Trace(cur, (d.get("trace_overrides") or {}).get("piece"))
     typed = d.get("piece_inputs") or {}
     you = {"type": "user", "note": f"Typed in the part register for {d['part_code']}"}
     reg = lambda note: {"type": "register", "note": note}
@@ -170,6 +170,7 @@ def run(part_id: int, country: str | None = None) -> dict:
                            "currency": tool_tr["currency"], "weight_kg": tool_tr["nodes"]["tool_weight"]["value"]
                            if "tool_weight" in tool_tr["nodes"] else 0.0}
     out["key"] = {"revision_id": rev_id, "rm": rm["version"], "tool": tool["version"], "inputs": typed,
+                  "overrides": (d.get("trace_overrides") or {}).get("piece") or {},
                   "rates": sorted(x["id"] for x in out["rates_used"]), "as_of": as_of}
     out["is_example"] = any(x.get("is_example") for x in out["rates_used"])
     return out

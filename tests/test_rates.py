@@ -45,7 +45,9 @@ def test_mhr_india_vmc_by_hand():
     src = r["nodes"]["in:electricity_rate"]["source"]
     assert src["type"] == "rate" and src["rate"]["month"] == MONTH and src["rate"]["is_example"]
     assert r["nodes"]["in:power_kw"]["source"] == {"type": "machine", "sheet": "Machines", "machine_id": "VMC-850",
-                                                   "field": "power_kw", "is_example": True}
+                                                   "field": "power_kw", "is_example": True,
+                                                   "ref": {"store": "costing_setup", "table": "machines",
+                                                           "match": {"machine_id": "VMC-850"}, "column": "power_kw"}}
 
 
 def test_labour_rate_by_hand():

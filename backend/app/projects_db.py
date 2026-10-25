@@ -106,6 +106,8 @@ parts = Table(
     # sheet-metal tools (stage 9): die type, edited operation sequence, draw depth / bend radius typed over the model
     Column("sheet_inputs", JSON),
     Column("piece_cost_inr", Float),
+    # your changes of traced values for this part (traceability panel): {"rm" | "tool" | "piece": {node id: {...}}}
+    Column("trace_overrides", JSON),
     Column("created_by", String(100), default=""),
     Column("created_at", DateTime, default=now),
     Column("updated_at", DateTime, default=now, onupdate=now),
