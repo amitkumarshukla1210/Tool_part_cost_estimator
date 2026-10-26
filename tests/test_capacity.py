@@ -63,15 +63,15 @@ def test_standard_cavity_rounding():
 
 def test_part_too_big_for_plate():
     with pytest.raises(ValueError):
-        calculate(CapacityInput(part_type="plastic", footprint_length_mm=700, footprint_width_mm=700))
+        calculate(CapacityInput(part_type="plastic", footprint_length_mm=5000, footprint_width_mm=5000))
 
 
 def test_api_capacity_and_hints():
     r = client.post("/api/capacity", json={"part_type": "die_casting", "footprint_length_mm": 100,
                                            "footprint_width_mm": 60, "annual_volume": 1_500_000})
     assert r.status_code == 200 and r.json()["cavities_per_tool"] == 4
-    assert client.post("/api/capacity", json={"part_type": "plastic", "footprint_length_mm": 700,
-                                              "footprint_width_mm": 700}).status_code == 400
+    assert client.post("/api/capacity", json={"part_type": "plastic", "footprint_length_mm": 5000,
+                                              "footprint_width_mm": 5000}).status_code == 400
     assert client.post("/api/capacity", json={"part_type": "plastic", "footprint_length_mm": 100,
                                               "footprint_width_mm": 60, "oee_pct": 0}).status_code == 422
 

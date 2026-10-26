@@ -1041,8 +1041,27 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 - **Correct the 3D model** (`part_fix.py`): a bend whose inside radius is below the minimum gets the new radius with the outside
   size kept (new bend axis, corner rebuilt; checked: one solid, volume close); holes below the minimum are opened up. Preview
   (before / after and the bend profile), corrected STEP, and **Release as new revision** (old revisions stay, costs recalculated).
-- All results are first-cut designs and analytical estimates by rules: the tool designer checks and completes them; gates,
-  runners, slides, lifters, hot runners, drawing dies, progressive forming stations and foundry patterns are not modelled yet.
+- All results are first-cut designs and analytical estimates by rules: the tool designer checks and completes them before release
+  (see the audit PDF in Help → Documents).
+
+## Large parts and the remaining tool types (stage 28)
+
+- **Large parts (10-20 kg):** Master data → Machines has moulding machines to 4000 t (IMM-650 … IMM-4000), presses to 3000 t
+  (PRESS-630 … PRESS-3000) and HPDC to 2500 t, with prices and consumables in every country (EXAMPLE). Mould bases to 2200 mm,
+  heavy die sets to 4800 × 2400 and die-casting holders to 1600 mm are "made to order" (cost 0 → priced by weight). When no base
+  takes more than one part, Stage C gives one cavity ("large part"); a blank larger than every sheet uses the large sheet in
+  Parameters (`large_sheet_length_mm` × `large_sheet_width_mm`, 4000 × 2000). The try-out press / machine must fit by **force and
+  bed / platen size**. Samples: `large_plastic_tub.step` (11.9 kg PP), `large_sheet_tray.step` (16.6 kg drawn tray),
+  `large_sheet_channel.step` (18.3 kg U channel).
+- **Sheet metal:** drawn parts (doubly curved walls) are recognised: blank → draw → trim; 3D **draw die** (punch, die, blank holder,
+  cushion pins), **trim die**, **U-bending die** (pressure pad, springs, gauge pins), forming stations in progressive dies.
+- **Moulds** (`mould_features.py`): sprue gate, cold runner with edge gates or hot-runner manifold and nozzles; **slides** (heel
+  block, angle pin) and **lifters** where the analysis finds undercuts; die casting **shot sleeve, biscuit, runners, overflows and
+  vacuum vents**; EPS **steam chambers, back plates, fill injectors, steam vents**; blow **neck and base inserts, blow pin**.
+- **Foundry:** tool cost of the pattern equipment and its 3D design (match plate, cope / drag patterns with gating and riser,
+  core box, flasks and pins). Simulation PDF + video for **EPS, blow moulding and foundry** (rules in Simulation rules).
+- **Draft correction:** moulded parts get the draft added to the walls in 3D (default = minimum draft + 0.5°) and are released as a
+  new revision; wall and rib changes stay in CAD.
 
 ## Look & feel: Design to Cost theme
 

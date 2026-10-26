@@ -161,7 +161,7 @@ def _bom_rows(design):
 def design_pdf(part: dict, design: dict, stage: int, rev: str = "", only: str | None = None) -> bytes:
     """Drawing set of one die / mould: assembly sheet + a detail sheet per made part (or only one sheet: 'ASM' / item no)."""
     from reportlab.lib.units import mm
-    from reportlab.platypus import PageBreak, Spacer, Table, TableStyle
+    from reportlab.platypus import PageBreak, Paragraph, Spacer, Table, TableStyle
     from .drawings import _doc, _styles
     from .pdf_report import _table
     theme, ss, st = _styles()
@@ -203,8 +203,11 @@ def design_pdf(part: dict, design: dict, stage: int, rev: str = "", only: str | 
                 ("Material", c.material or "-"), ("Hardness", c.hardness or "-"),
                 ("Size", f"{L:.2f} × {W:.2f} × {H:.2f} mm"), ("Make", c.make or "-"), ("Finish", tol.get("finish_general", ""))]
         story += [drawing_style.pdf_header(st, "DETAIL DRAWING", f"{c.no} · {c.name}"),
-                  Table([[views, side]], colWidths=[dw + 4 * mm, 92 * mm], style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")])),
-                  drawing_style.pdf_title_block(width, rows, pt, _scale_text(sc), f"{k} / {sheets}", drawing_no(part, stage, c.no), rev,
+                  Table([[views, side]], colWidths=[dw + 4 * mm, 92 * mm], style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))]
+        if len(c.holes) > SIDE_HOLES:
+            story += [Paragraph("Hole table (datum 0,0 = lower-left corner)", st["k"]),
+                      _hole_table(c, theme, tol, [14 * mm, 24 * mm, 24 * mm, 16 * mm, 300 * mm])]
+        story += [drawing_style.pdf_title_block(width, rows, pt, _scale_text(sc), f"{k} / {sheets}", drawing_no(part, stage, c.no), rev,
                                                 c.notes)]
     doc.build(story)
     return buf.getvalue()
@@ -222,27 +225,39 @@ def _fit_notes(tol):
             + (f", punch {tol['fit_punch']}" if tol.get("fit_punch") else "")]
 
 
+SIDE_HOLES = 22      # more holes than this: the hole table goes full width under the views (and runs on to the next page)
+
+
+def _hole_table(c, theme, tol, widths):
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.platypus import Paragraph, Table, TableStyle
+    small = ParagraphStyle("s", fontSize=6.5, leading=8)
+    rows = [["#", "X", "Y", "Ø", "Kind / fit"]]
+    for i, h in enumerate(c.holes, start=1):
+        kind = h["label"] or h["kind"]
+        if h.get("depth"):
+            kind += f", depth {h['depth']:g}" + ("" if h.get("top", True) else " from below")
+        if h["kind"] == "fit":
+            kind += f", position {tol.get('position_tol', '')}"
+        rows.append([f"H{i}", f"{h['x']:.2f}", f"{h['y']:.2f}", f"{h['d']:g}", Paragraph(kind, small)])
+    t = Table(rows, colWidths=widths, repeatRows=1)
+    t.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 6.5), ("GRID", (0, 0), (-1, -1), 0.25, theme["border"]),
+                           ("BACKGROUND", (0, 0), (-1, 0), theme["head"]), ("TEXTCOLOR", (0, 0), (-1, 0), theme["head_text"]),
+                           ("TOPPADDING", (0, 0), (-1, -1), 1), ("BOTTOMPADDING", (0, 0), (-1, -1), 1)]))
+    return t
+
+
 def _detail_side(c, theme, tol):
-    """Hole table and opening notes next to the views."""
+    """Hole table (if short) and opening notes next to the views."""
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
     from reportlab.platypus import Paragraph, Table, TableStyle
     small = ParagraphStyle("s", fontSize=6.5, leading=8)
     out = []
-    if c.holes:
-        rows = [["#", "X", "Y", "Ø", "Kind / fit"]]
-        for i, h in enumerate(c.holes, start=1):
-            kind = h["label"] or h["kind"]
-            if h.get("depth"):
-                kind += f", depth {h['depth']:g}" + ("" if h.get("top", True) else " from below")
-            if h["kind"] == "fit":
-                kind += f", position {tol.get('position_tol', '')}"
-            rows.append([f"H{i}", f"{h['x']:.2f}", f"{h['y']:.2f}", f"{h['d']:g}", Paragraph(kind, small)])
-        t = Table(rows, colWidths=[8 * mm, 13 * mm, 13 * mm, 9 * mm, 47 * mm], repeatRows=1)
-        t.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 6.5), ("GRID", (0, 0), (-1, -1), 0.25, theme["border"]),
-                               ("BACKGROUND", (0, 0), (-1, 0), theme["head"]), ("TEXTCOLOR", (0, 0), (-1, 0), theme["head_text"]),
-                               ("TOPPADDING", (0, 0), (-1, -1), 1), ("BOTTOMPADDING", (0, 0), (-1, -1), 1)]))
-        out.append([t])
+    if c.holes and len(c.holes) <= SIDE_HOLES:
+        out.append([_hole_table(c, theme, tol, [8 * mm, 13 * mm, 13 * mm, 9 * mm, 47 * mm])])
+    elif c.holes:
+        out.append([Paragraph(f"<b>{len(c.holes)} holes</b>: hole table under the views.", small)])
     for o in c.openings:
         out.append([Paragraph(f"<b>{o['label']}</b>" + (f" · tolerance {o['tol']}" if o.get("tol") else "")
                               + " · profile in the DXF (wire cut / CNC)", small)])

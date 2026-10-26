@@ -42,6 +42,24 @@ def _section_area(shape, z: float) -> float:
         return 0.0
 
 
+def _section_area_axis(shape, axis: str, frac: float) -> float:
+    """Cross-section area of the shape square to an axis (x / y / z) at a fraction of its length."""
+    bb = shape.BoundingBox()
+    big = 4 * max(bb.xlen, bb.ylen, bb.zlen) + 10
+    if axis == "x":
+        x = bb.xmin + frac * bb.xlen
+        slab = cq.Solid.makeBox(0.2, big, big, cq.Vector(x - 0.1, bb.center.y - big / 2, bb.center.z - big / 2))
+    elif axis == "y":
+        y = bb.ymin + frac * bb.ylen
+        slab = cq.Solid.makeBox(big, 0.2, big, cq.Vector(bb.center.x - big / 2, y - 0.1, bb.center.z - big / 2))
+    else:
+        return _section_area(shape, bb.zmin + frac * bb.zlen)
+    try:
+        return shape.intersect(slab).Volume() / 0.2
+    except Exception:
+        return 0.0
+
+
 def _ray_top(shape, x: float, y: float, z0: float):
     """Lowest point of the part above z0 on the vertical line through (x, y), else None."""
     from OCP.gp import gp_Dir, gp_Lin, gp_Pnt
@@ -53,6 +71,54 @@ def _ray_top(shape, x: float, y: float, z0: float):
     return min(zs) if zs else None
 
 
+def split_core_cavity(shape, axis: str, shrink: float, il: float, iw: float, backing: float, middle: bool = False) -> dict:
+    """Core and cavity of one cavity (also the punch and die of a drawing die).
+
+    The part (× 1 + shrink) is turned so its opening direction is +Z and its open side is down; the parting plane is the
+    bottom of the part (middle = through the middle, blow moulds). cavity = upper block − part; core = lower block − part
+    + whatever the part encloses above the parting plane."""
+    s = _orient(shape, axis)
+    if shrink:
+        s = s.scale(1 + shrink)
+    bb = s.BoundingBox()
+    s = s.translate(cq.Vector(-bb.center.x, -bb.center.y, -bb.zmin))       # centred, bottom at z = 0
+    bb = s.BoundingBox()
+    H = bb.zlen
+    notes = []
+    if middle:
+        pl = H / 2
+    else:
+        lo, hi = _section_area(s, H * 0.02), _section_area(s, H * 0.98)
+        if hi < lo:                     # open side at the top: turn the part over so the open side is down
+            s = s.rotate((0, 0, 0), (1, 0, 0), 180).translate(cq.Vector(0, 0, H))
+            bb = s.BoundingBox()
+            lo = hi
+        pl = 0.0
+    ha = (bb.zmax - pl) + backing                     # cavity insert height (above the parting plane)
+    hb = backing + max(0.0, pl - bb.zmin)             # core insert height (below the parting plane)
+    upper = cq.Solid.makeBox(il, iw, ha, cq.Vector(-il / 2, -iw / 2, pl))
+    lower = cq.Solid.makeBox(il, iw, hb, cq.Vector(-il / 2, -iw / 2, pl - hb))
+    pieces = sorted(upper.cut(s).Solids(), key=lambda x: -x.Volume())
+    if not middle and len(pieces) == 1:
+        # nothing enclosed: maybe the open side is the other end (ribs or bosses made the section test pick it): try it
+        f = s.rotate((0, 0, 0), (1, 0, 0), 180).translate(cq.Vector(0, 0, H))
+        fp = sorted(upper.cut(f).Solids(), key=lambda x: -x.Volume())
+        if len(fp) > 1:
+            s, pieces, bb = f, fp, f.BoundingBox()
+    cavity = pieces[0]
+    core = lower.cut(s) if middle or pl > bb.zmin + 1e-6 else lower
+    enclosed = None
+    if len(pieces) > 1:
+        enclosed = pieces[1] if len(pieces) == 2 else cq.Compound.makeCompound(pieces[1:])
+        core = core.fuse(*pieces[1:]).clean()
+        notes.append("Core formed by the region the part encloses (inside of the part).")
+    elif not middle and lo < 0.6 * _section_area(s, H * 0.5):
+        notes.append("Core and cavity could not be separated cleanly (holes through the part link inside and outside): "
+                     "the designer splits the shut-offs.")
+    return {"part": s, "bb": bb, "H": H, "pl": pl, "cavity": cavity, "core": core, "enclosed": enclosed, "ha": ha, "hb": hb,
+            "notes": notes}
+
+
 def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -> dict:
     rules = Rules(part_type)
     lines = tr["lines"]
@@ -62,44 +128,19 @@ def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -
     if not b.get("length_mm"):
         raise DesignError("The tool cost has no mould base: a detailed mould needs one (Mould & die database → Mould bases).")
     shrink = rules("shrinkage_pct") / 100
-    s = _orient(shape, axis).scale(1 + shrink)
-    bb = s.BoundingBox()
-    s = s.translate(cq.Vector(-bb.center.x, -bb.center.y, -bb.zmin))       # centred, bottom at z = 0
-    bb = s.BoundingBox()
-    H = bb.zlen
-    notes = [f"Cavity and core = part × {1 + shrink:g} (shrinkage {rules('shrinkage_pct'):g} %).",
-             "Gate, runner, vents, slides and lifters: to be added by the mould designer (see the concept analysis)."]
-    # parting plane
-    if part_type == "blow":
-        pl = H / 2
-        notes.append("Blow mould: parting plane through the middle; neck and base inserts to be added.")
-    else:
-        lo, hi = _section_area(s, H * 0.02), _section_area(s, H * 0.98)
-        if hi < lo:                     # open side at the top: turn the part over so the open side is down
-            s = s.rotate((0, 0, 0), (1, 0, 0), 180).translate(cq.Vector(0, 0, H))
-            bb = s.BoundingBox()
-        pl = 0.0
     rows, cols = int(val("v:layout_rows", 1)), int(val("v:layout_cols", 1))
-    il, iw = val("v:insert_each_l", bb.xlen + 50), val("v:insert_each_w", bb.ylen + 50)
+    bb0 = _orient(shape, axis).BoundingBox()
+    il, iw = val("v:insert_each_l", bb0.xlen + 50), val("v:insert_each_w", bb0.ylen + 50)
     gapc = val("v:insert_gap_mm", 10)
     backing = val("v:insert_backing_mm", rules("cavity_wall_mm"))
-    ha = (bb.zmax - pl) + backing                     # cavity insert height (above the parting plane)
-    hb = backing + max(0.0, pl - bb.zmin)             # core insert height (below the parting plane)
+    sp = split_core_cavity(shape, axis, shrink, il, iw, backing, middle=part_type == "blow")
+    s, bb, H, pl, cavity, core, ha, hb = (sp[k] for k in ("part", "bb", "H", "pl", "cavity", "core", "ha", "hb"))
+    notes = [f"Cavity and core = part × {1 + shrink:g} (shrinkage {rules('shrinkage_pct'):g} %)."] + sp["notes"] + \
+        ["Vents at the parting line, polish and texture as the part drawing: by the mould designer."]
+    if part_type == "blow":
+        notes.append("Blow mould: parting plane through the middle.")
     # cavity centres
     cells = [((c - (cols - 1) / 2) * (il + gapc), (r - (rows - 1) / 2) * (iw + gapc)) for r in range(rows) for c in range(cols)]
-    # ----- core and cavity of one cavity -----
-    upper = cq.Solid.makeBox(il, iw, ha, cq.Vector(-il / 2, -iw / 2, pl))
-    lower = cq.Solid.makeBox(il, iw, hb, cq.Vector(-il / 2, -iw / 2, pl - hb))
-    cut = upper.cut(s)
-    pieces = sorted(cut.Solids(), key=lambda x: -x.Volume())
-    cavity = pieces[0]
-    core = lower.cut(s)
-    if len(pieces) > 1:
-        core = core.fuse(*pieces[1:]).clean()
-        notes.append("Core formed by the region the part encloses (inside of the part).")
-    elif part_type != "blow" and _section_area(s, H * 0.02) < 0.6 * _section_area(s, H * 0.5):
-        notes.append("Core and cavity could not be separated cleanly (holes through the part link inside and outside): "
-                     "the designer splits the shut-offs.")
     # cooling channels in the inserts, kept clear of the part
     cd = rules("cooling_d_mm")
     depth = rules("cooling_depth_factor") * cd
@@ -175,6 +216,8 @@ def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -
     epd = rules("ejector_pin_d_mm")
     pitch = rules("ejector_pitch_mm")
     pins = []
+    max_pins = rules("ejector_max_pins", 48)
+    pitch = max(pitch, (bb.xlen * bb.ylen / max_pins) ** 0.5)          # large parts: fewer, bigger-spaced pins
     nx, ny = max(2, int(bb.xlen // pitch)), max(1, int(bb.ylen // pitch))
     for i in range(nx):
         for j in range(ny):
@@ -191,7 +234,7 @@ def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -
     rails_w = max(30.0, (W - pocket_w) / 2 - 10) if tsp else 0
     comps_plates = []
     ejection = bool(tej) and part_type in ("plastic", "die_casting")
-    sprue = part_type in ("plastic", "die_casting") and bool(tc)
+    sprue = part_type == "plastic" and bool(tc)        # die casting: shot sleeve instead (mould_features)
     if not ejection:
         pins = []
     TC = Plate(L, W, tc or 1)
@@ -295,16 +338,17 @@ def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -
         _sprue_parts(comps, lines, sprue_d, ring_d, ta, tc, ha, z_tc)
     if tc:
         _clamp_screws(comps, sd, se, tc, L, W, z_tc)
-    if part_type == "eps":
-        notes.append("EPS: steam chest, fill injectors and steam vents (slots / vent plugs in the cavity and core) to be added by the designer.")
-    if part_type == "blow":
-        notes.append("Blow mould: no ejection; neck and base inserts, blow pin and venting to be added by the designer.")
-    if part_type == "die_casting":
-        notes.append("Die casting: shot sleeve / biscuit, runner, overflows and vacuum vents to be added by the designer.")
+    # process features: gates / runners / hot runner / shot sleeve / overflows, slides, lifters, EPS chambers, blow inserts
+    from . import mould_features
+    ctx = {"part_type": part_type, "rules": rules, "lines": lines, "val": val, "comps": comps, "notes": notes, "part": s, "bb": bb,
+           "pl": pl, "ha": ha, "hb": hb, "cells": cells, "il": il, "iw": iw, "L": L, "W": W, "ta": ta, "tb": tb, "tc": tc,
+           "z_tc": z_tc, "z_ret": z_ret, "ej_ret_h": ej_ret_h, "ejection": ejection, "pocket_w": pocket_w, "base_mat": base_mat,
+           "base_make": base_make, "core_mat": km, "stack": z_tc + (tc or 0) - z_bc if tc else (pl + ta) - (pl - tb)}
+    mould_features.apply(ctx)
     # the moulded part (reference)
     comps.append(Comp("Moulded part (reference)", s, [(x, y, 0.0) for x, y in cells], kind="ref", size=(bb.xlen, bb.ylen, bb.zlen),
                       color="ref", drawing="none"))
-    return _finish(comps, notes, chans, cd, depth, z_tc + (tc or 0) - z_bc if tc else (pl + ta) - (pl - tb), cells, H, b, L, W, rules, part_type)
+    return _finish(comps, notes, chans, cd, depth, ctx["stack"], cells, H, b, L, W, rules, part_type)
 
 
 def _sprue_parts(comps, lines, sprue_d, ring_d, ta, tc, ha, z_tc):
@@ -340,3 +384,114 @@ def _finish(comps, notes, chans, cd, depth, stack, cells, H, b, L, W, rules, par
     return {"name": f"Mould · {len(cells)} cavit{'y' if len(cells) == 1 else 'ies'}", "key": "mould", "components": order,
             "notes": notes, "shut_height": round(stack, 1), "die_set": f"{b.get('series', '')} {b.get('size_code', '')} {L:.0f} × {W:.0f}",
             "rules_are_examples": rules.is_example, "part_type": part_type}
+
+
+# ---------- foundry: pattern equipment for a sand mould ----------
+
+def foundry_design(part: dict, shape, tr: dict, axis: str = "z") -> dict:
+    """Match plate with the cope and drag patterns (the part × shrinkage, split at its largest section), gating (sprue,
+    runner bar, ingate) and riser patterns, a core box when the casting encloses a region (inside of a cover / housing),
+    cope and drag flasks with pins and bushes."""
+    from .mould_features import _box
+    rules = Rules("foundry")
+    lines, nodes = tr["lines"], tr["nodes"]
+    val = lambda k, d=0.0: float(nodes[k]["value"]) if k in nodes else d
+    b = tr["base"]
+    shrink = rules("shrinkage_pct") / 100
+    s = _orient(shape, axis).scale(1 + shrink)
+    bb = s.BoundingBox()
+    s = s.translate(cq.Vector(-bb.center.x, -bb.center.y, -bb.zmin))
+    bb = s.BoundingBox()
+    H = bb.zlen
+    zs = [H * f for f in (0.1, 0.3, 0.5, 0.7, 0.9)]
+    pl = max(zs, key=lambda z: _section_area(s, z))           # parting plane at the largest cross-section
+    rows, cols = int(val("v:layout_rows", 1)), int(val("v:layout_cols", 1))
+    il, iw = val("v:insert_each_l", bb.xlen + 120), val("v:insert_each_w", bb.ylen + 120)
+    gapc = val("v:insert_gap_mm", 60)
+    cells = [((c - (cols - 1) / 2) * (il + gapc), (r - (rows - 1) / 2) * (iw + gapc)) for r in range(rows) for c in range(cols)]
+    L, W = float(b["length_mm"]), float(b["width_mm"])
+    hc, hd, tp = float(b.get("a_plate_mm") or 200), float(b.get("b_plate_mm") or 200), float(b.get("clamp_plates_mm") or rules("pattern_plate_mm"))
+    big = 10 * max(bb.xlen, bb.ylen, bb.zlen)
+    upper = cq.Solid.makeBox(big, big, big, cq.Vector(-big / 2, -big / 2, pl))
+    cope = s.intersect(upper)
+    drag = s.cut(upper)
+    notes = [f"Patterns = casting × {1 + shrink:g} (shrinkage {rules('shrinkage_pct'):g} %); machining allowance "
+             f"{rules('machining_allowance_mm'):g} mm and draft {rules('pattern_draft_deg'):g}° to be added on the pattern where the "
+             "casting drawing asks.", f"Parting plane at the largest cross-section ({pl:.1f} mm from the bottom)."]
+    pm = _line(lines, "Cope pattern").get("grade") or "Aluminium 6061-T6"
+    comps = []
+    # match plate between the flasks; cope pattern on top, drag pattern below (mould closed: patterns shown in place)
+    mp = Plate(L, W, tp)
+    sd, se = rules("screw_d_mm"), rules("screw_edge_mm")
+    for cx, cy in cells:
+        for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+            mp.hole(cx + dx * (bb.xlen / 2 - se) + L / 2, cy + dy * (bb.ylen / 2 - se) + W / 2, sd + 1, "thru", f"Ø{sd + 1:g} pattern screw")
+    pd = _pillar_d(rules, W)
+    pe = rules("pillar_edge_factor") * pd
+    pins = [(-L / 2 + pe, 0.0), (L / 2 - pe, 0.0)]
+    for (x, y) in pins:
+        mp.hole(x + L / 2, y + W / 2, pd, "fit", f"Ø{pd:g} {rules.text('fit_bush')} flask pin bush seat")
+    comps.append(mp.comp("Match plate", [(-L / 2, -W / 2, pl - tp / 2)], material=b.get("material") or pm, make=b.get("make") or "",
+                         color="plate", notes=[f"Thickness {rules.text('plate_thk_tol')} mm, flatness {rules.text('plate_flatness')}"]))
+    cb, db_ = cope.BoundingBox(), drag.BoundingBox()
+    cope_s = cope.translate(cq.Vector(-cb.xmin, -cb.ymin, -cb.zmin))
+    drag_s = drag.translate(cq.Vector(-db_.xmin, -db_.ymin, -db_.zmin))
+    comps.append(Comp("Cope pattern", cope_s, [(cx + cb.xmin, cy + cb.ymin, cb.zmin + tp / 2) for cx, cy in cells], material=pm,
+                      color="hard", size=(cb.xlen, cb.ylen, cb.zlen), drawing="solid",
+                      notes=[f"Upper half of the casting above the parting plane, finish {rules.text('finish_pattern')}"]))
+    comps.append(Comp("Drag pattern", drag_s, [(cx + db_.xmin, cy + db_.ymin, db_.zmin - tp / 2) for cx, cy in cells], material=pm,
+                      color="hard", size=(db_.xlen, db_.ylen, db_.zlen), drawing="solid",
+                      notes=["Lower half of the casting below the parting plane", f"Finish {rules.text('finish_pattern')}"]))
+    # gating: sprue (cope), runner bar and ingate on the parting plane, riser on the top of the casting
+    spd, rw, igw = rules("sprue_d_mm"), rules("runner_w_mm"), rules("ingate_w_mm")
+    wall = max(float(part.get("wall_mm") or 0), 4.0)
+    rd = max(40.0, rules("riser_d_factor") * wall)
+    sx = -(il / 2) + spd + 10
+    gating = []
+    for cx, cy in cells:
+        gx = cx + sx
+        sprue = cq.Solid.makeCylinder(spd / 2, hc - 10, cq.Vector(gx, cy, pl + tp / 2), cq.Vector(0, 0, 1))
+        runner = _box(gx, cy - rw / 2, pl + tp / 2, cx - bb.xlen / 2 - igw * 0.2, cy + rw / 2, pl + tp / 2 + rw)
+        ingate = _box(cx - bb.xlen / 2 - igw * 0.2, cy - igw / 2, pl + tp / 2, cx - bb.xlen / 2 + 3, cy + igw / 2, pl + tp / 2 + rw * 0.4)
+        riser = cq.Solid.makeCylinder(rd / 2, max(rd * 1.5, 40), cq.Vector(cx, cy, cb.zmax + tp / 2 - 2), cq.Vector(0, 0, 1))
+        gating.append(sprue.fuse(runner).fuse(ingate).fuse(riser).clean())
+    gl = _line(lines, "Gating & riser patterns")
+    for k, g in enumerate(gating, start=1):
+        gb = g.BoundingBox()
+        comps.append(Comp(f"Gating & riser pattern {k}" if len(gating) > 1 else "Gating & riser pattern", g.translate(cq.Vector(-gb.xmin, -gb.ymin, -gb.zmin)),
+                          [(gb.xmin, gb.ymin, gb.zmin)], material=gl.get("grade") or pm, color="std", size=(gb.xlen, gb.ylen, gb.zlen),
+                          drawing="solid", notes=[f"Sprue Ø{spd:g}, runner {rw:g} × {rw:g}, ingate {igw:g}, riser Ø{rd:.0f} (= {rules('riser_d_factor'):g} × wall)"]))
+    # core box: the region the casting encloses (open side down), when there is one
+    core_line = _line(lines, "Core box")
+    if (core_line.get("quantity") or 0) > 0:
+        sp = split_core_cavity(shape, axis, shrink, bb.xlen + 60, bb.ylen + 60, 30)
+        if sp["enclosed"] is not None:
+            enc = sp["enclosed"]
+            eb = enc.BoundingBox()
+            box = cq.Solid.makeBox(eb.xlen + 60, eb.ylen + 60, eb.zlen + 30, cq.Vector(eb.xmin - 30, eb.ymin - 30, eb.zmin - 0.01))
+            cbox = box.cut(enc)
+            kb = cbox.BoundingBox()
+            comps.append(Comp("Core box", cbox.translate(cq.Vector(-kb.xmin, -kb.ymin, -kb.zmin)), [(L / 2 + 80, -kb.ylen / 2, pl - hd)],
+                              material=core_line.get("grade") or pm, color="hard", size=(kb.xlen, kb.ylen, kb.zlen), drawing="solid",
+                              notes=["Forms the sand core of the region the casting encloses; split and vent by the pattern maker",
+                                     "Shown beside the flasks"]))
+            notes.append("Core box for the sand core of the inside of the casting (shown beside the flasks).")
+        else:
+            notes.append("No enclosed region found: the core box line of the tool BOM can be set to 0.")
+    # flasks
+    fw = rules("flask_wall_mm")
+    for name, z, h in (("Cope flask", pl + tp / 2, hc), ("Drag flask", pl - tp / 2 - hd, hd)):
+        frame = _box(0, 0, 0, L, W, h).cut(_box(fw, fw, -1, L - fw, W - fw, h + 1))
+        comps.append(Comp(name, frame, [(-L / 2, -W / 2, z)], material="Steel (fabricated)", make=b.get("make") or "", color="shoe",
+                          size=(L, W, h), drawing="solid", notes=[f"Wall {fw:g} mm; pin lugs at the ends"]))
+    comps.append(Comp(f"Flask pin Ø{pd:g}", cq.Solid.makeCylinder(pd / 2, hc + hd + tp), [(x, y, pl - tp / 2 - hd) for x, y in pins], kind="std",
+                      std=f"Flask pin Ø{pd:g} {rules.text('fit_pillar')}", size=(pd, pd, hc + hd + tp), color="std", drawing="none"))
+    comps.append(Comp("Casting (reference)", s, [(cx, cy, 0.0) for cx, cy in cells], kind="ref", size=(bb.xlen, bb.ylen, bb.zlen),
+                      color="ref", drawing="none"))
+    order = [c for c in comps if c.kind == "made"] + [c for c in comps if c.kind == "std"] + [c for c in comps if c.kind == "ref"]
+    for i, c in enumerate(order, start=1):
+        c.no = f"{i:02d}" if c.kind != "ref" else "REF"
+    notes.append(f"Flasks {L:.0f} × {W:.0f} mm, cope {hc:g} / drag {hd:g} mm, {len(cells)} pattern(s) on the match plate.")
+    return {"name": f"Pattern equipment · {len(cells)} pattern{'s' if len(cells) > 1 else ''}", "key": "pattern", "components": order,
+            "notes": notes, "shut_height": round(hc + hd + tp, 1), "die_set": f"{b.get('series', '')} {b.get('size_code', '')} {L:.0f} × {W:.0f}",
+            "rules_are_examples": rules.is_example, "part_type": "foundry"}

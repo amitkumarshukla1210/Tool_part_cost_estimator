@@ -90,8 +90,8 @@ def _regions(tri: np.ndarray, flagged: np.ndarray) -> list[np.ndarray]:
 
 def analyze(vertices, triangles, part_type: str, projected_area_mm2: dict) -> dict:
     """Opening-direction ranking, undercut regions and the slide / lifter proposal for a tessellated part."""
-    if part_type not in ("plastic", "die_casting"):
-        raise ValueError("Concept v1 covers plastic moulds and die-casting dies.")
+    if part_type not in ("plastic", "die_casting", "eps", "blow", "foundry"):
+        raise ValueError("The concept analysis covers moulds, dies and patterns (plastic, die casting, EPS, blow moulding, foundry).")
     p = _rules(part_type)
     v = np.asarray(vertices, float)
     tri = v[np.asarray(triangles, int)]

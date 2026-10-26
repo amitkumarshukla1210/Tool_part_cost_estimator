@@ -55,8 +55,10 @@ def plan(sheet: dict, layout: dict | None) -> list[dict]:
     for i, o in enumerate(ops, start=1):
         seen[o["code"]] = seen.get(o["code"], 0) + 1
         key = o["code"] + (str(seen[o["code"]]) if seen[o["code"]] > 1 else "")
-        work_l = max(feat["blank_l"], feat.get("part_l") or 0)
-        work_w = max(feat["blank_w"], feat.get("part_w") or 0)
+        # blank and formed part compared long side with long side (they may lie either way round)
+        bl, bw = sorted((feat["blank_l"], feat["blank_w"]), reverse=True)
+        pl_, pw_ = sorted((feat.get("part_l") or 0, feat.get("part_w") or 0), reverse=True)
+        work_l, work_w = max(bl, pl_), max(bw, pw_)
         dies.append({"key": key, "name": f"Die {i}: {o['name']}", "ops": [o["code"]], "op_names": [o["name"]],
                      "force_t": o["force_t"], "work_l": work_l, "work_w": work_w, "stations": 1,
                      "pitch": feat["blank_l"], "strip_w": feat["blank_w"], "progressive": 0,

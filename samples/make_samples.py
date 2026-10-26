@@ -49,6 +49,44 @@ def example_bracket(radius: float = 0.0):
     return prof.cut(long_holes).cut(short_holes)
 
 
+def large_plastic_tub():
+    """Large moulded part (about 12 kg PP): open tub 1050 x 700 x 420 mm, 6 mm wall, rounded corners, 4 ribs under the floor.
+    Needs a mould for a 3000 t class injection machine."""
+    tub = (cq.Workplane("XY").box(1050, 700, 420).edges("|Z").fillet(60).faces("<Z").edges().fillet(30)
+           .faces(">Z").shell(-6))
+    ribs = cq.Workplane("XY").workplane(offset=-210).pushPoints([(x, 0) for x in (-315, -105, 105, 315)]).rect(6, 600).extrude(-40)
+    return tub.union(ribs)
+
+
+def large_sheet_tray():
+    """Large deep-drawn sheet part (about 16 kg): tray 1400 x 900 mm, 120 mm deep, 1.2 mm sheet, corner radius 60 mm.
+    Needs a drawing die on a large press."""
+    return (cq.Workplane("XY").box(1400, 900, 120).edges("|Z").fillet(60).faces("<Z").edges().fillet(15)
+            .faces(">Z").shell(-1.2))
+
+
+def large_sheet_channel():
+    """Large bent sheet part (about 18 kg): U channel 1600 mm long, 300 mm base, 100 mm flanges, 3 mm sheet, inside radius 6 mm,
+    8 Ø14 holes in the base."""
+    t, r = 3.0, 6.0
+    prof = (cq.Workplane("YZ").polyline([(0, 0), (300, 0), (300, 100), (300 - t, 100), (300 - t, t), (t, t), (t, 100), (0, 100)])
+            .close().extrude(1600))
+    prof = prof.edges("|X").edges(cq.selectors.NearestToPointSelector((800, t, t))).fillet(r)
+    prof = prof.edges("|X").edges(cq.selectors.NearestToPointSelector((800, 300 - t, t))).fillet(r)
+    prof = prof.edges("|X").edges(cq.selectors.NearestToPointSelector((800, 0, 0))).fillet(r + t)
+    prof = prof.edges("|X").edges(cq.selectors.NearestToPointSelector((800, 300, 0))).fillet(r + t)
+    holes = cq.Workplane("XY").pushPoints([(x, y) for x in (200, 600, 1000, 1400) for y in (90, 210)]).circle(7).extrude(20).translate((0, 0, -10))
+    return prof.cut(holes)
+
+
+def pet_bottle():
+    """500 ml PET bottle (blow moulding): body Ø65 x 160 mm, shoulder, neck Ø28 x 20 mm, 0.5 mm wall, axis along X."""
+    prof = (cq.Workplane("XY").moveTo(0, 0).lineTo(32.5, 0).lineTo(32.5, 160).threePointArc((26, 180), (14, 195))
+            .lineTo(14, 215).lineTo(0, 215).close())
+    body = prof.revolve(360, (0, 0, 0), (0, 1, 0))
+    return body.faces(">Y").shell(-0.5).rotate((0, 0, 0), (0, 0, 1), -90)
+
+
 def demo_assembly():
     """Base plate + bracket group (2 identical brackets) + 4 identical pins + 1 look-alike pin."""
     plate = cq.Workplane("XY").box(200, 120, 10)
@@ -98,6 +136,10 @@ if __name__ == "__main__":
         ("sheet_metal_bracket", sheet_metal_bracket),
         ("example_bracket_revA", lambda: example_bracket(0.5)),
         ("example_bracket_revB", lambda: example_bracket(2.0)),
+        ("large_plastic_tub", large_plastic_tub),
+        ("large_sheet_tray", large_sheet_tray),
+        ("large_sheet_channel", large_sheet_channel),
+        ("pet_bottle", pet_bottle),
     ]:
         path = OUT / f"{name}.step"
         cq.exporters.export(fn(), str(path))

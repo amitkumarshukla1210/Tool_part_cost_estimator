@@ -100,6 +100,9 @@ def test_new_types_work_in_the_country_comparison(tmp_path):
     assert rows["IN"]["landed"]["bcd"] == 0 and rows["DE"]["landed"]["landed"] > 0
 
 
-def test_unsupported_cards_say_so(tmp_path):
+def test_concept_and_simulation_cover_blow_moulding(tmp_path):
     pid = add(tmp_path, bottle(), "bottle3.step", "PET bottle grade (IV 0.80)", "stretch_blow_moulding", "SB3")
-    assert "plastic moulds and die-casting dies" in client.get(f"/api/parts/{pid}/concept").json()["detail"]
+    r = client.get(f"/api/parts/{pid}/concept")
+    assert r.status_code == 200, r.text
+    r = client.get(f"/api/parts/{pid}/simulation/report.pdf")
+    assert r.status_code == 200 and r.content[:4] == b"%PDF"

@@ -52,10 +52,30 @@ class PartMetrics:
         return asdict(self)
 
 
+def solidify(shape):
+    """Closed shells (some CAD systems write a closed body as a shell, not a solid) made solids; others unchanged."""
+    if shape is None or shape.Solids():
+        return shape
+    solids = []
+    for sh in shape.Shells():
+        try:
+            if sh.Closed():
+                sol = cq.Solid.makeSolid(sh)
+                if sol.isValid() and sol.Volume() < 0:
+                    sol = cq.Solid(sol.wrapped.Reversed())
+                if sol.isValid() and sol.Volume() > 0:
+                    solids.append(sol)
+        except Exception:
+            pass
+    if not solids:
+        return shape
+    return solids[0] if len(solids) == 1 else cq.Compound.makeCompound(solids)
+
+
 def load_step(path: str) -> cq.Shape:
     """Read a STEP file and return a single shape holding all its solids."""
     wp = cq.importers.importStep(path)
-    solids = [s for obj in wp.vals() for s in obj.Solids()]
+    solids = [s for obj in wp.vals() for s in solidify(obj).Solids()]
     if not solids:
         raise ValueError("The STEP file contains no solid bodies (surfaces only?).")
     return solids[0] if len(solids) == 1 else cq.Compound.makeCompound(solids)
@@ -377,6 +397,15 @@ def developed_blank(shape: cq.Shape, volume_mm3: float, bbox_mm: dict, thickness
             "bend_axes": len(axes)}
 
 
+DOUBLY_CURVED = ("TORUS", "SPHERE", "BSPLINE", "BEZIER", "REVOLUTION", "OFFSET", "OTHER")
+
+
+def drawn_share(shape: cq.Shape) -> float:
+    """Share of the surface that is curved both ways (torus, sphere, free-form): corners of a drawn part."""
+    total = sum(f.Area() for f in shape.Faces()) or 1.0
+    return sum(f.Area() for f in shape.Faces() if f.geomType() in DOUBLY_CURVED) / total
+
+
 def sheet_features(shape: cq.Shape, thickness: float) -> dict:
     """Holes and bend radii of a sheet-metal part.
 
@@ -386,9 +415,10 @@ def sheet_features(shape: cq.Shape, thickness: float) -> dict:
     """
     from OCP.BRepAdaptor import BRepAdaptor_Surface
     holes = []
+    sheet = {f.hashCode() for f in _sheet_faces(shape, thickness)}
     for face in shape.Faces():
-        if face.geomType() != "PLANE" or face.Area() < thickness * thickness:
-            continue
+        if face.geomType() != "PLANE" or face.Area() < thickness * thickness or face.hashCode() not in sheet:
+            continue                     # only the faces of the sheet itself (not the rim / edge faces of a tray)
         for w in face.innerWires():
             area = cq.Face.makeFromWires(w).Area()
             holes.append((w.Length(), area))

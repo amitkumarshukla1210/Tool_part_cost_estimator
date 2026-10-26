@@ -96,6 +96,15 @@ def choose_cavities(part_type: str, needed: float, limit: int) -> int:
     return next((n for n in options if n >= needed), options[-1])
 
 
+def _largest_base(part_type: str, length: float, width: float):
+    """The biggest base of the part type whose insert area takes length × width (either way round), or None."""
+    from . import mould_db
+    bases = [b for b in mould_db.tables()["mould_bases"] if b["part_type"] == part_type]
+    ok = [b for b in bases if (b["max_insert_length_mm"] >= length and b["max_insert_width_mm"] >= width)
+          or (b["max_insert_length_mm"] >= width and b["max_insert_width_mm"] >= length)]
+    return min(ok, key=lambda b: b["length_mm"] * b["width_mm"]) if ok else None
+
+
 def calculate(inp: CapacityInput) -> dict:
     # OEE is applied exactly once: planned hours -> productive hours.
     oee = inp.oee_pct / 100
@@ -113,13 +122,21 @@ def calculate(inp: CapacityInput) -> dict:
         inp.spacing_mm,
     )
     fit = layout["per_sheet"]
+    large = None
     if fit == 0:
-        raise ValueError("The part does not fit on the tool plate. Check the plate size and spacing.")
+        # large part: one cavity per tool, on the largest mould base / die set of Mould bases that takes it
+        large = _largest_base(inp.part_type, inp.footprint_length_mm + 2 * inp.spacing_mm, inp.footprint_width_mm + 2 * inp.spacing_mm)
+        if not large:
+            raise ValueError("The part does not fit on the tool plate nor in any mould base / die set of Mould & die database → "
+                             "Mould bases. Add a bigger base (or check the plate size and spacing).")
+        fit = 1
 
     limit = min(fit, inp.max_cavities)
     cavities = choose_cavities(inp.part_type, needed, limit)
     if cavities >= math.ceil(needed):
         limited_by = None
+    elif large:
+        limited_by = "part size (large part: one cavity per tool)"
     elif fit < inp.max_cavities:
         limited_by = "plate size"
     else:
@@ -143,7 +160,10 @@ def calculate(inp: CapacityInput) -> dict:
         "required_parts_per_hour": round(parts_per_hour, 2),
         "cavities_needed": round(needed, 3),
         "cavities_fit_on_plate": fit,
-        "layout": {k: layout[k] for k in ("along", "across", "rotated")},
+        "layout": {k: layout[k] for k in ("along", "across", "rotated")} if not large else {"along": 1, "across": 1, "rotated": False},
+        "large_part": ({"base": f"{large['series']} {large['size_code']}", "note": "Part larger than the standard tool plate: one cavity "
+                        f"per tool on {large['series']} {large['size_code']} ({large['length_mm']:g} × {large['width_mm']:g} mm)."}
+                       if large else None),
         "cavities_per_tool": cavities,
         "limited_by": limited_by,
         "output_per_tool_per_hour": round(cavities * 3600 / inp.cycle_time_s * oee, 1),
