@@ -4,6 +4,7 @@ const ROLE_HELP = {
   viewer: "viewer: reads everything, changes nothing",
   engineer: "engineer: + projects, parts, costs, imports, master data, rate drafts, suppliers (default permissions)",
   approver: "approver: + approves rates, sees the activity log",
+  head: "head (head of department): sees and changes the data of every tool group and every user; no user management",
   admin: "admin: + creates IDs, sets permissions, deletes projects, backups",
 };
 let info = null;          // {roles, permissions, me, mine}
@@ -19,6 +20,7 @@ async function init() {
   $("usersNoAdmin").hidden = isAdmin;
   $("newRole").innerHTML = info.roles.map((r) => `<option ${r === "engineer" ? "selected" : ""}>${r}</option>`).join("");
   $("roleHelp").textContent = ROLE_HELP.engineer;
+  $("newGroups").innerHTML = groupBoxes([], "groups");
   const tabOk = { users: true, perms: true, activity: info.mine.view_activity, backups: info.mine.backups, drawings: true };
   document.querySelectorAll("#tabs [data-tab]").forEach((b) => (b.hidden = !tabOk[b.dataset.tab]));
   $("permsActions").hidden = !isAdmin;
@@ -40,12 +42,17 @@ $("tabs").addEventListener("click", (e) => {
 });
 
 // ---------- users ----------
+function groupBoxes(have, name = "") {
+  return (info.groups || []).map((g) => `<label class="flag"><input type="checkbox" ${name ? `name="${name}"` : ""} data-g="${esc(g.key)}" value="${esc(g.key)}" ${have.includes(g.key) ? "checked" : ""} />${esc(g.label)}</label>`).join(" ");
+}
+
 async function loadUsers() {
   const users = await api("/api/users");
-  $("users").innerHTML = `<thead><tr><th>User ID</th><th>Full name</th><th>Role</th><th>Active</th><th>Last login</th>
+  $("users").innerHTML = `<thead><tr><th>User ID</th><th>Full name</th><th>Role</th><th>Tool groups (none = all)</th><th>Active</th><th>Last login</th>
     <th>New password</th><th></th></tr></thead><tbody>${users.map((u) => `<tr data-id="${u.id}">
     <td><b>${esc(u.username)}</b></td><td><input data-f="name" value="${esc(u.name)}" /></td>
     <td><select data-f="role">${info.roles.map((r) => `<option ${r === u.role ? "selected" : ""}>${r}</option>`).join("")}</select></td>
+    <td class="group-checks">${groupBoxes(u.groups || [])}</td>
     <td><label class="flag"><input type="checkbox" data-f="active" ${u.active ? "checked" : ""} />${u.active ? "active" : "blocked"}</label></td>
     <td>${esc((u.last_login || "—").replace("T", " "))}</td>
     <td><input type="password" data-f="password" placeholder="leave empty" autocomplete="new-password" minlength="10" /></td>
@@ -56,6 +63,7 @@ $("users").addEventListener("click", async (e) => {
   if (!e.target.matches("[data-save]")) return;
   const tr = e.target.closest("tr"), data = {};
   tr.querySelectorAll("[data-f]").forEach((el) => { data[el.dataset.f] = el.type === "checkbox" ? el.checked : el.value; });
+  data.groups = [...tr.querySelectorAll("[data-g]:checked")].map((el) => el.dataset.g);
   if (!data.password) delete data.password;
   try {
     await api(`/api/users/${tr.dataset.id}`, { method: "PUT", body: JSON.stringify(data) });
@@ -68,7 +76,9 @@ $("users").addEventListener("click", async (e) => {
 $("newUser").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
-    const u = await api("/api/users", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(e.target))) });
+    const body = Object.fromEntries(new FormData(e.target));
+    body.groups = new FormData(e.target).getAll("groups");
+    const u = await api("/api/users", { method: "POST", body: JSON.stringify(body) });
     e.target.reset();
     $("roleHelp").textContent = ROLE_HELP.engineer;
     status($("status"), `ID '${u.username}' created with the role ${u.role}. Give the user the ID and first password; they can change it on Admin.`, "ok");

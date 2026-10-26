@@ -1288,7 +1288,7 @@ def help_page():
 # ---------- server mode: logins and roles (roadmap stage 17) ----------
 
 from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
-from . import auth  # noqa: E402
+from . import auth, scope  # noqa: E402
 
 
 def _log_settings_change(request, response) -> None:
@@ -1331,6 +1331,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if why:
             return JSONResponse({"detail": why}, status_code=403)
         token = auth.set_current(user)
+        why = scope.guard(path)             # data access by tool group (stage 29)
+        if why:
+            auth.reset(token)
+            return JSONResponse({"detail": why}, status_code=403)
         try:
             response = await call_next(request)
             _log_settings_change(request, response)
@@ -1411,7 +1415,8 @@ def users_list():
 
 @app.post("/api/users")
 def users_create(data: dict):
-    return auth.create_user(data.get("username", ""), data.get("password", ""), data.get("role", "engineer"), data.get("name", ""))
+    return auth.create_user(data.get("username", ""), data.get("password", ""), data.get("role", "engineer"), data.get("name", ""),
+                            data.get("groups") or [])
 
 
 @app.put("/api/users/{uid}")
@@ -1458,7 +1463,7 @@ def admin_page():
 @app.get("/api/admin/permissions")
 def admin_permissions():
     me = auth.current()
-    return {"roles": list(auth.ROLES), "permissions": auth.permissions(), "me": me,
+    return {"roles": list(auth.ROLES), "groups": [{"key": g, "label": scope.LABELS[g]} for g in scope.GROUPS], "permissions": auth.permissions(), "me": me,
             "mine": {p["action"]: auth.may(p["action"], me) for p in auth.permissions()}}
 
 

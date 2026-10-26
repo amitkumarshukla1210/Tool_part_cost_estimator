@@ -1063,6 +1063,20 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 - **Draft correction:** moulded parts get the draft added to the walls in 3D (default = minimum draft + 0.5°) and are released as a
   new revision; wall and rib changes stay in CAD.
 
+## Head of department and data access by tool group (stage 29)
+
+- **Roles:** viewer < engineer < approver < **head** < admin. *Head* (head of department) sees and changes the data of every tool group and
+  every user, like an admin, but does not manage login IDs (the permissions per role on Admin → Permissions apply as before).
+- **Tool groups:** Admin → Users & roles has check boxes per login ID: *Plastic moulding, Die casting, Foundry, Sheet metal, EPS, Blow moulding*.
+  A viewer, engineer or approver with groups ticked sees only the parts whose process belongs to those groups, and the projects that hold
+  such parts, that they created themselves, or that have no tool-group part yet; opening another group's part or project gives "not your tool
+  group". They can give a part only a process of their own groups. Parts without a tool group (assemblies, bought-out, machined) are seen by all.
+- **Change of responsibility:** example: today *user1* has Sheet metal and EPS, *user2* Die casting and Plastic; in six months the admin ticks
+  Die casting and EPS for user1 and Sheet metal and Plastic for user2. The data stays where it is; each user now sees the other groups.
+- An ID with no group ticked sees everything (as before this stage), so existing IDs keep working until the admin sets their groups.
+  The project dashboard totals still include all parts of an open project. With logins off (`DTC_MODE=local`) there are no limits.
+- Code: `backend/app/scope.py`; `users.groups` (added to an existing database automatically). Tests: `tests/test_scope.py`.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:

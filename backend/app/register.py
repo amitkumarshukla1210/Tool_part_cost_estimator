@@ -266,9 +266,15 @@ def delete_part(part_id: int, confirm_code: str = "", backup: bool = True) -> di
 
 
 def list_projects() -> list[dict]:
+    from . import scope
+    g = scope.groups()
     with db.engine().connect() as conn:
-        counts = dict(conn.execute(select(db.parts.c.project_id, func.count()).group_by(db.parts.c.project_id)).all())
-        rows = conn.execute(select(db.projects).order_by(db.projects.c.code)).mappings().all()
+        cq = select(db.parts.c.project_id, func.count()).group_by(db.parts.c.project_id)
+        pq = select(db.projects).order_by(db.projects.c.code)
+        if g is not None:
+            cq, pq = cq.where(scope.part_condition(g)), pq.where(scope.project_condition(g))
+        counts = dict(conn.execute(cq).all())
+        rows = conn.execute(pq).mappings().all()
         return [_plain(r) | {"part_count": counts.get(r["id"], 0)} for r in rows]
 
 
@@ -506,6 +512,8 @@ def upsert_part(conn, project_id: int, code: str, values: dict, is_assembly=Fals
     vals = {"sourcing": next(iter(register_setup.sourcing())), "status": register_setup.initial_status()} | values
     if is_assembly:
         vals["process"] = vals.get("process") or register_setup.assembly_process()
+    from . import scope
+    scope.check_process(vals.get("process"))
     pid = conn.execute(db.parts.insert().values(part_code=code, project_id=project_id, is_assembly=is_assembly,
                                                 created_by=user(), **vals)).inserted_primary_key[0]
     _log(conn, "part", pid, "created", {"part_code": code, **{k: v for k, v in vals.items() if v not in (None, "")}})
@@ -626,6 +634,9 @@ def update_part(part_id: int, data: dict, refresh: bool = True) -> dict:
         if not old:
             raise RegisterError(f"Part {part_id} does not exist.")
         changes = {k: {"old": old[k], "new": v} for k, v in vals.items() if not _same(old[k], v)}
+        if "process" in changes:
+            from . import scope
+            scope.check_process(vals["process"])
         if "status" in changes:
             _check_status_change(old["status"], vals["status"], data.get("status_comment", ""))
         if changes:
@@ -671,8 +682,12 @@ def _part_query():
 def search(q="", project_id=None, process="", status="", sourcing="", rev="", file_missing=None,
            target_min=None, target_max=None, rm_min=None, rm_max=None, rm_missing=None, tool_min=None, tool_max=None,
            tool_missing=None, sort="part_code", limit=50, offset=0) -> dict:
+    from . import scope
     query, r = _part_query()
     conds = []
+    g = scope.groups()
+    if g is not None:
+        conds.append(scope.part_condition(g))
     if q:
         like = f"%{q.strip()}%"
         conds.append(or_(db.parts.c.part_code.ilike(like), db.parts.c.name.ilike(like), db.parts.c.material.ilike(like)))

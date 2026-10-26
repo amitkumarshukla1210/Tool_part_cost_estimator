@@ -359,8 +359,9 @@ users = Table(
     Column("username", String(80), nullable=False, unique=True),
     Column("name", String(200), default=""),
     Column("password_hash", String(300), nullable=False),
-    Column("role", String(20), nullable=False),        # viewer, engineer, approver, admin
+    Column("role", String(20), nullable=False),        # viewer, engineer, approver, head, admin
     Column("active", Boolean, default=True),
+    Column("groups", JSON),                            # tool groups the user sees (scope.py); empty = all
     Column("created_at", DateTime, default=now),
     Column("last_login", DateTime),
 )

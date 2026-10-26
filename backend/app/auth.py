@@ -3,7 +3,8 @@
     logins            every page and API call needs a login (cookie session). The first start, with no user yet, shows
                       /setup to create the first admin. DTC_MODE=local turns logins off: only for the automated tests
                       and developers; the Windows kit always starts with logins.
-    roles             viewer < engineer < approver < admin
+    roles             viewer < engineer < approver < head < admin  (head = head of department: sees all data, stage 29)
+    tool groups       each login ID has tool groups (scope.py): it sees the parts and projects of those groups
     permissions       the lowest role for each action (PERMISSIONS); the admin changes them on Admin → Permissions
                       (table role_permissions). Managing users and permissions is always admin only.
     who               the logged-in user is the author of every history record and the approver of every rate approval
@@ -24,7 +25,7 @@ from sqlalchemy import select
 
 from . import projects_db as db
 
-ROLES = ("viewer", "engineer", "approver", "admin")
+ROLES = ("viewer", "engineer", "approver", "head", "admin")
 COOKIE = "dtc_session"
 SESSION_HOURS = 12
 MIN_PASSWORD = 10
@@ -168,12 +169,21 @@ def _check_new_password(password: str) -> None:
 
 # ---------- users ----------
 
+def _groups(value) -> list:
+    from .scope import GROUPS
+    bad = [g for g in (value or []) if g not in GROUPS]
+    if bad:
+        raise AuthError(f"Unknown tool group {', '.join(map(str, bad))}: use {', '.join(GROUPS)}.", 400)
+    return [g for g in GROUPS if g in (value or [])]
+
+
 def _public(u) -> dict:
     return {"id": u["id"], "username": u["username"], "name": u["name"], "role": u["role"], "active": bool(u["active"]),
+            "groups": list(u.get("groups") or []),
             "last_login": u["last_login"].isoformat(timespec="seconds") if u["last_login"] else None}
 
 
-def create_user(username: str, password: str, role: str = "engineer", name: str = "") -> dict:
+def create_user(username: str, password: str, role: str = "engineer", name: str = "", groups: list | None = None) -> dict:
     username = (username or "").strip().lower()
     if not username or not username.replace(".", "").replace("_", "").replace("-", "").isalnum():
         raise AuthError("The user name may only have letters, digits, . _ -", 400)
@@ -183,9 +193,10 @@ def create_user(username: str, password: str, role: str = "engineer", name: str 
     with db.engine().begin() as conn:
         if conn.execute(select(db.users.c.id).where(db.users.c.username == username)).first():
             raise AuthError(f"User '{username}' already exists.", 400)
+        gl = _groups(groups)
         uid = conn.execute(db.users.insert().values(username=username, name=name.strip(), password_hash=hash_password(password), role=role,
-                                                     active=True)).inserted_primary_key[0]
-        log(conn, "user", uid, "created", {"username": username, "role": role, "name": name.strip()})
+                                                     active=True, groups=gl)).inserted_primary_key[0]
+        log(conn, "user", uid, "created", {"username": username, "role": role, "name": name.strip(), "groups": gl})
     return get_user(uid)
 
 
@@ -212,6 +223,8 @@ def update_user(uid: int, data: dict, by: dict) -> dict:
         vals["active"] = bool(data["active"])
     if "name" in data:
         vals["name"] = str(data["name"]).strip()
+    if "groups" in data:
+        vals["groups"] = _groups(data["groups"])
     if data.get("password"):
         _check_new_password(data["password"])
         vals["password_hash"] = hash_password(data["password"])
@@ -226,7 +239,7 @@ def update_user(uid: int, data: dict, by: dict) -> dict:
                 raise AuthError("There must always be one active admin.", 400)
         if vals:
             conn.execute(db.users.update().where(db.users.c.id == uid).values(**vals))
-            detail = {k: {"old": old[k], "new": v} for k, v in vals.items() if k != "password_hash" and old[k] != v}
+            detail = {k: {"old": old[k], "new": v} for k, v in vals.items() if k != "password_hash" and (old[k] or ([] if k == "groups" else old[k])) != v}
             if "password_hash" in vals:
                 detail["password"] = "changed"
             if detail:
