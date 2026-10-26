@@ -281,7 +281,13 @@ function toolBlock(p) {
     <p class="note downloads">${tr.dies ? "<b>Tool drawings per stage</b>: in the Dies table above." :
       `<b>Mould concept drawing</b> (plan, plate stack, main BOM): <a class="link" href="/api/parts/${p.id}/tool-drawing.pdf">PDF</a> ·
       <a class="link" href="/api/parts/${p.id}/tool-drawing.dxf">DXF</a>.`}
-      <a class="btn btn-primary small" href="/api/parts/${p.id}/po-pack.zip" title="Part STEP and drawing, tool drawings and cost sheets per stage, blank / strip, costs">⬇ PO pack (ZIP)</a></p>`;
+      <a class="btn btn-primary small" href="/api/parts/${p.id}/po-pack.zip" title="Part STEP and drawing, tool drawings and cost sheets per stage, blank / strip, costs">⬇ PO pack (ZIP)</a></p>
+    <details class="card add-insert" id="tdBox"><summary class="btn btn-outline small">Tool design: 3D assembly, every part in 3D, drawings (PDF / DXF)</summary>
+      <p class="note">Every ${tr.dies ? "die stage" : "mould"} designed in 3D from the part and the tool cost: plates, punches / core and cavity,
+        pillars, bushes, standard parts, screws; an assembly drawing and a detail drawing of every made part with tolerances,
+        material, hardness and your logo. A first-cut design by the Design rules (Master data) for your tool designer to check and release.</p>
+      <button type="button" class="btn btn-primary small" id="tdRun">Make the tool design</button> <span class="status" id="tdStatus"></span>
+      <div id="tdOut"></div></details>`;
   }
   if (tr?.lines) html += bomEditor(p, tr);
   const typed = p.tool_inputs || {};
@@ -310,7 +316,8 @@ function toolBlock(p) {
       <details class="card add-insert"><summary class="btn btn-outline small">Simulation &amp; analysis (wall, draft, sink, cycle, clamp)</summary>
       <p class="note">Analytical estimate from the 3D model and the Simulation rules in Master data, not a flow simulation.</p>
       <button type="button" class="btn btn-outline small" id="simRun">Analyse</button>
-      <a class="link" href="/api/parts/${p.id}/simulation/report.pdf">PDF report with maps</a> <span class="status" id="simStatus"></span>
+      <a class="link" href="/api/parts/${p.id}/simulation/report.pdf">PDF report with maps</a> ·
+      <a class="link" href="/api/parts/${p.id}/simulation/video" title="Takes about 30 s to make">▶ Video (MP4)</a> <span class="status" id="simStatus"></span>
       <div id="simOut"></div></details>`;
   }
   if (t.versions) {
@@ -606,6 +613,9 @@ $("panelBody").addEventListener("click", async (e) => {
       status($("simStatus"), err.message, "error");
     }
   }
+  if (e.target.id === "tdRun") return toolDesignLoad();
+  if (e.target.id === "fixOpen") return fixPreview(true);
+  if (e.target.id === "fixRefresh") return fixPreview(false);
   if (e.target.id === "simToLoop") {
     const { status: target, comment } = e.target.dataset;
     // not yet at Simulation (e.g. still Uploaded / Concept tool): move there first, step by step, then fill the form
@@ -1193,7 +1203,74 @@ function simResultBox(p) {
     </ul>
     ${p.loop ? `<button type="button" class="btn btn-outline small" id="simToLoop" data-status="${issues.length ? "corrections_required" : "simulation_ok"}"
       data-comment="${esc(comment)}">Put this result in the Design loop form</button>` : ""}
+    <p class="note downloads"><b>Simulation report</b>: <a class="link" href="/api/parts/${p.id}/forming-simulation.pdf">⬇ PDF</a> ·
+      <a class="link" href="/api/parts/${p.id}/forming-simulation.video" title="Takes about 15 s to make">▶ Video (MP4)</a>
+      ${s.problems.some((x) => ["bend_radius", "hole_diameter"].includes(x.check)) ?
+        ` · <button type="button" class="btn btn-primary small" id="fixOpen">Correct the 3D model</button>` : ""}</p>
+    <div id="fixBox"></div>
     <span class="note">Details: <i>Sheet-metal tools</i> below (operations, forces, strip layout, blank DXF).</span></div>`;
+}
+
+// 3D correction after the simulation: preview, download, release as a new revision (stage 27)
+function fixQuery() {
+  const f = $("fixForm");
+  const q = new URLSearchParams();
+  if (f?.elements.radius.value) q.set("radius", f.elements.radius.value);
+  if (f?.elements.hole.value) q.set("hole", f.elements.hole.value);
+  return q.toString();
+}
+async function fixPreview(first) {
+  const box = $("fixBox");
+  try {
+    const r = await api(`/api/parts/${part.id}/correction${first ? "" : "?" + fixQuery()}`);
+    const q = first ? "" : fixQuery();
+    if (first) {
+      box.innerHTML = `<form id="fixForm" class="card grid2">
+        <p class="span2 note">The software changes the 3D model; the outside dimensions stay, holes and other features are kept.
+          Check the picture, download the STEP if you want, then release it as a new revision (old revisions stay).</p>
+        <label>New inside bend radius (mm) <input name="radius" type="number" step="0.1" min="0" value="${r.changes.some((c) => c.what === "inside bend radius") ? r.defaults.radius_mm : ""}" /></label>
+        <label>Smallest hole (mm) <input name="hole" type="number" step="0.1" min="0" value="${r.changes.some((c) => c.what === "hole diameter") ? r.defaults.hole_mm : ""}" /></label>
+        <label>New revision <input name="rev" value="${esc(r.next_rev)}" /></label>
+        <label>What changed <input name="note" value="${esc(r.change_note)}" /></label>
+        <div class="span2" id="fixOut"></div>
+        <div class="span2 dialog-actions"><button type="button" class="btn btn-outline small" id="fixRefresh">Preview again</button>
+          <button type="submit" class="btn btn-primary small">Release as new revision</button></div>
+        <p class="status span2" id="fixStatus"></p></form>`;
+    }
+    $("fixOut").innerHTML = `<p><b>Changes:</b> ${r.changes.map((c) => `${esc(c.what)} ${fmt(c.from_mm, 2)} → ${fmt(c.to_mm, 2)} mm`).join(" · ")}
+        · volume ${fmt(r.volume_before_cm3, 2)} → ${fmt(r.volume_after_cm3, 2)} cm³</p>
+      <img src="/api/parts/${part.id}/correction.png?${q}&t=${Date.now()}" alt="Before (grey) and after (blue)" style="max-width:100%;border:1px solid #ddd" />
+      <p class="note">Left: rev ${esc(r.rev)} · right: corrected. <a class="link" href="/api/parts/${part.id}/correction.step?${q}">⬇ Corrected STEP</a></p>`;
+  } catch (err) {
+    box.innerHTML = `<p class="status error">${esc(err.message)}</p>`;
+  }
+}
+
+// detailed tool design: every die stage / the mould in 3D with drawings (stage 27)
+async function toolDesignLoad() {
+  const out = $("tdOut");
+  status($("tdStatus"), "Designing the tool(s) in 3D… (a few seconds per tool)");
+  try {
+    const r = await api(`/api/parts/${part.id}/tool-design`);
+    status($("tdStatus"), "");
+    out.innerHTML = r.tools.map((t) => {
+      const q = r.tools.length > 1 || t.key !== "mould" ? `?die=${encodeURIComponent(t.key)}` : "";
+      return `<div class="card"><h4>Tool ${t.stage}: ${esc(t.name)}</h4>
+        <img src="/api/parts/${part.id}/tool-design.png${q}" alt="${esc(t.name)} in 3D" style="display:block;max-width:560px;width:100%;margin:6px 0;border:1px solid #e3e6ea" />
+        <p class="note">${esc(t.die_set)} · shut / mould height ${fmt(t.shut_height, 1)} mm${t.rules_are_examples ? " · <b>uses EXAMPLE design rules</b>" : ""}</p>
+        <p class="note">${t.notes.map(esc).join("<br/>")}</p>
+        <p class="downloads"><a class="link" href="/api/parts/${part.id}/tool-design.step${q}">⬇ Assembly 3D (STEP)</a> ·
+          <a class="link" href="/api/parts/${part.id}/tool-design.pdf${q}">⬇ Drawing set (PDF)</a> ·
+          <a class="btn btn-primary small" href="/api/parts/${part.id}/tool-design.zip${q}">⬇ Release pack (3D + PDF + DXF + BOM)</a></p>
+        <div class="table-wrap"><table class="cost-table"><thead><tr><th>Item</th><th>Qty</th><th>Part</th><th>Material</th>
+          <th>Hardness</th><th>Make / standard part</th><th>Size (mm)</th></tr></thead><tbody>
+          ${t.components.map((c) => `<tr><td>${esc(c.no)}</td><td class="num">${c.qty}</td><td>${esc(c.name)}</td><td>${esc(c.material || "—")}</td>
+            <td>${esc(c.hardness || "—")}</td><td>${esc(c.std || "—")}</td><td>${c.size.map((v) => fmt(v, 1)).join(" × ")}</td></tr>`).join("")}
+          </tbody></table></div></div>`;
+    }).join("") + (r.tools.length > 1 ? `<p><a class="btn btn-primary" href="/api/parts/${part.id}/tool-design.zip">⬇ Release pack of all ${r.tools.length} tools</a></p>` : "");
+  } catch (err) {
+    status($("tdStatus"), err.message, "error");
+  }
 }
 
 // design loop: status flow, allowed moves, timeline
@@ -1219,6 +1296,23 @@ function loopBlock(p) {
 }
 
 $("panelBody").addEventListener("submit", async (e) => {
+  if (e.target.id === "fixForm") {
+    e.preventDefault();
+    const f = e.target.elements;
+    status($("fixStatus"), "Releasing the corrected model…");
+    try {
+      await api(`/api/parts/${part.id}/correction`, { method: "POST", body: JSON.stringify({
+        radius_mm: f.radius.value ? Number(f.radius.value) : null, hole_mm: f.hole.value ? Number(f.hole.value) : null,
+        rev: f.rev.value, change_note: f.note.value }) });
+      await openPart(part.id);
+      await search();
+      status($("loopStatus") || $("status"), `Revision ${f.rev.value} released with the corrected 3D model; costs recalculated. `
+        + "Move to Simulation to check it.", "ok");
+    } catch (err) {
+      status($("fixStatus"), err.message, "error");
+    }
+    return;
+  }
   if (e.target.id !== "loopForm") return;
   e.preventDefault();
   const f = new FormData(e.target);

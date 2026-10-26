@@ -41,11 +41,14 @@
           <p>New user? Follow the PDF: it takes a real L bracket from the 3D model through the whole design loop (with a correction and Rev B)
             to the tool drawings per stage and the PO pack, with a screenshot of every step.</p>
         </div>
-        <p><a class="btn btn-primary" href="/static/docs/DTC_Work_Instruction.pdf" target="_blank">⬇ Work instruction (PDF)</a></p>
+        <p><a class="btn btn-primary" href="/static/docs/DTC_Work_Instruction.pdf" target="_blank">⬇ Work instruction (PDF)</a>
+          <a class="btn btn-outline" href="/static/docs/DTC_Audit_Tool_Design.pdf" target="_blank">Audit: what is done for every tool type (PDF)</a></p>
         <div class="help-steps two">
           <div class="card"><h3>1 · Sample 3D models</h3><p><a class="link" href="/static/docs/example/example_bracket_revA.step" download>Bracket Rev A (needs a correction)</a> · <a class="link" href="/static/docs/example/example_bracket_revB.step" download>Bracket Rev B (corrected)</a> · <a class="link" href="/static/docs/example/plastic_cover.step" download>Plastic cover (mould)</a></p></div>
           <div class="card"><h3>2 · Drawings</h3><p><a class="link" href="/static/docs/example/EX26-0001_part_drawing_revA.pdf" download>Part drawing Rev A</a> · <a class="link" href="/static/docs/example/EX26-0001_part_drawing_revB.pdf" download>Rev B PDF</a> · <a class="link" href="/static/docs/example/EX26-0001_part_drawing_revB.dxf" download>Rev B DXF</a> · <a class="link" href="/static/docs/example/EX26-0002_mould_drawing.pdf" download>Mould drawing</a></p></div>
           <div class="card"><h3>3 · Stage tools (dies)</h3><p><a class="link" href="/static/docs/example/EX26-0001_stage1_blank_tool_drawing.pdf" download>Stage 1 blanking drawing</a> · <a class="link" href="/static/docs/example/EX26-0001_stage1_blank_tool_drawing.dxf" download>DXF</a> · <a class="link" href="/static/docs/example/EX26-0001_stage1_blank_tool_cost.pdf" download>cost</a> · <a class="link" href="/static/docs/example/EX26-0001_stage2_pierce_tool_drawing.pdf" download>Stage 2 piercing drawing</a> · <a class="link" href="/static/docs/example/EX26-0001_stage2_pierce_tool_drawing.dxf" download>DXF</a> · <a class="link" href="/static/docs/example/EX26-0001_stage2_pierce_tool_cost.pdf" download>cost</a> · <a class="link" href="/static/docs/example/EX26-0001_stage3_bend_tool_drawing.pdf" download>Stage 3 bending drawing</a> · <a class="link" href="/static/docs/example/EX26-0001_stage3_bend_tool_drawing.dxf" download>DXF</a> · <a class="link" href="/static/docs/example/EX26-0001_stage3_bend_tool_cost.pdf" download>cost</a> · <a class="link" href="/static/docs/example/EX26-0001_tool_cost_all_stages.pdf" download>All stages</a></p></div>
+          <div class="card"><h3>5 · Simulation report, video, 3D correction</h3><p><a class="link" href="/static/docs/example/EX26-0001_revA_forming_simulation.pdf" download>Forming report Rev A (PDF)</a> · <a class="link" href="/static/docs/example/EX26-0001_revA_forming_simulation.mp4" download>Forming video (MP4)</a> · <a class="link" href="/static/docs/example/EX26-0001_revA_correction_preview.png" download>Correction before / after</a> · <a class="link" href="/static/docs/example/EX26-0001_corrected_from_revA.step" download>Corrected STEP</a> · <a class="link" href="/static/docs/example/EX26-0002_simulation.pdf" download>Moulding report</a> · <a class="link" href="/static/docs/example/EX26-0002_simulation.mp4" download>Moulding video</a></p></div>
+          <div class="card"><h3>6 · Tool design for your tool room</h3><p><a class="link" href="/static/docs/example/EX26-0001_tool_design_release_pack.zip" download>Release pack: 3 dies (3D + PDF + DXF + BOM)</a> · <a class="link" href="/static/docs/example/EX26-0001_T01_blanking_die_drawing_set.pdf" download>Blanking die drawing set</a> · <a class="link" href="/static/docs/example/EX26-0001_T01_blanking_die_assembly.step" download>Blanking die assembly STEP</a> · <a class="link" href="/static/docs/example/EX26-0002_mould_release_pack.zip" download>Mould release pack</a> · <a class="link" href="/static/docs/example/EX26-0002_mould_drawing_set.pdf" download>Mould drawing set</a></p></div>
           <div class="card"><h3>4 · For RFQ / PO</h3><p><a class="link" href="/static/docs/example/EX26-0001_PO_pack.zip" download>PO pack (ZIP)</a> · <a class="link" href="/static/docs/example/EX26-0001_blank.dxf" download>Blank DXF</a> · <a class="link" href="/static/docs/example/EX26-0001_tool_pack.pdf" download>Tool pack</a> · <a class="link" href="/static/docs/example/EX26-0001_rm_cost.pdf" download>RM cost</a>.
             On your own part: Parts → part → Tool cost → <b>⬇ PO pack (ZIP)</b>.</p></div>
         </div>
@@ -54,11 +57,11 @@
           <tbody>
             <tr><td><b>Uploaded</b></td><td>Import the STEP (Rev A).</td><td>Geometry, weight, RM, tool and part cost; process suggestion.</td><td>Part drawing PDF / DXF</td></tr>
             <tr><td><b>Concept tool</b></td><td>Check the dies / mould proposed; change grades, base, operations if needed.</td><td>Dies per stage / mould with BOM and cost.</td><td>Tool drawing and cost per stage (PDF / DXF / Excel)</td></tr>
-            <tr><td><b>Simulation</b></td><td>Move to Simulation; read the result.</td><td>Sheet metal: forming result; plastic / die casting: wall, draft, sink, cycle, clamp.</td><td>Simulation PDF (plastic / die casting), tool pack</td></tr>
-            <tr><td><b>Corrections required</b></td><td>Put the result in the form → Change status; send the comment to the designer.</td><td>The correction kept in the timeline.</td><td>—</td></tr>
-            <tr><td><b>Revised</b></td><td>Upload the corrected model as a new revision.</td><td>All costs recalculated on the new revision.</td><td>Part drawing of the new revision</td></tr>
+            <tr><td><b>Simulation</b></td><td>Move to Simulation; read the result.</td><td>Sheet metal: forming result; plastic / die casting: wall, draft, sink, cycle, clamp.</td><td>Simulation report PDF and video (all part types)</td></tr>
+            <tr><td><b>Corrections required</b></td><td>Put the result in the form → Change status; send the comment to the designer, or Correct the 3D model in the software.</td><td>The correction kept in the timeline; the corrected 3D model.</td><td>Corrected STEP</td></tr>
+            <tr><td><b>Revised</b></td><td>Upload the corrected model, or Release the software&#x27;s correction, as a new revision.</td><td>All costs recalculated on the new revision.</td><td>Part drawing of the new revision</td></tr>
             <tr><td><b>Simulation OK</b></td><td>Simulation again → Put this result → Simulation OK.</td><td>No corrections required.</td><td>—</td></tr>
-            <tr><td><b>Tool design frozen</b></td><td>Move to Tool design frozen.</td><td>Concept frozen for quotation.</td><td>PO pack (ZIP) for RFQ / PO</td></tr>
+            <tr><td><b>Tool design frozen</b></td><td>Move to Tool design frozen; Make the tool design.</td><td>Every die / the mould in 3D with drawings of every part.</td><td>Tool design release pack (3D STEP, PDF, DXF, BOM); PO pack (ZIP) for RFQ / PO</td></tr>
           </tbody>
         </table></div>
       </div>
@@ -282,6 +285,33 @@
         </div>
       </div>
     </section>
+    <section>
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Simulation, correction, tool design</p>
+          <h2>From the simulation result to released tool drawings</h2>
+        </div>
+        <div class="help-steps two">
+          <div class="card"><h3>Simulation report and video</h3><p>Sheet metal: Design loop → Forming simulation → <b>⬇ PDF</b> (every check OK / FAIL,
+            blank and yield, stages, force, press, a picture after every stage, flat pattern with bend lines) and <b>▶ Video</b> (blank,
+            piercing, bending; a failing bend is red). Plastic / die casting: Tool cost → Simulation &amp; analysis → PDF and Video of the
+            wall, draft and risk maps. Analytical results from the rules in Master data, not a finite-element simulation.</p></div>
+          <div class="card"><h3>Correct the 3D model</h3><p>When the forming check fails on the bend radius or a hole size:
+            <b>Correct the 3D model</b>. The software sets the new inside radius (outside size kept) or opens the holes, shows before /
+            after with the bend profile, gives the corrected STEP and <b>releases it as a new revision</b> (old revisions stay, costs are
+            recalculated). Other changes (draft, walls, ribs): in CAD, then Upload a new revision.</p></div>
+          <div class="card"><h3>Tool design in 3D</h3><p>Tool cost → <b>Tool design → Make the tool design</b>: each die stage (blanking,
+            piercing, bending, progressive) or the mould (plastic, die casting, EPS, blow) is designed in 3D from the part, the flat pattern
+            and the tool cost: shoes or plates, die plate / inserts with the real opening or core and cavity, punches with clearance,
+            stripper, guides, pillars, bushes, ejection, cooling, screws, dowels. Sizes, fits, tolerances and finishes are
+            <b>Design rules</b> in Master data → Mould &amp; die database.</p></div>
+          <div class="card"><h3>Drawings and release pack</h3><p><b>Drawing set (PDF)</b>: assembly sheet (iso, exploded, section, BOM) and a
+            detail sheet per made part (views, dimensions, hole table with fits, tolerances, material, hardness, heat treatment, finish).
+            <b>Release pack (ZIP)</b>: assembly STEP, a STEP per part, PDF and DXF of every drawing, BOM Excel. Your logo, company and
+            signatures: <b>Admin → Drawings</b>. A first-cut design by rules for your tool designer to check and release.</p></div>
+        </div>
+      </div>
+    </section>
     <section class="page-body">
       <div class="container">
         <div class="section-head">
@@ -339,6 +369,9 @@
           <tbody>
             <tr><td>Part name, material, process, sourcing, volume, programme life</td><td>Parts → part → details form → Save changes</td><td>History keeps old → new</td></tr>
             <tr><td>Wrong or changed 3D model</td><td>Part → Upload a new revision (old revisions stay)</td><td>Design loop → Revised</td></tr>
+            <tr><td>Bend radius too small / hole too small (simulation)</td><td>Forming simulation → Correct the 3D model → Release as new revision</td><td>Outside size kept</td></tr>
+            <tr><td>A size, fit, tolerance or finish on the tool drawings</td><td>Master data → Mould &amp; die database → Design rules</td><td>Next tool design</td></tr>
+            <tr><td>Logo, company, signatures on drawings</td><td>Admin → Drawings</td><td>All drawings</td></tr>
             <tr><td>Part not needed in a project / not needed at all</td><td>Part → Remove from project BOM / Delete part (type the code)</td><td>Backup ZIP made first</td></tr>
             <tr><td>Project data (budget, SOP, name) / whole project</td><td>Dashboard → Edit project / Delete project</td><td>Delete: type the code, backup first</td></tr>
             <tr><td>Design-loop status or a forgotten step</td><td>Design loop → Move to → ↩ Back to … with a comment</td><td>Shown as step back</td></tr>

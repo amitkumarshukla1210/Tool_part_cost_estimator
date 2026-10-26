@@ -3010,3 +3010,179 @@ def export_parts_excel(**filters) -> bytes:
 def export_dashboard_pdf(project_id: int) -> bytes:
     from .pdf_report import dashboard_pdf
     return dashboard_pdf(dashboard(project_id))
+
+
+# ---------- detailed tool design (roadmap stage 27) ----------
+
+def tool_designs(part_id: int, key: str | None = None) -> tuple[dict, dict, list]:
+    """(part, revision, [(stage no, design)]) - every die stage of a sheet-metal part or the mould of a moulded part,
+    designed in 3D from the current revision and the stored (else live) tool cost."""
+    from . import die_cost, mould_design, tool_design
+    d = part_detail(part_id, with_rm=False)
+    tr = tool_trace(part_id)
+    if tr.get("dies"):
+        d, rev, fp, sl, res = _layout(part_id)
+        plan = {p["key"]: p for p in die_cost.plan(res, {"strip": sl})}
+        out = []
+        for k, die in enumerate(tr["dies"], start=1):
+            if key and die["key"] != key:
+                continue
+            info = die | {f: plan.get(die["key"], {}).get(f) for f in ("progressive", "stations", "pitch", "strip_w")}
+            lines = [x for x in tr["lines"] if x.get("die_key") == die["key"]]
+            try:
+                des = tool_design.die_design(d, fp, res["features"]["t"], info, lines, sl["best"]["values"])
+            except tool_design.DesignError as exc:
+                raise RegisterError(f"{die['name']}: {exc}") from None
+            out.append((k, des | {"part_type": "sheet_metal"}))
+        if key and not out:
+            raise RegisterError(f"There is no die '{key}' in this tool cost.")
+        return d, rev, out
+    part_type = (register_setup.processes().get(d["process"]) or {}).get("part_type")
+    if part_type not in ("plastic", "die_casting", "eps", "blow"):
+        raise RegisterError(f"A detailed tool design is made for sheet-metal dies and for moulds (plastic, die casting, EPS, "
+                            f"blow moulding); this part's process is {d['process']}.")
+    d, rev, shape = _revision_shape(part_id)
+    try:
+        axis = _concept_inputs(part_id)[5]["opening_axis"]
+    except Exception:
+        axis = "z"
+    try:
+        des = mould_design.mould_design(d, shape, tr, part_type, axis)
+    except tool_design.DesignError as exc:
+        raise RegisterError(str(exc)) from None
+    return d, rev, [(1, des)]
+
+
+def tool_design_summary(part_id: int) -> dict:
+    """What the part panel lists: each tool with its parts (no geometry)."""
+    d, rev, designs = tool_designs(part_id)
+    return {"part_id": part_id, "rev": rev["rev"], "tools": [
+        {"stage": k, "key": des["key"], "name": des["name"], "notes": des["notes"], "shut_height": des["shut_height"],
+         "die_set": des["die_set"], "rules_are_examples": des["rules_are_examples"],
+         "components": [{"no": c.no, "name": c.name, "qty": c.qty, "kind": c.kind, "material": c.material, "hardness": c.hardness,
+                         "std": c.std or c.make, "size": [round(v, 1) for v in c.size]} for c in des["components"] if c.kind != "ref"]}
+        for k, des in designs]}
+
+
+def tool_design_file(part_id: int, kind: str, key: str | None = None) -> tuple[bytes, str, str]:
+    """(content, media type, file name) of a tool design download: zip (release pack), step (assembly), pdf (drawing
+    set) or png (iso picture)."""
+    from . import render3d, tool_design, tool_drawings
+    d, rev, designs = tool_designs(part_id, key)
+    code = d["part_code"]
+    if kind == "zip":
+        tag = f"_{tool_drawings._safe(key)}" if key else ""
+        return tool_drawings.release_zip(d, designs, rev["rev"]), "application/zip", f"{code}_tool_design{tag}.zip"
+    k, des = designs[0]
+    stem = f"{code}_T{k:02d}_{tool_drawings._safe(des['key'])}"
+    if kind == "step":
+        return tool_design.step_bytes(tool_design.assembly(des, stem)), "application/step", f"{stem}_assembly.step"
+    if kind == "pdf":
+        return tool_drawings.design_pdf(d, des, k, rev["rev"]), "application/pdf", f"{stem}_drawing_set.pdf"
+    if kind == "png":
+        img = render3d.render(render3d.design_items(des, tool_design.COLORS), size=(900, 650))
+        return render3d.png(img), "image/png", f"{stem}.png"
+    raise RegisterError(f"Unknown tool design download '{kind}'.")
+
+
+def forming_report(part_id: int, kind: str = "pdf") -> tuple[bytes, str, str]:
+    """Sheet-metal forming simulation report of the current revision: (content, media type, file name); kind pdf or video."""
+    from . import sim_report
+    d, rev, fp, sl, res = _layout(part_id)
+    res = res | {"blank": res.get("blank") or {}}
+    code = d["part_code"]
+    if kind == "pdf":
+        return sim_report.pdf(res, fp, d, rev["rev"]), "application/pdf", f"{code}_rev{rev['rev']}_forming_simulation.pdf"
+    data, ext = sim_report.video(res, fp, d)
+    return data, "video/mp4" if ext == "mp4" else "image/gif", f"{code}_rev{rev['rev']}_forming_simulation.{ext}"
+
+
+# ---------- 3D correction after the simulation (roadmap stage 27) ----------
+
+def _correction(part_id: int, radius: float | None, hole_d: float | None):
+    """(part, revision, old shape, new shape, changes, defaults) for a sheet-metal part's current revision."""
+    from . import part_fix
+    d, rev, shape, blank, res = _sheet_context(part_id)
+    t = res["features"]["t"]
+    mv = res["material_values"]
+    defaults = {"radius_mm": round(mv.get("min_bend_r_factor", 1) * t, 3), "hole_mm": round(mv.get("min_hole_factor", 1) * t, 3),
+                "t": t, "checks": res.get("checks", [])}
+    new, changes = shape, []
+    failed = {c["check"] for c in res.get("checks", []) if not c["passed"]}
+    try:
+        if radius is not None or "bend_radius" in failed:
+            r = radius if radius is not None else defaults["radius_mm"]
+            new, ch = part_fix.fix_bend_radius(new, t, r, only_below=r)
+            changes += [{"what": "inside bend radius"} | c for c in ch]
+        if hole_d is not None or ("hole_diameter" in failed and radius is None):
+            h = hole_d if hole_d is not None else defaults["hole_mm"]
+            new, ch = part_fix.fix_small_holes(new, t, h)
+            changes += [{"what": "hole diameter"} | c for c in ch]
+    except part_fix.FixError as exc:
+        raise RegisterError(str(exc)) from None
+    if not changes:
+        raise RegisterError("The simulation found nothing the software can correct in 3D (bend radius, hole size): correct the model in CAD.")
+    return d, rev, shape, new, changes, defaults
+
+
+def correction_preview(part_id: int, radius: float | None = None, hole_d: float | None = None) -> dict:
+    d, rev, old, new, changes, defaults = _correction(part_id, radius, hole_d)
+    with db.engine().connect() as conn:
+        existing = [r for (r,) in conn.execute(select(db.revisions.c.rev).where(db.revisions.c.part_id == part_id))]
+    note = "; ".join(f"{c['what']} {c['from_mm']:g} → {c['to_mm']:g} mm" for c in changes[:3]) + (" …" if len(changes) > 3 else "")
+    return {"part_id": part_id, "rev": rev["rev"], "next_rev": _next_rev(existing), "changes": changes, "defaults": defaults,
+            "change_note": f"Corrected after simulation: {note}", "volume_before_cm3": round(old.Volume() / 1000, 3),
+            "volume_after_cm3": round(new.Volume() / 1000, 3)}
+
+
+def correction_file(part_id: int, kind: str, radius: float | None = None, hole_d: float | None = None) -> tuple[bytes, str, str]:
+    """The corrected model as STEP, or a picture (before | after) as PNG."""
+    from . import render3d, tool_design
+    d, rev, old, new, changes, _ = _correction(part_id, radius, hole_d)
+    if kind == "step":
+        return tool_design.step_bytes(new), "application/step", f"{d['part_code']}_corrected_from_rev{rev['rev']}.step"
+    import math
+    from PIL import Image, ImageDraw
+    from . import part_fix
+    items_old = [(*render3d.mesh(old, 0.05), (0.6, 0.62, 0.66))]
+    items_new = [(*render3d.mesh(new, 0.05), (0.35, 0.55, 0.8))]
+    sph = render3d.sphere_of(items_old)
+    img = Image.new("RGB", (1200, 840), "white")
+    img.paste(render3d.render(items_old, size=(600, 420), sphere=sph, margin=0.05), (0, 0))
+    img.paste(render3d.render(items_new, size=(600, 420), sphere=sph, margin=0.05), (600, 0))
+    dr = ImageDraw.Draw(img)
+    dr.text((10, 8), f"rev {rev['rev']} (now)", fill=(60, 60, 60))
+    dr.text((610, 8), "corrected", fill=(60, 60, 60))
+    t = _sheet_context(part_id)[4]["features"]["t"]
+    bs = part_fix.bends(old, t)
+    if any(c["what"] == "inside bend radius" for c in changes) and bs:
+        b = min(bs, key=lambda x: x["r"])        # zoom on the bend, looking along its axis (profile of the bend)
+        a = b["axis"]
+        centre = b["centre"] + a * (b["a0"] + b["a1"]) / 2
+        az, el = math.degrees(math.atan2(a[1], a[0])), math.degrees(math.asin(max(-1, min(1, a[2]))))
+        zoom = (centre, max(6 * t, 10.0))
+        img.paste(render3d.render(items_old, size=(600, 420), az=az, el=el, sphere=zoom, margin=0.02), (0, 420))
+        img.paste(render3d.render(items_new, size=(600, 420), az=az, el=el, sphere=zoom, margin=0.02), (600, 420))
+        dr.text((10, 428), f"bend profile: inside radius {b['r']:g} mm", fill=(60, 60, 60))
+        dr.text((610, 428), "bend profile: corrected", fill=(60, 60, 60))
+    else:
+        img = img.crop((0, 0, 1200, 420))
+    return render3d.png(img), "image/png", f"{d['part_code']}_correction.png"
+
+
+def correction_release(part_id: int, radius: float | None = None, hole_d: float | None = None, rev: str = "",
+                       change_note: str = "") -> dict:
+    """Release the corrected model as a new revision (design loop → Revised, costs recalculated)."""
+    from . import tool_design
+    d, cur, old, new, changes, _ = _correction(part_id, radius, hole_d)
+    note = change_note or correction_preview(part_id, radius, hole_d)["change_note"]
+    data = tool_design.step_bytes(new)
+    return new_revision_from_upload(part_id, data, f"{d['part_code']}_corrected.step", rev, note)
+
+
+def simulation_video(part_id: int) -> tuple[bytes, str, str]:
+    """Video of the simulation & analysis maps of a moulded part (plastic, die casting)."""
+    from . import sim_report
+    d, rev, res = _simulate(part_id)
+    data, ext = sim_report.moulding_video(res, d)
+    return data, "video/mp4" if ext == "mp4" else "image/gif", f"{d['part_code']}_rev{rev['rev']}_simulation.{ext}"

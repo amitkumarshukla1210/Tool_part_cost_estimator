@@ -45,6 +45,7 @@
             <button role="tab" class="btn btn-outline" data-tab="perms" aria-selected="false">Permissions</button>
             <button role="tab" class="btn btn-outline" data-tab="activity" aria-selected="false">Activity log</button>
             <button role="tab" class="btn btn-outline" data-tab="backups" aria-selected="false">Backups &amp; update</button>
+            <button role="tab" class="btn btn-outline" data-tab="drawings" aria-selected="false">Drawings (logo)</button>
           </div>
           <span class="spacer"></span>
           <span class="note" id="whoami"></span>
@@ -119,6 +120,19 @@
         <div id="reports"><p class="note">No update report yet.</p></div>
         <p class="note">To update: close the app window, double-click <b>DTC_Update.bat</b> (a backup is made first), then <b>DTC_Start.bat</b>.
           To go back: <b>DTC_Rollback.bat</b>. To put a backup back: <b>DTC_Restore.bat</b>.</p>
+      </div>
+      <div id="tab-drawings" class="tab-pane" hidden>
+        <p class="note">Shown on every drawing (part, tool concept, tool design sets, blank and strip DXF): logo, company, projection,
+          drawn / checked / approved and general notes. General tolerances, fits and finishes are Design rules in
+          <a class="link" href="/master-data">Master data → Mould &amp; die database</a>.</p>
+        <div class="card grid2">
+          <div><b>Logo</b><br /><img id="logoImg" alt="Drawing logo" style="max-height:90px;max-width:220px;border:1px solid #ddd;padding:6px;background:#fff" />
+            <p class="note" id="logoNote"></p></div>
+          <form id="logoForm"><label>Upload a logo (PNG / JPG) <input type="file" name="file" accept="image/*" required /></label>
+            <div class="dialog-actions"><button type="submit" class="btn btn-primary small">Upload logo</button>
+              <button type="button" class="btn btn-outline small" id="logoReset">Use the app logo</button></div></form>
+        </div>
+        <form id="drawForm" class="card grid2"></form>
       </div>
     </div></section>
   </main>

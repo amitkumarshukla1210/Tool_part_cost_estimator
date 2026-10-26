@@ -1016,6 +1016,34 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 - Rebuild the PDF after a change of screens: `python docs/work_instruction/build_work_instruction.py` (needs Node.js with
   Playwright, and pdftoppm).
 
+## Tool design in 3D, drawings, simulation report and video, 3D correction (stage 27)
+
+- **Flat pattern of bent parts** (`unfold.py`): the part is unfolded from its 3D model (both rounded and sharp bends): real outline,
+  holes with their positions, bend lines with angle, inside radius and direction. Developed length = angle × (inside radius +
+  k-factor × t), k-factor in Mould & die database → Design rules. Used by the blank / strip DXF, the dies and the forming report.
+- **Tool design** (Tool cost → *Tool design*): `tool_design.py` designs every die stage in 3D (bottom / top shoe, guide pillars and
+  bushes, die plate with the blank outline or the holes + clearance, backing plates, stock guides or nest, fixed stripper, punch
+  holder, blanking punch = outline − clearance, round piercing punches with heads, V-die and blade for bending, screws, dowels);
+  `mould_design.py` the mould (core and cavity = blocks − part × (1 + shrinkage), parting plane at the open side (blow: middle),
+  A / B plates with pockets, clamp and support plates, spacer blocks, ejector plates, ejector pins up to the core surface, return pins,
+  sprue bush, locating ring, cooling channels kept clear of the part). Every size comes from the tool cost (die set / mould base,
+  inserts) and **Design rules** (clearance %, fits, plate and pillar sizes, screw / dowel sizes, tolerances, finishes, shrinkage).
+- **Drawings** (`tool_drawings.py`): drawing set PDF (assembly sheet with iso, exploded and section views and the BOM; a detail sheet
+  per made part with views, overall dimensions, hole table from the datum corner with fits and depths, tolerances, material,
+  hardness, heat treatment, finish) and DXF of every sheet at 1:1. **Release pack** ZIP: assembly STEP, STEP per part, PDF, DXF, BOM.
+- **Drawing frame** (`drawing_style.py`): logo, company, drawing number, revision, general tolerance, projection symbol, scale,
+  sheet, drawn / checked / approved and notes on every drawing (part, tool concept, tool design, blank and strip DXF). Set on
+  **Admin → Drawings** (upload your logo); in DXF the logo is drawn as hatches so it stays inside the file.
+- **Simulation report and video** (`sim_report.py`): sheet metal - PDF with every formability check OK / FAIL, blank and yield,
+  stages with force and press, a picture after every stage, flat pattern with bend lines; MP4 video of blanking, piercing and the
+  bends folding (a failing bend in red). Plastic / die casting - MP4 of the wall, draft and risk maps. Videos need ffmpeg:
+  `imageio-ffmpeg` (in requirements) brings it; without it an animated GIF is made.
+- **Correct the 3D model** (`part_fix.py`): a bend whose inside radius is below the minimum gets the new radius with the outside
+  size kept (new bend axis, corner rebuilt; checked: one solid, volume close); holes below the minimum are opened up. Preview
+  (before / after and the bend profile), corrected STEP, and **Release as new revision** (old revisions stay, costs recalculated).
+- All results are first-cut designs and analytical estimates by rules: the tool designer checks and completes them; gates,
+  runners, slides, lifters, hot runners, drawing dies, progressive forming stations and foundry patterns are not modelled yet.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:
