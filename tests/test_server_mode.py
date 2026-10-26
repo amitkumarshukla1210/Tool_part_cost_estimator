@@ -32,7 +32,7 @@ def make(c, username, role):
 def test_local_mode_needs_no_login():
     c = TestClient(app)
     assert c.get("/api/projects").status_code == 200
-    assert c.get("/api/auth/me").json() == {"mode": "local", "user": None}
+    assert c.get("/api/auth/me").json() == {"mode": "local", "user": None, "version": "V0"}
 
 
 def test_server_mode_blocks_everything_until_login(server):

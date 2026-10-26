@@ -22,13 +22,14 @@ from .geometry import PART_TYPES, analyze, blank_estimate, load_step, sheet_thic
 from . import bom_extract as bom_extract_mod
 from . import (capacity, costing_setup, country_rates, file_store, gross_weight, master_data, mould, mould_db, rate_engine, rates,
                register, register_setup, rm_cost, tool_cost, example_values)
-from . import projects_db
+from . import price_master, projects_db
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 THEME_DIR = Path(__file__).resolve().parents[2] / "theme"
 MAX_UPLOAD_MB = 100
 
-app = FastAPI(title="Design to Cost — Part Cost Estimator", version="0.9.0 (tool cost engine)")
+APP_VERSION = (Path(__file__).resolve().parents[2] / "VERSION").read_text(encoding="utf-8").strip()  # release name, e.g. V0
+app = FastAPI(title="Design to Cost — Part Cost Estimator", version=APP_VERSION)
 
 
 @app.get("/api/part-types")
@@ -406,6 +407,49 @@ async def rates_upload(file: UploadFile = File(...)):
     _require_xlsx(file)
     created = rates.import_excel(await file.read())
     return {"drafts_created": len(created)}
+
+
+# ---------- price master (roadmap stage 29) ----------
+
+class PriceIn(BaseModel):
+    group: str
+    item: str
+    country: str
+    month: str
+    value: float
+    approve: bool = False           # a draft for Rates → Rate review unless an approver ticks Save & approve
+    comment: str = ""
+
+
+@app.get("/api/price-master/meta")
+def price_master_meta():
+    return {"groups": {k: v["title"] for k, v in price_master.GROUPS.items()}, "month": rates.current_month(),
+            "base": country_rates.base_country()["code"], "may_approve": auth.may("approve_rates"),
+            "countries": [{"code": c["code"], "name": c["name"], "currency": c["currency"]}
+                          for c in costing_setup.tables()["countries"]]}
+
+
+@app.get("/api/price-master/grid")
+def price_master_grid(group: str, country: str, end: Optional[str] = None, months: int = price_master.MONTHS):
+    return price_master.grid(group, country, end, max(1, min(months, 120)))
+
+
+@app.post("/api/price-master/price")
+def price_master_price(inp: PriceIn):
+    return price_master.set_price(inp.group, inp.item, inp.country, inp.month, inp.value, inp.approve, inp.comment)
+
+
+@app.get("/api/price-master/export.xlsx")
+def price_master_export(group: str, country: str, end: Optional[str] = None, months: int = price_master.MONTHS):
+    return _xlsx(price_master.to_excel(group, country, end, max(1, min(months, 120))),
+                 f"price_master_{group}_{country.upper()}.xlsx")
+
+
+@app.post("/api/price-master/upload")
+async def price_master_upload(group: str = Form(...), country: str = Form(...), approve: bool = Form(False),
+                              file: UploadFile = File(...)):
+    _require_xlsx(file)
+    return price_master.import_excel(group, country, await file.read(), approve)
 
 
 # ---------- machine hour rates and labour rates ----------
@@ -1231,6 +1275,7 @@ def _require_xlsx(file: UploadFile) -> None:
         raise HTTPException(400, "Please upload an Excel .xlsx file.")
 
 
+@app.exception_handler(price_master.PriceError)
 @app.exception_handler(rm_cost.RMError)
 @app.exception_handler(tool_cost.ToolCostError)
 @app.exception_handler(example_values.ExampleError)
@@ -1248,6 +1293,11 @@ def master_data_error(request, exc):
 @app.get("/")
 def index():
     return FileResponse(FRONTEND_DIR / "index.html")
+
+
+@app.get("/master-data/prices")
+def prices_page():
+    return FileResponse(FRONTEND_DIR / "prices.html")
 
 
 @app.get("/master-data/examples")
@@ -1379,7 +1429,7 @@ def auth_logout(request: Request):
 @app.get("/api/auth/me")
 def auth_me():
     u = auth.current()
-    return {"mode": "server" if auth.server_mode() else "local", "user": u}
+    return {"mode": "server" if auth.server_mode() else "local", "user": u, "version": APP_VERSION}
 
 
 @app.post("/api/auth/password")

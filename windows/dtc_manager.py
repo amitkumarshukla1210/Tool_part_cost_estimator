@@ -560,7 +560,8 @@ def cmd_update(args) -> None:
             shutil.copy2(f, BASE / name)
     for f in sorted(OLD.glob("*"), key=lambda p: p.stat().st_mtime, reverse=True)[3:] if OLD.exists() else []:
         shutil.rmtree(f, ignore_errors=True)                       # keep the last 3 old versions
-    write_version({"installed": datetime.now().isoformat(timespec="seconds"), "zip": src.name, "sha256": sha256(src),
+    release = (current / "VERSION").read_text(encoding="utf-8").strip() if (current / "VERSION").exists() else ""
+    write_version({"installed": datetime.now().isoformat(timespec="seconds"), "release": release, "zip": src.name, "sha256": sha256(src),
                    **info, "previous_app": str(retired[0]) if retired else "", "backup_before_update": str(before or "")})
     log = log_dir / f"update-{t}.txt"
     log.write_text(f"Update {t} from {src}\n{json.dumps(info)}\nBackup before the update: {before}\n\n{report}\n", encoding="utf-8")
@@ -661,7 +662,7 @@ def cmd_status(_args) -> None:
     last = backup_list()
     say(f"Base folder:    {BASE}")
     say(f"App:            {app_dir()} {'(installed)' if is_app(app_dir()) else '(NOT installed)'}")
-    say(f"Version:        {v.get('commit') or v.get('zip', '-')}  installed {v.get('installed', '-')}")
+    say(f"Version:        {v.get('release') or '-'} ({v.get('commit') or v.get('zip', '-')})  installed {v.get('installed', '-')}")
     say(f"Your data:      {DATA}")
     say(f"CAD files:      {storage_dir()}")
     say(f"Backups:        {BACKUPS}  ({len(last)}; last {last[0].name if last else 'none'})")

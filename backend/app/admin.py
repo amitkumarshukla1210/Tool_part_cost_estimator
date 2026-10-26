@@ -182,5 +182,6 @@ def about() -> dict:
                 continue
             reports.append({"name": f.name, "text": text[-6000:]})
     from . import auth
-    return {"version": version, "data_folder": str(data) if data else "", "logins": auth.server_mode(),
+    release = (ROOT / "VERSION").read_text(encoding="utf-8").strip() if (ROOT / "VERSION").exists() else ""
+    return {"version": version, "release": release, "data_folder": str(data) if data else "", "logins": auth.server_mode(),
             "database": db.database_url().split(":", 1)[0], "update_reports": reports}

@@ -3,7 +3,7 @@
 Holds the data that sizes a mould or die and builds its BOM:
 
     mould_bases     standard mould base / die holder sizes, plates, weight, cost
-    tool_materials  core/cavity and plate steels, density, rate per kg
+    tool_materials  tool steels and other tool materials: type, grade, density, rate per kg (India)
     bom_elements    BOM lines with formula rules for quantity, cost, weight, hours
     process_rates   machining and other process rates per hour (India values; other countries are in the rate library)
     process_unit_rates  heat treatment per kg, wire cut per cm², polishing per cm², painting per m², transport per kg, ...
@@ -70,6 +70,7 @@ TABLES = {
     ]},
     "tool_materials": {"title": "Tool materials", "unique": ("code",), "columns": [
         col("code", "Steel / material"),
+        col("material_type", "Material type", required=False),
         col("application", "Used for"),
         col("density_g_cm3", "Density (g/cm³)", "number"),
         col("rate_per_kg", "Rate / kg (India)", "number"),

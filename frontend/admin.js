@@ -145,7 +145,7 @@ async function loadBackups() {
     const [b, a] = await Promise.all([api("/api/admin/backups"), api("/api/admin/about")]);
     const v = a.version || {};
     $("about").innerHTML = `<table class="cost-table"><tbody>
-      <tr><td>Version</td><td><b>${esc(v.commit || v.zip || "—")}</b></td></tr>
+      <tr><td>Version</td><td><b>${esc(a.release || "—")}</b> · ${esc(v.commit || v.zip || "—")}</td></tr>
       <tr><td>Installed</td><td>${esc((v.installed || "—").replace("T", " "))}</td></tr>
       <tr><td>Data folder</td><td>${esc(a.data_folder || b.locations.data)}</td></tr>
       <tr><td>Database</td><td>${esc(a.database)}</td></tr>

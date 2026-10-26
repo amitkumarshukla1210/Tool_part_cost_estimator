@@ -195,12 +195,20 @@ def keys_used(trace_rates: list[dict]) -> list[dict]:
 
 # ---------- writing (append-only for approved rows) ----------
 
-def create(data: dict, approve: bool = False, origin: str = "manual", approver: str = "") -> dict:
+def create(data: dict, approve: bool = False, origin: str = "manual", approver: str = "", system: bool = False) -> dict:
+    """A new rate version: a draft, or approved when `approve` (needs the permission Approve rates, like set_status).
+    `system=True` is only for the first set-up seeding (country_rates.seed): no logged-in user, approved as `approver`."""
     row = _clean(data)
     now = date.today().isoformat()
     row |= {"status": "draft", "approved_by": "", "approved_date": "", "origin": origin, "created_at": now}
     if approve:
-        row |= {"status": "approved", "approved_by": _approver() if _server() else approver or _approver(), "approved_date": now}
+        if system:
+            by = approver or "Example seed"
+        else:
+            from . import auth
+            auth.require_perm("approve_rates")
+            by = _approver() if _server() else approver or _approver()
+        row |= {"status": "approved", "approved_by": by, "approved_date": now}
     cols = list(row)
     with closing(_connect()) as con, con:
         cur = con.execute(f"INSERT INTO rates ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
@@ -295,11 +303,11 @@ def to_excel() -> bytes:
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = HEADER_FILL
-    for r in rows:
+    for i, r in enumerate(rows, start=2):
         ws.append(["yes" if r[k] is True else "no" if r[k] is False else r[k] for k in keys])
         if r["is_example"]:
-            for cell in ws[ws.max_row]:
-                cell.fill = EXAMPLE_FILL
+            for j in range(1, len(keys) + 1):  # ws.cell is direct; ws[i] / ws.max_row scan the whole sheet every row
+                ws.cell(row=i, column=j).fill = EXAMPLE_FILL
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
     buf = io.BytesIO()
