@@ -563,13 +563,21 @@ def _back_codes(code: str) -> list[str]:
     return [s["code"] for s in reversed(sts) if cur and s["sort_order"] < cur["sort_order"]]
 
 
+def _is_step_back(old: str, new: str) -> bool:
+    """A move to an earlier status that Part statuses does not allow as a next step (e.g. a forgotten step).
+    An allowed move to an earlier status (Revised → Simulation) is a normal step."""
+    st = {s["code"]: s for s in register_setup.statuses()}
+    allowed = register_setup.next_codes(st[old]) if old in st else []
+    return new in _back_codes(old) and new not in allowed
+
+
 def _check_status_change(old: str, new: str, comment: str) -> None:
     """Design loop: the move must be allowed by Part statuses (next statuses), with a comment where required.
     A step back to an earlier status is always allowed and always needs a comment (why)."""
     st = {s["code"]: s for s in register_setup.statuses()}
     if new not in st:
         raise RegisterError(f"Status '{new}' is not in Part register setup → Part statuses.")
-    if new in _back_codes(old):
+    if _is_step_back(old, new):
         if not str(comment or "").strip():
             raise RegisterError(f"Stepping back to '{st[new]['name']}' needs a comment (why).")
         return
@@ -626,7 +634,7 @@ def update_part(part_id: int, data: dict, refresh: bool = True) -> dict:
         if "status" in changes:
             _log(conn, "part", part_id, "status_changed", {"old": old["status"], "new": vals["status"],
                                                            "comment": str(data.get("status_comment") or "").strip(),
-                                                           "step_back": vals["status"] in _back_codes(old["status"])})
+                                                           "step_back": _is_step_back(old["status"], vals["status"])})
     if refresh and {"material", "process", "sourcing", "country", "costing_month", "rm_inputs", "tool_country",
                     "tool_inputs", "annual_volume", "programme_life_years"} & set(changes):
         refresh_costs([part_id], "part details changed")
@@ -1414,6 +1422,59 @@ def _developed_blank(rev: dict, g: dict, thickness: float, shape=None) -> dict:
     with db.engine().begin() as conn:
         conn.execute(db.revisions.update().where(db.revisions.c.id == rev["id"]).values(geometry=geo))
     return blank
+
+
+def _revision_shape(part_id: int):
+    """(part detail, current revision, 3D shape) of a part; RegisterError if there is no 3D file."""
+    from .geometry import load_step
+    d = part_detail(part_id, with_rm=False)
+    rev = d["revisions"][0] if d["revisions"] else None
+    if not rev or not rev["file_id"]:
+        raise RegisterError("This part has no 3D file yet. Upload a revision first.")
+    with db.engine().connect() as conn:
+        row = conn.execute(select(db.files).where(db.files.c.id == rev["file_id"])).mappings().first()
+    path = file_store.path_of(dict(row))
+    if not path.exists():
+        raise RegisterError(f"The 3D file is missing from the storage folder ({row['stored_path']}).")
+    return d, rev, load_step(str(path))
+
+
+def revision_file_bytes(rev: dict) -> bytes:
+    with db.engine().connect() as conn:
+        row = conn.execute(select(db.files).where(db.files.c.id == rev["file_id"])).mappings().first()
+    return file_store.path_of(dict(row)).read_bytes()
+
+
+def part_drawing(part_id: int, kind: str = "pdf") -> bytes:
+    """Part drawing of the current revision (roadmap stage 26): PDF (A3, three views, title block) or DXF."""
+    from . import drawings
+    d, rev, shape = _revision_shape(part_id)
+    if kind == "dxf":
+        return drawings.part_drawing_dxf(d, rev, shape)
+    info = {}
+    try:
+        t = _geometry_trace(part_id)[0]
+        if "weight" in t.nodes:
+            info["weight"] = f"{t.value('weight'):,.1f} g"
+    except Exception:
+        pass
+    proc = register_setup.processes().get(d["process"]) or {}
+    if proc.get("part_type") == "sheet_metal":
+        g = rev["geometry"]
+        try:
+            b = _developed_blank(rev, g, g.get("wall_mm") or 1.0, shape)
+            info["blank"] = f"{b['length']:.1f} × {b['width']:.1f} mm ({b['method']})"
+        except Exception:
+            pass
+    return drawings.part_drawing_pdf(d | {"process": proc.get("name") or d["process"]}, rev, shape, info)
+
+
+def tool_drawing(part_id: int, kind: str = "pdf", die: str | None = None) -> bytes:
+    """Concept drawing of the mould or of one die stage, from the stored (else live) tool cost."""
+    from . import drawings
+    d = part_detail(part_id, with_rm=False)
+    tr = tool_trace(part_id)
+    return (drawings.tool_drawing_dxf if kind == "dxf" else drawings.tool_drawing_pdf)(d, tr, die)
 
 
 def _sheet_context(part_id: int):

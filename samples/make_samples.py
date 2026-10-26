@@ -35,6 +35,20 @@ def sheet_metal_bracket():
     )
 
 
+def example_bracket(radius: float = 0.0):
+    """Work-instruction example: L mounting bracket, 2 mm galvanised sheet, 40 mm wide, legs 250 mm and 80 mm,
+    four Ø8.5 holes in the long leg and two in the short leg. Rev A has a 0.5 mm inside bend radius (too tight), Rev B a 2 mm
+    inside bend radius (the correction asked by the forming simulation)."""
+    t, w = 2.0, 40.0
+    prof = cq.Workplane("XZ").polyline([(0, 0), (250, 0), (250, t), (t, t), (t, 80), (0, 80)]).close().extrude(-w)
+    if radius:
+        prof = prof.edges("|Y").edges(cq.selectors.NearestToPointSelector((t, w / 2, t))).fillet(radius)
+        prof = prof.edges("|Y").edges(cq.selectors.NearestToPointSelector((0, w / 2, 0))).fillet(radius + t)
+    long_holes = cq.Workplane("XY").pushPoints([(60, w / 2), (110, w / 2), (160, w / 2), (210, w / 2)]).circle(4.25).extrude(10).translate((0, 0, -5))
+    short_holes = cq.Workplane("YZ").pushPoints([(w / 2, 35), (w / 2, 65)]).circle(4.25).extrude(10).translate((-5, 0, 0))
+    return prof.cut(long_holes).cut(short_holes)
+
+
 def demo_assembly():
     """Base plate + bracket group (2 identical brackets) + 4 identical pins + 1 look-alike pin."""
     plate = cq.Workplane("XY").box(200, 120, 10)
@@ -82,6 +96,8 @@ if __name__ == "__main__":
         ("plate_with_hole", plate_with_hole),
         ("plastic_cover", plastic_cover),
         ("sheet_metal_bracket", sheet_metal_bracket),
+        ("example_bracket_revA", lambda: example_bracket(0.5)),
+        ("example_bracket_revB", lambda: example_bracket(2.0)),
     ]:
         path = OUT / f"{name}.step"
         cq.exporters.export(fn(), str(path))

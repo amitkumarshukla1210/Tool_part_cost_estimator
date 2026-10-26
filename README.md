@@ -1003,6 +1003,19 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 
 ---
 
+## Work instruction, drawings and the PO pack
+
+- **Help page → Start here → Work instruction (PDF)**: a step-by-step guide for a new user, made from a real example (L bracket
+  EX26-0001: Rev A, simulation asks for a correction, Rev B, tool design frozen; plastic cover EX26-0002 with its mould). The
+  sample STEP files and every output of the example (drawings, cost sheets, PO pack) can be downloaded there.
+- **Part drawing**: part panel → Geometry → *Part drawing PDF / DXF* (three views, overall dimensions, title block, revision).
+- **Tool drawing per stage**: Dies table → *Drawing PDF · DXF* per die (plan with pillars, die plate / work area, plate stack, main
+  BOM); plastic / die-cast parts: *Mould concept drawing*. Concept layouts for quotation and PO reference; the 3D model is the master.
+- **PO pack (ZIP)**: Tool cost → *⬇ PO pack*: `01_part` (STEP, drawing), `02_tool` (per stage drawing, cost PDF, BOM Excel; all
+  stages; blank / strip DXF, tool pack), `03_cost` (RM and part cost), `README.txt`.
+- Rebuild the PDF after a change of screens: `python docs/work_instruction/build_work_instruction.py` (needs Node.js with
+  Playwright, and pdftoppm).
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:
