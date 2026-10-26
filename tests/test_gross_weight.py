@@ -52,7 +52,7 @@ def test_sheet_metal_blank_too_big():
     with pytest.raises(ValueError):
         calculate(GrossWeightInput(
             part_type="sheet_metal", net_weight_g=10, density_g_cm3=7.85,
-            thickness_mm=2, blank_length_mm=3000, blank_width_mm=1300,
+            thickness_mm=2, blank_length_mm=5000, blank_width_mm=2500,
         ))
 
 
@@ -66,7 +66,7 @@ def test_api_gross_weight_and_validation():
         "part_type": "sheet_metal", "net_weight_g": 650, "density_g_cm3": 7.85}).status_code == 422
     assert client.post("/api/gross-weight", json={
         "part_type": "sheet_metal", "net_weight_g": 10, "density_g_cm3": 7.85, "thickness_mm": 2,
-        "blank_length_mm": 3000, "blank_width_mm": 1300}).status_code == 400
+        "blank_length_mm": 5000, "blank_width_mm": 2500}).status_code == 400
 
 
 def test_api_analyze_returns_sheet_hints():

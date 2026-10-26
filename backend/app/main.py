@@ -964,21 +964,22 @@ def parts_forming_simulation(part_id: int, kind: str):
 
 
 @app.get("/api/parts/{part_id}/correction")
-def parts_correction_preview(part_id: int, radius: Optional[float] = None, hole: Optional[float] = None):
-    """What the software can correct in the 3D model after the simulation (bend radius, small holes), with the new values."""
+def parts_correction_preview(part_id: int, radius: Optional[float] = None, hole: Optional[float] = None, draft: Optional[float] = None):
+    """What the software can correct in the 3D model after the simulation (bend radius, small holes; draft of moulded parts)."""
     try:
-        return register.correction_preview(part_id, radius, hole)
+        return register.correction_preview(part_id, radius, hole, draft)
     except (register.RegisterError, register.ToolNotApplicable) as exc:
         raise HTTPException(400, str(exc)) from None
 
 
 @app.get("/api/parts/{part_id}/correction.{kind}")
-def parts_correction_file(part_id: int, kind: str, radius: Optional[float] = None, hole: Optional[float] = None):
+def parts_correction_file(part_id: int, kind: str, radius: Optional[float] = None, hole: Optional[float] = None,
+                          draft: Optional[float] = None):
     """The corrected 3D model (step) or a before | after picture (png)."""
     if kind not in ("step", "png"):
         raise HTTPException(404, "step or png")
     try:
-        data, media, name = register.correction_file(part_id, kind, radius, hole)
+        data, media, name = register.correction_file(part_id, kind, radius, hole, draft)
     except (register.RegisterError, register.ToolNotApplicable) as exc:
         raise HTTPException(400, str(exc)) from None
     return Response(data, media_type=media, headers={"Content-Disposition": f'{"inline" if kind == "png" else "attachment"}; filename="{name}"'})
@@ -989,7 +990,7 @@ def parts_correction_release(part_id: int, data: dict):
     """Release the corrected model as a new revision: {radius_mm?, hole_mm?, rev?, change_note?}."""
     try:
         return register.correction_release(part_id, data.get("radius_mm"), data.get("hole_mm"), data.get("rev") or "",
-                                           data.get("change_note") or "")
+                                           data.get("change_note") or "", data.get("draft_deg"))
     except (register.RegisterError, register.ToolNotApplicable) as exc:
         raise HTTPException(400, str(exc)) from None
 

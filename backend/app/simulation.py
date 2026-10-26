@@ -22,8 +22,8 @@ from . import concept, costing_setup, formula, master_data, mould_db, register_s
 
 REQUIRED = ("min_draft_deg", "thin_ratio", "sink_ratio", "cycle_s", "clamp_t")
 SIM_VARS = concept.CONCEPT_VARS | {
-    "max_wall_mm": "Thickest wall: 95th percentile of the measured thickness (mm)",
-    "min_wall_mm": "Thinnest wall: 5th percentile of the measured thickness (mm)",
+    "max_wall_mm": "Thickest wall: 95th percentile of the measured thickness, by area (mm)",
+    "min_wall_mm": "Thinnest wall: 5th percentile of the measured thickness, by area (mm)",
     "flow_length_mm": "Flow length estimate = part_l + part_h (gate on one edge) (mm)",
     "shot_weight_g": "Shot weight = part weight (body only, inserts excluded) × cavities (g)",
     "inserts_per_shot": "Moulded-in inserts × cavities",
@@ -97,12 +97,21 @@ def run(vertices, triangles, part_type: str, facts: dict, projected_area_mm2: di
     idx = np.arange(0, len(tri), step)
     th = np.full(len(tri), np.nan)
     th[idx] = thickness(tri, n, idx, p["undercut_offset_mm"])
-    meas = th[~np.isnan(th)]
-    wall = facts.get("wall_mm") or (float(np.median(meas)) if len(meas) else 0)
+    ok = ~np.isnan(th)
+    meas = th[ok]
+    w_area = area[ok]
+
+    def pct(q):        # area-weighted percentile: many small faces (rims, fillets) must not outweigh the walls
+        if not len(meas):
+            return 0.0
+        o = np.argsort(meas)
+        cum = np.cumsum(w_area[o]) / max(w_area.sum(), 1e-12)
+        return float(meas[o][min(np.searchsorted(cum, q / 100), len(meas) - 1)])
+    wall = facts.get("wall_mm") or pct(50)
     env = sample_env(part_type) | {k: 0.0 for k in SIM_VARS}
     env |= {k: float(x) for k, x in facts.items() if k in SIM_VARS}
-    env |= {"wall_mm": wall, "max_wall_mm": float(np.percentile(meas, 95)) if len(meas) else wall,
-            "min_wall_mm": float(np.percentile(meas, 5)) if len(meas) else wall,
+    env |= {"wall_mm": wall, "max_wall_mm": pct(95) if len(meas) else wall,
+            "min_wall_mm": pct(5) if len(meas) else wall,
             "flow_length_mm": facts["part_l"] + facts["part_h"],
             "shot_weight_g": facts["part_weight_g"] * facts["cavities"],
             "inserts_per_shot": facts.get("inserts", 0) * facts["cavities"],

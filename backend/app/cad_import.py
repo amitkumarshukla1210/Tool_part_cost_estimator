@@ -32,7 +32,7 @@ from OCP.TDF import TDF_Label, TDF_LabelSequence
 from OCP.TDocStd import TDocStd_Document
 from OCP.XCAFDoc import XCAFDoc_DocumentTool
 
-from .geometry import exact_bbox, projected_area, tessellate, wall_stats
+from .geometry import exact_bbox, projected_area, solidify, tessellate, wall_stats
 
 THEME_CSS = Path(__file__).resolve().parents[2] / "theme" / "dtc-theme.css"
 
@@ -325,7 +325,7 @@ def analyse_file(path: str, file_name: str, with_files: bool = True, insert_dete
     for d in defs.values():
         d.pop("placed", None)
     for d in defs.values():
-        shape = cq.Shape.cast(d["shape"]) if d["shape"] is not None else None
+        shape = solidify(cq.Shape.cast(d["shape"])) if d["shape"] is not None else None
         d.pop("shape")
         d.pop("instance_names")
         if shape is None:  # synthetic root: build the compound of its children for the picture

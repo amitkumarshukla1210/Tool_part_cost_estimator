@@ -73,7 +73,7 @@ def validate(clean: dict) -> None:
 
 
 def features(shape, geometry: dict, blank: dict, typed: dict, density: float, annual_volume, years) -> dict:
-    from .geometry import sheet_features
+    from .geometry import drawn_share, sheet_features
     t = geometry.get("wall_mm") or 1.0
     f = sheet_features(shape, t)
     holes, bends = f["holes"], f["bends"]
@@ -89,8 +89,11 @@ def features(shape, geometry: dict, blank: dict, typed: dict, density: float, an
     strip_w = blank["width"] if str(blank.get("method", "")).startswith("Developed") else b["width"]
     bend_len = sum(x["length_mm"] for x in bends) or n_bends * strip_w
     depth = typed.get("draw_depth_mm")
+    drawn = drawn_share(shape) > params.get("drawn_min_share", 0.001)       # corners curved both ways: a drawn part
     if depth is None:
-        depth = (b["height"] - t) if (b["height"] > params.get("draw_height_ratio", 5) * t and not n_bends) else 0.0
+        depth = (b["height"] - t) if (b["height"] > params.get("draw_height_ratio", 5) * t and (not n_bends or drawn)) else 0.0
+    if depth and drawn and typed.get("bend_radius_mm") is None:
+        n_bends, bend_len = 0, 0.0      # wall / floor radii of a drawn part are formed in the draw, not bent
     foot = b["length"] * b["width"]
     hole_area = sum(h["area_mm2"] for h in holes)
     return {

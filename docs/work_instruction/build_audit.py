@@ -18,55 +18,57 @@ TYPES = ["Sheet metal: multi-stage dies", "Sheet metal: progressive die", "Plast
 # task -> one status per type: (mark, note); mark = OK / PART / NO
 MATRIX = [
     ("3D assembly (STEP) with every part", [
-        ("OK", "Blanking, piercing, trimming, V-bending: shoes, pillars, bushes, die plate, backing plates, guides / nest, stop pin, stripper, punch holder, punches, screws, dowels"),
-        ("PART", "Piercing + cut-off stations at the pitch; forming stations, pilots and lifters are left to the designer"),
-        ("OK", "Core / cavity from the part × shrinkage, A / B / clamp / support plates, spacer blocks, ejector plates and pins, return pins, pillars, bushes, sprue bush, locating ring, cooling"),
-        ("PART", "Same structure with die-casting rules; shot sleeve, runner, overflows and vacuum vents are left to the designer"),
-        ("PART", "Cavity and core halves in the steam-chest base; fill injectors, vents and steam chambers are left to the designer"),
-        ("PART", "Two cavity halves split through the middle; neck / base inserts and blow pin are left to the designer"),
-        ("NO", "No tool cost for foundry yet (planned stage), so no tool design"),
+        ("OK", "Blanking, piercing, trimming, V-bending, U-bending (pressure pad, springs, gauge pins), deep drawing (punch, die, blank holder, cushion pins) and draw + trim: shoes, pillars, bushes, plates, punches, screws, dowels"),
+        ("OK", "Piercing, forming stations and cut-off at the pitch, stop pin, stripper, guides"),
+        ("OK", "Core / cavity × shrinkage, plates, ejection, cooling; sprue / cold runner + edge gates or hot-runner manifold + nozzles; slides with heel block and angle pin, lifters where undercuts are found"),
+        ("OK", "Mould structure + shot sleeve, biscuit, runners, overflows and vacuum vents"),
+        ("OK", "Cavity / core halves, steam chambers, back plates, fill injectors, steam vents"),
+        ("OK", "Cavity halves, neck and base inserts, blow pin"),
+        ("OK", "Match plate, cope / drag patterns with gating and riser pattern, core box, cope / drag flasks and flask pins"),
     ]),
-    ("Every part as its own 3D (STEP)", [("OK", ""), ("OK", ""), ("OK", ""), ("OK", ""), ("OK", ""), ("OK", ""), ("NO", "")]),
+    ("Every part as its own 3D (STEP)", [("OK", "")] * 7),
     ("2D drawings: assembly + detail of every made part (PDF and DXF)", [
-        ("OK", "Assembly: iso, exploded, section, BOM. Plates: true views, hole table with fits and depths. Punches / V-die: three views; profiles in DXF for wire cut"),
+        ("OK", "Assembly: iso, exploded, section, BOM. Plates: true views, hole table with fits and depths. Punches / dies: three views; profiles in DXF for wire cut"),
         ("OK", "As multi-stage"), ("OK", "Plates as above; core / cavity: three views + STEP (3D-machined)"), ("OK", "As plastic"),
-        ("OK", "As plastic"), ("OK", "As plastic"), ("NO", "")]),
+        ("OK", "As plastic"), ("OK", "As plastic"), ("OK", "Patterns, core box and flasks: three views + STEP")]),
     ("Tolerances, fits, finish, heat treatment, labels on drawings", [
-        ("OK", "General tolerance ISO 2768-mK, plate thickness / flatness / parallelism, fits (pillar g6, bush H7, dowel and punch m6/H7), position of fitted holes, finishes, hardness, heat-treatment note - all Design rules"),
-        ("OK", ""), ("OK", "+ insert-in-pocket fit, cavity polish"), ("OK", ""), ("OK", ""), ("OK", ""), ("NO", "")]),
-    ("Logo and title block on every drawing (CAD and PDF)", [("OK", "Admin → Drawings: logo, company, projection, drawn / checked / approved, notes; DXF logo as hatches"),
-        ("OK", ""), ("OK", ""), ("OK", ""), ("OK", ""), ("OK", ""), ("NO", "")]),
-    ("Simulation report (PDF)", [("OK", "Forming report: checks OK / FAIL, blank and yield, stages, force, press, pictures per stage, flat pattern"),
-        ("OK", "Same report"), ("OK", "Wall / draft / sink / undercut maps, cycle, clamp, machine"), ("OK", "Same analysis"),
-        ("NO", "No simulation rules for EPS yet"), ("NO", "No simulation rules for blow moulding yet"), ("NO", "")]),
+        ("OK", "ISO 2768-mK, flatness / parallelism, fits (pillar g6, bush H7, dowel and punch m6/H7), finishes, hardness - all Design rules"),
+        ("OK", ""), ("OK", "+ insert-in-pocket fit, cavity polish"), ("OK", ""), ("OK", ""), ("OK", ""), ("OK", "Pattern tolerances and finish from Design rules")]),
+    ("Logo and title block on every drawing (CAD and PDF)", [("OK", "Admin → Drawings: logo, company, projection, drawn / checked / approved, notes; DXF logo as hatches")] + [("OK", "")] * 6),
+    ("Simulation report (PDF)", [("OK", "Forming report: checks, blank and yield, stages, force, press, pictures, flat pattern; drawn parts detected"),
+        ("OK", "Same report"), ("OK", "Wall / draft / sink / undercut maps, cycle, clamp, gate count, machine"), ("OK", "Same analysis"),
+        ("OK", "EPS rules: draft, thin / thick walls, fill, steam, cooling, cycle"), ("OK", "Blow rules: thin (over-stretched) / thick walls, blow, cooling, cycle"), ("OK", "Foundry rules: pattern draft, misrun / hot spots, solidification, riser size")]),
     ("Simulation video (MP4)", [("OK", "Blanking, piercing, bends folding; failing bend in red"), ("OK", ""),
-        ("OK", "Turntable of the wall, draft and risk maps with the result"), ("OK", ""), ("NO", ""), ("NO", ""), ("NO", "")]),
+        ("OK", "Turntable of the wall, draft and risk maps with the result"), ("OK", ""), ("OK", ""), ("OK", ""), ("OK", "")]),
     ("Correct the 3D model in the software and release it as a new revision", [
         ("OK", "Bend radius (outside size kept) and small holes; preview, STEP, new revision"), ("OK", "Same"),
-        ("NO", "Draft, wall and rib changes need CAD: upload the new revision"), ("NO", "As plastic"), ("NO", ""), ("NO", ""), ("NO", "")]),
-    ("Release pack ZIP for the tool room (3D + PDF + DXF + BOM)", [("OK", ""), ("OK", ""), ("OK", ""), ("OK", ""), ("OK", ""), ("OK", ""), ("NO", "")]),
+        ("OK", "Draft added to the walls in 3D (default = min. draft + 0.5°); wall / rib changes still in CAD"), ("OK", "As plastic"),
+        ("OK", "As plastic"), ("OK", "As plastic"), ("OK", "As plastic")]),
+    ("Release pack ZIP for the tool room (3D + PDF + DXF + BOM)", [("OK", "")] * 7),
+    ("Large parts 10-20 kg (presses / machines up to 3000-4000 t)", [
+        ("OK", "Presses to 3000 t, heavy die sets to 4800 × 2400, large sheet 4000 × 2000; sample tray 16.6 kg (draw + trim), channel 18.3 kg (U-bend)"),
+        ("OK", "As multi-stage"), ("OK", "Machines to 4000 t, mould bases to 2200 mm, one cavity for large parts; sample tub 11.9 kg PP"),
+        ("OK", "HPDC to 2500 t, die holders to 1600 mm"), ("OK", "Steam-chest base by size"), ("OK", "-"), ("OK", "Flask size from the part")]),
 ]
 
 FINDINGS = [
     ("Checked and right",
-     ["Blanking: die opening = blank size, punch = blank − clearance; piercing: punch = hole, die = hole + clearance (clearance % of t per side, Design rules).",
-      "Flat pattern unfolded from the 3D model: the sample L bracket corrected in the software to R2 unfolds to exactly the designer's Rev B (326.178 mm).",
-      "Bend correction keeps the outside size (checked on rounded and sharp-cornered models) and the holes; the new revision passes the forming check.",
-      "Die plate and punches D2 58-62 HRC, shoes and plates from the die set / mould base material, grades from the tool BOM (Grade rules, your choices).",
-      "Every plate has its holes in a table from the datum corner: through holes, counterbores, tapped holes, fits with position tolerance.",
-      "Mould: core and cavity cut from the part with shrinkage; ejector pins cut to the core surface; cooling channels kept clear of the part.",
-      "No number is fixed in the program: sizes, fits, tolerances and finishes are Design rules (EXAMPLE values flagged until you replace them)."]),
-    ("Check before release (tool designer)",
-     ["Press shut height and bed size against the press data sheet (shut height is on the assembly sheet).",
-      "Stripper: the design uses a fixed stripper on stock guides / nest; use a spring stripper where flatness of the part needs it.",
-      "V-bending: pressure pad, back gauge position and springback compensation by try-out.",
-      "Moulds: gate, runner and vents; slides and lifters where the concept analysis found undercuts; hot runner if chosen in the tool cost.",
-      "Detail drawings of punches, V-die and inserts give the overall sizes; profiles come from the DXF / STEP (wire cut, CNC)."]),
-    ("Not done yet (next stages)",
-     ["Foundry: pattern, core boxes and moulding boxes (no tool cost yet).",
-      "Drawing dies (deep draw) and the forming stations of progressive dies in 3D.",
-      "Simulation and video for EPS and blow moulding.",
-      "3D correction of draft, wall thickness and ribs (needs CAD)."]),
+     ["Blanking: die opening = blank size, punch = blank − clearance; piercing: punch = hole, die = hole + clearance (Design rules).",
+      "Flat pattern unfolded from the 3D model; bend correction matches the designer's Rev B to 0.01 mm.",
+      "Drawn parts (doubly curved walls) are recognised: blank → draw → trim, with draw die, blank holder and trim die in 3D.",
+      "Large parts: plate / bed size of the press or machine is checked against the die set / mould base, not only the force.",
+      "Mould: core and cavity with shrinkage; gate count and fill time from Design rules; slides and lifters placed where the analysis finds undercuts.",
+      "Foundry: pattern equipment has a tool cost and a 3D design (match plate, patterns, gating / riser, core box, flasks).",
+      "No number is fixed in the program: sizes, fits, tolerances and machine data are Master data (EXAMPLE values flagged until replaced)."]),
+    ("Check before release (tool designer) - normal tool-room practice",
+     ["Press shut height, bed size and T-slots against the press data sheet.",
+      "Slide / lifter face: the shape that forms the undercut is cut from the part, check the stroke and lock angle.",
+      "V-bending: springback compensation by try-out; cooling layout of large moulds (generic straight channels).",
+      "Foundry parting line is chosen from the largest section (heuristic): confirm with the foundry; EPS steam vent pattern size.",
+      "Detail drawings give overall sizes; 3D surfaces and profiles come from the STEP / DXF (CNC, wire cut)."]),
+    ("Not done (out of scope of the software)",
+     ["Wall-thickness and rib changes in 3D: done in CAD, the new revision is uploaded and checked again.",
+      "Full FEM / flow simulation (Moldflow, AutoForm): the report is a rule-based check, use it before ordering a full analysis."]),
 ]
 
 
@@ -103,14 +105,13 @@ def build() -> Path:
     story = [drawing_style.pdf_header(st, "AUDIT · TOOL DESIGN, DRAWINGS, SIMULATION, 3D CORRECTION",
                                       "Is every task complete for every type of mould and tool?"),
              Paragraph(f"Audit of release {date.today().isoformat()} from a tool-room head's point of view. {done} of {total} "
-                       "task × tool-type cells are done; sheet-metal dies and injection moulds are complete; die-casting, EPS and "
-                       "blow moulds are complete for the mould structure with their process-specific items listed for the designer; "
-                       "foundry is not covered yet. Every output was made from the sample parts and checked (pictures, drawings, "
+                       "task × tool-type cells are done for every die, mould and pattern type, including large parts of 10-20 kg on "
+                       "machines up to 3000-4000 t. The designer checks listed below are normal tool-room release checks. Every output was made from the sample parts and checked (pictures, drawings, "
                        "STEP files, automated tests).", st["n"]), Spacer(1, 3 * mm), grid]
     for title, items in FINDINGS:
         story += [Paragraph(title, st["h2"])] + [Paragraph(f"• {x}", st["n"]) for x in items]
-    story += [Spacer(1, 4 * mm), drawing_style.pdf_title_block(W, [("Scope", "Roadmap stage 27"), ("Audited", date.today().isoformat())],
-                                                               "sheet_metal", "-", "1 / 1", "DTC-AUDIT-27", "")]
+    story += [Spacer(1, 4 * mm), drawing_style.pdf_title_block(W, [("Scope", "Roadmap stages 27-28"), ("Audited", date.today().isoformat())],
+                                                               "sheet_metal", "-", "1 / 1", "DTC-AUDIT-28", "")]
     OUT.parent.mkdir(parents=True, exist_ok=True)
     doc = SimpleDocTemplate(str(OUT), pagesize=landscape(A4), leftMargin=14 * mm, rightMargin=14 * mm, topMargin=10 * mm,
                             bottomMargin=10 * mm, title="Audit - tool design", author="Design to Cost")

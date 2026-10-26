@@ -169,3 +169,103 @@ def fix_small_holes(shape, t: float, min_d: float):
     if not changes:
         raise FixError("No hole is smaller than the minimum: nothing to correct.")
     return s.clean(), changes
+
+
+# ---------- moulded parts: draft on the walls along the opening direction ----------
+
+AXIS_DIR = {"x": (1, 0, 0), "y": (0, 1, 0), "z": (0, 0, 1)}
+
+
+def add_draft(shape, axis: str, angle_deg: float, neutral: str = "auto"):
+    """New shape with `angle_deg` draft on every wall parallel to the opening direction (axis x / y / z), about a neutral
+    plane at the parting side of the part (the end of the part with the smaller cross-section, the open side of a cover).
+    Faces that the draft operation cannot take are left as they are and counted. Returns (shape, changes)."""
+    from OCP.BRepOffsetAPI import BRepOffsetAPI_DraftAngle
+    from OCP.gp import gp_Dir, gp_Pln, gp_Pnt
+    from OCP.TopoDS import TopoDS
+    d = np.array(AXIS_DIR[axis], float)
+    bb = shape.BoundingBox()
+    lo = np.array([bb.xmin, bb.ymin, bb.zmin]) @ d
+    hi = np.array([bb.xmax, bb.ymax, bb.zmax]) @ d
+    from .mould_design import _section_area_axis
+    a_lo = _section_area_axis(shape, axis, 0.03)
+    a_hi = _section_area_axis(shape, axis, 0.97)
+    at = lo if (neutral == "low" or (neutral == "auto" and a_lo <= a_hi)) else hi
+    pull = d if at == lo else -d                      # the part comes off the core towards the far side
+    plane = gp_Pln(gp_Pnt(*(d * at)), gp_Dir(*pull))
+    walls = []
+    for f in shape.Faces():
+        if f.geomType() not in ("PLANE", "CYLINDER", "CONE", "BSPLINE"):
+            continue
+        n = np.array(f.normalAt().toTuple())
+        if abs(n @ d) < 0.02 and f.Area() > 1.0:
+            walls.append(f)
+    if not walls:
+        raise FixError("No walls along the opening direction: nothing to draft.")
+    centre = np.array([bb.center.x, bb.center.y, bb.center.z])
+    def outer(f):                     # outside wall: its normal points away from the middle of the part
+        c = np.array(f.Center().toTuple())
+        r = c - centre
+        r = r - (r @ d) * d
+        return float(np.array(f.normalAt().toTuple()) @ r) > 0
+    side = [outer(f) for f in walls]
+    best = None
+    for sgn in (1, -1):               # outside walls one way, inside walls the other: both taper the same way, wall kept
+        op = BRepOffsetAPI_DraftAngle(shape.wrapped)
+        done = skipped = 0
+        for f, out in zip(walls, side):
+            op.Add(TopoDS.Face_s(f.wrapped), gp_Dir(*pull), math.radians((sgn if out else -sgn) * angle_deg), plane)
+            if op.AddDone():
+                done += 1
+            else:
+                op.Remove(TopoDS.Face_s(f.wrapped))
+                skipped += 1
+        if not done:
+            continue
+        try:
+            op.Build()
+            if not op.IsDone():
+                continue
+            new = cq.Shape.cast(op.Shape())
+        except Exception:
+            continue
+        sol = new.Solids()
+        if len(sol) != 1 or not sol[0].isValid():
+            continue
+        new = sol[0]
+        # the right sign makes the part release: its outline at the far end from the neutral plane gets smaller
+        cand = (sgn, new, done, skipped)
+        if best is None or (_opens(new, shape, d, at) and not _opens(best[1], shape, d, at)):
+            best = cand
+    if best is None:
+        raise FixError("The draft could not be applied to this model: add it in CAD.")
+    _, new, done, skipped = best
+    if abs(new.Volume() - shape.Volume()) > 0.25 * shape.Volume():
+        raise FixError("The drafted model differs too much from the original: add the draft in CAD.")
+    return new, [{"what": "draft on walls", "from_mm": 0.0, "to_mm": angle_deg, "faces": done, "faces_skipped": skipped}]
+
+
+def _opens(new, old, d, at) -> bool:
+    """True when the drafted part releases: its section at the far end from the neutral plane is not larger than before."""
+    from .mould_design import _section_area_axis
+    axis = "xyz"[int(np.argmax(np.abs(d)))]
+    frac = 0.9 if abs(at - (np.array([old.BoundingBox().xmin, old.BoundingBox().ymin, old.BoundingBox().zmin]) @ d)) < 1e-6 else 0.1
+    del axis, _section_area_axis
+    return _outer_extent(new, d, frac) <= _outer_extent(old, d, frac) + 1e-6
+
+
+def _outer_extent(shape, d, frac):
+    """Largest size of the part square to d at a fraction of its length along d (outline of a thin slab)."""
+    bb = shape.BoundingBox()
+    lo = np.array([bb.xmin, bb.ymin, bb.zmin]) @ d
+    hi = np.array([bb.xmax, bb.ymax, bb.zmax]) @ d
+    z = lo + frac * (hi - lo)
+    big = 4 * max(bb.xlen, bb.ylen, bb.zlen) + 10
+    c = np.array([bb.center.x, bb.center.y, bb.center.z])
+    c = c - (c @ d) * d + d * z
+    slab = cq.Solid.makeBox(big, big, 0.2, cq.Vector(-big / 2, -big / 2, -0.1))
+    if abs(d[2]) < 0.9:
+        slab = slab.rotate((0, 0, 0), (0, 1, 0) if abs(d[0]) > 0.9 else (1, 0, 0), 90 if abs(d[0]) > 0.9 else -90)
+    sec = shape.intersect(slab.translate(cq.Vector(*c)))
+    sb = sec.BoundingBox()
+    return max(sb.xlen * (1 - abs(d[0])), sb.ylen * (1 - abs(d[1])), sb.zlen * (1 - abs(d[2])))

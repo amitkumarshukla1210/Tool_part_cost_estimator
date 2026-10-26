@@ -99,27 +99,44 @@ def _move(pts, dx, dy):
 
 
 class Plate:
-    """A plate with its holes and openings, origin at its lower-left-bottom corner."""
+    """A plate with its holes and openings, origin at its lower-left-bottom corner. Holes and openings are collected and
+    cut in one go (one boolean for all of them: fast on large plates with many holes)."""
 
     def __init__(self, L, W, H):
         self.L, self.W, self.H = L, W, H
-        self.wp = _box(L, W, H)
+        self._wp = _box(L, W, H)
+        self._pending = []
         self.holes, self.openings = [], []
+
+    @property
+    def wp(self):
+        if self._pending:
+            tools = [t.val() if hasattr(t, "val") else t for t in self._pending]
+            self._wp = cq.Workplane("XY").newObject([self._wp.val().cut(*tools)])     # one boolean, tools may overlap
+            self._pending = []
+        return self._wp
+
+    @wp.setter
+    def wp(self, value):
+        self._pending = []
+        self._wp = value
+
+    def _cut(self, tool):
+        self._pending.append(tool)
 
     def hole(self, x, y, d, kind="thru", label="", depth=None, from_top=True, cb_d=None, cb_h=None):
         h = depth or self.H
         z0 = self.H - h if from_top else 0
-        self.wp = self.wp.cut(cq.Workplane("XY").workplane(offset=z0 - 0.01).center(x, y).circle(d / 2).extrude(h + 0.02))
+        self._cut(cq.Workplane("XY").workplane(offset=z0 - 0.01).center(x, y).circle(d / 2).extrude(h + 0.02))
         if cb_d:
             z1 = self.H - cb_h if from_top else 0
-            self.wp = self.wp.cut(cq.Workplane("XY").workplane(offset=z1 - 0.01).center(x, y).circle(cb_d / 2).extrude(cb_h + 0.02))
-        if cb_d:
+            self._cut(cq.Workplane("XY").workplane(offset=z1 - 0.01).center(x, y).circle(cb_d / 2).extrude(cb_h + 0.02))
             label = f"{label}: Ø{d:g} thru, counterbore Ø{cb_d:g} × {cb_h:g}" + ("" if from_top else " from below")
         self.holes.append({"x": round(x, 3), "y": round(y, 3), "d": round(d, 3), "kind": kind, "label": label,
                            "depth": None if depth is None else round(depth, 2), "top": from_top, "cb_d": cb_d, "cb_h": cb_h})
 
     def opening(self, pts, label, tol=""):
-        self.wp = self.wp.cut(_prism(pts, -0.01, self.H + 0.02))
+        self._cut(_prism(pts, -0.01, self.H + 0.02))
         self.openings.append({"pts": [[round(x, 3), round(y, 3)] for x, y in pts], "label": label, "tol": tol})
 
     def comp(self, name, locs, **k) -> Comp:
@@ -150,6 +167,55 @@ class Rules:
 
     def hardness(self, grade):
         return (self.steels.get(grade) or {}).get("hardness") or ""
+
+
+def _forming_station(dp, hp, fp, t, rules, lines, x_st, DL, DW, z_die, DH, z_holder, holder_h, die_mat):
+    """V-forming insert (pocketed in the die plate, flush with its top) and forming punch (in the punch holder) for the first
+    bend of the part, at station x_st of a progressive die."""
+    b = fp["bends"][0]
+    (x1, y1), (x2, y2) = b["line"]
+    blen = math.hypot(x2 - x1, y2 - y1)
+    horiz = abs(x2 - x1) > abs(y2 - y1)
+    v_open = rules("v_die_open_factor") * t
+    inc = math.radians(180 - b["angle_deg"] - rules("overbend_deg"))
+    depth_v = (v_open / 2) / math.tan(inc / 2)
+    vw = v_open * rules("v_die_w_factor")
+    il, iw = (blen + 10, vw) if horiz else (vw, blen + 10)
+    ih = DH
+    cx = (x1 + x2) / 2 - fp["length_mm"] / 2 + x_st
+    cy = (y1 + y2) / 2 - fp["width_mm"] / 2
+    blk = cq.Workplane("XY").box(il, iw, ih, centered=False)
+    if horiz:
+        prof = cq.Workplane("YZ").polyline([(iw / 2 - v_open / 2, ih + 0.01), (iw / 2, ih - depth_v), (iw / 2 + v_open / 2, ih + 0.01)]).close().extrude(il)
+    else:
+        prof = cq.Workplane("XZ").polyline([(il / 2 - v_open / 2, ih + 0.01), (il / 2, ih - depth_v), (il / 2 + v_open / 2, ih + 0.01)]).close().extrude(-iw)
+    blk = blk.cut(prof)
+    pocket = [[cx - il / 2 + DL / 2, cy - iw / 2 + DW / 2], [cx + il / 2 + DL / 2, cy - iw / 2 + DW / 2],
+              [cx + il / 2 + DL / 2, cy + iw / 2 + DW / 2], [cx - il / 2 + DL / 2, cy + iw / 2 + DW / 2],
+              [cx - il / 2 + DL / 2, cy - iw / 2 + DW / 2]]
+    dp.opening(pocket, "Pocket for the forming insert", rules.text("fit_insert", "H7"))
+    vm, vh = _mat(rules, _line(lines, "Bending die", "Die plate"), die_mat)
+    out = [Comp("Forming insert (V)", blk.val(), [(cx - il / 2, cy - iw / 2, z_die)], material=vm, hardness=vh, color="hard",
+                size=(il, iw, ih), drawing="solid", notes=[f"V opening {v_open:g} mm, included angle {math.degrees(inc):.1f}°",
+                                                           rules.text("heat_treat_note")])]
+    r_tip = max(b["inner_radius_mm"], 0.2)
+    ph = z_holder + holder_h - (z_die + DH - depth_v + t)
+    tw = max(2 * ph * math.tan(inc / 2) * 0.5, 2 * r_tip + 4)
+    pts = [(-r_tip, 0.0), (-tw / 2, ph), (tw / 2, ph), (r_tip, 0.0)]
+    blade = (cq.Workplane("YZ").polyline(pts).close().extrude(blen) if horiz else cq.Workplane("XZ").polyline(pts).close().extrude(-blen))
+    loc = (cx - blen / 2, cy, z_die + DH - depth_v + t) if horiz else (cx, cy - blen / 2, z_die + DH - depth_v + t)
+    sl = [[cx - blen / 2 + DL / 2, cy - tw / 2 + DW / 2], [cx + blen / 2 + DL / 2, cy - tw / 2 + DW / 2],
+          [cx + blen / 2 + DL / 2, cy + tw / 2 + DW / 2], [cx - blen / 2 + DL / 2, cy + tw / 2 + DW / 2],
+          [cx - blen / 2 + DL / 2, cy - tw / 2 + DW / 2]] if horiz else \
+         [[cx - tw / 2 + DL / 2, cy - blen / 2 + DW / 2], [cx + tw / 2 + DL / 2, cy - blen / 2 + DW / 2],
+          [cx + tw / 2 + DL / 2, cy + blen / 2 + DW / 2], [cx - tw / 2 + DL / 2, cy + blen / 2 + DW / 2],
+          [cx - tw / 2 + DL / 2, cy - blen / 2 + DW / 2]]
+    hp.opening(sl, "Forming punch seat", rules.text("fit_punch"))
+    bm, bh = _mat(rules, _line(lines, "Bending punch"), die_mat)
+    bb = blade.val().BoundingBox()
+    out.append(Comp("Forming punch (V)", blade.val(), [loc], material=bm, hardness=bh, color="hard", size=(bb.xlen, bb.ylen, bb.zlen),
+                    drawing="solid", notes=[f"Tip radius R{r_tip:g}", rules.text("heat_treat_note")]))
+    return out
 
 
 def _round_up(x, step):
@@ -266,9 +332,11 @@ def die_design(part: dict, fp: dict, t: float, die: dict, lines: list, strip: di
             pitch = float(die.get("pitch") or fp["length_mm"])
             xs = [-(n_st - 1) * pitch / 2 + i * pitch for i in range(n_st)]
             st_pierce, st_blank = xs[0], xs[-1]
-            if ops - {"blank", "pierce", "trim"}:
-                notes.append(f"Progressive die: forming stations ({', '.join(sorted(ops - {'blank', 'pierce', 'trim'}))}) are not "
-                             "modelled - the die designer adds them between piercing and cut-off.")
+            forming = ops - {"blank", "pierce", "trim"}
+            st_form = xs[len(xs) // 2] if len(xs) >= 3 else None
+            if forming - {"bend"} or ("bend" in forming and (st_form is None or not fp.get("bends"))):
+                notes.append(f"Progressive die: forming stations ({', '.join(sorted(forming))}) need a station between piercing and "
+                             "cut-off: the die designer adds them.")
         else:
             st_pierce = st_blank = 0.0
         if ops & {"blank", "trim"}:
@@ -406,6 +474,10 @@ def die_design(part: dict, fp: dict, t: float, die: dict, lines: list, strip: di
                                   openings=[{"pts": local, "label": "Punch profile = blank − clearance", "tol": tol["punch_tol"]}],
                                   notes=[f"Profile = blank outline − {c:.3f} mm per side, {tol['punch_tol']} mm", tol["heat_treat_note"],
                                          f"Working faces {tol['finish_working']}"]))
+        if die.get("progressive") and "bend" in ops and fp.get("bends") and st_form is not None:
+            comps += _forming_station(dp, hp, fp, t, rules, lines, st_form, DL, DW, z_die, DH, z_holder, holder_h, die_mat)
+            notes.append(f"Progressive die: forming station at {st_form:+.1f} mm (V-forming insert in the die plate, forming punch "
+                         "in the punch holder); check carrier, pilots and lifters with the strip layout.")
         top_screws = [(x - DL / 2, y - DW / 2) for x, y in corners]
     else:
         # ----- bending: V-die block and punch blade -----
@@ -599,3 +671,280 @@ def step_bytes(obj) -> bytes:
             return fh.read()
     finally:
         os.remove(path)
+
+
+# ---------- drawing die (deep drawing of trays, cups, panels) ----------
+
+def _outline_at(solid, z: float):
+    """Outer outline (list of x, y) of a solid's cross-section just above z, or None."""
+    from shapely.geometry import MultiPolygon
+    from shapely.ops import unary_union
+    bb = solid.BoundingBox()
+    slab = cq.Solid.makeBox(bb.xlen + 20, bb.ylen + 20, 0.2, cq.Vector(bb.xmin - 10, bb.ymin - 10, z + 0.5))
+    sec = solid.intersect(slab)
+    polys = []
+    for f in sec.Faces():
+        if abs(f.normalAt().z) > 0.99:
+            from .unfold import _wire_pts
+            pts = [(p[0], p[1]) for p in _wire_pts(f.outerWire())]
+            if len(pts) >= 3:
+                polys.append(Polygon(pts).buffer(0))
+    if not polys:
+        return None
+    u = unary_union(polys)
+    if isinstance(u, MultiPolygon):
+        u = max(u.geoms, key=lambda g: g.area)
+    return [list(c) for c in u.exterior.coords]
+
+
+def draw_die_design(part: dict, shape, t: float, die: dict, lines: list, trim: bool = False) -> dict:
+    """Drawing die: punch (inside of the part) on the bottom shoe, blank holder round it on cushion pins, die (outside of
+    the part) on the top shoe, guide pillars and bushes. Closed position.
+    trim=True: trimming die of the drawn part - trim post (the punch shape) holds the part, the upper trim steel cuts the rim
+    (opening = outside of the part + cutting clearance), pressure pad in the trim steel; scrap cutters noted."""
+    from .mould_design import split_core_cavity
+    rules = Rules("sheet_metal")
+    base = die["base"]
+    SL, SW = float(base["length_mm"]), float(base["width_mm"])
+    if die.get("base_turned"):
+        SL, SW = SW, SL
+    shoe_h = float(base.get("clamp_plates_mm") or rules("die_plate_min_mm"))
+    DL, DW = float(die["die_plate"]["die_l"]), float(die["die_plate"]["die_w"])
+    back = rules("draw_die_backing_mm", 60)
+    sp = split_core_cavity(shape, "z", 0.0, DL, DW, back)
+    s, bb, pl, cavity, ha = sp["part"], sp["bb"], sp["pl"], sp["cavity"], sp["ha"]
+    notes = list(sp["notes"])
+    if sp["enclosed"] is None:
+        raise DesignError("The drawn shape encloses no punch region (is the part open on one side?).")
+    outline = _outline_at(sp["enclosed"], pl)
+    if not outline:
+        raise DesignError("Could not find the punch outline at the parting plane.")
+    hb = rules("draw_holder_h_mm", 50)
+    clear = t * (1 + rules("draw_clearance_pct", 10) / 100)
+    punch_base = cq.Workplane("XY").workplane(offset=pl - hb).polyline([tuple(p) for p in outline[:-1]]).close().extrude(hb).val()
+    punch = sp["enclosed"].fuse(punch_base).clean()
+    holder = Plate(DL, DW, hb)
+    holder.opening(_move(_offset(outline, clear), DL / 2, DW / 2), f"Blank holder opening = punch + {clear:.2f} mm per side", "")
+    pd = _pillar_d(rules, SW)
+    pe = rules("pillar_edge_factor") * pd
+    pillars = [(-SL / 2 + pe, -SW / 2 + pe), (SL / 2 - pe, -SW / 2 + pe), (-SL / 2 + pe, SW / 2 - pe), (SL / 2 - pe, SW / 2 - pe)]
+    bush_od, bush_len = rules("bush_od_factor") * pd, rules("bush_len_factor") * pd
+    z_shoe_top = pl - hb
+    bshoe, tshoe = Plate(SL, SW, shoe_h), Plate(SL, SW, shoe_h)
+    for (x, y) in pillars:
+        bshoe.hole(x + SL / 2, y + SW / 2, pd, "fit", f"Ø{pd:g} {rules.text('fit_bush', 'H7')} pillar seat")
+        tshoe.hole(x + SL / 2, y + SW / 2, bush_od, "fit", f"Ø{bush_od:g} {rules.text('fit_bush', 'H7')} bush seat")
+    cpd = rules("cushion_pin_d_mm", 20)
+    ob = Polygon(outline).bounds
+    cush = [(x, y) for x in (ob[0] - clear - 1.5 * cpd, ob[2] + clear + 1.5 * cpd) for y in (ob[1] / 2, ob[3] / 2)]
+    cush = [(x, y) for x, y in cush if abs(x) + cpd < DL / 2 and abs(y) + cpd < DW / 2]
+    for (x, y) in cush:
+        bshoe.hole(x + SL / 2, y + SW / 2, cpd + 1, "thru", f"Ø{cpd + 1:g} cushion pin")
+    dm, dh = _mat(rules, _line(lines, "Draw die ring", "Die plate"), "")
+    pm, ph = _mat(rules, _line(lines, "Draw punch"), dm)
+    hm, hh = _mat(rules, _line(lines, "Blank holder"), dm)
+    tol_ = {k: rules.text(k) for k in ("finish_working", "heat_treat_note", "plate_thk_tol", "plate_flatness", "fit_pillar", "fit_bush")}
+    pnotes = [f"Thickness {tol_['plate_thk_tol']} mm", f"Flatness {tol_['plate_flatness']}"]
+    if trim:
+        c_cut = rules("cut_clearance_pct") / 100 * t
+        steel = Plate(DL, DW, hb)
+        steel.opening(_move(_offset(outline, t + c_cut), DL / 2, DW / 2), f"Trim steel opening = outside of the part + {c_cut:.3f}", "")
+        pad_ = punch.translate(cq.Vector(0, 0, 0))
+        comps = [
+            bshoe.comp("Bottom shoe (die set)", [(-SL / 2, -SW / 2, z_shoe_top - shoe_h)], material=base.get("material") or "",
+                       make=base.get("make") or "", color="shoe", notes=pnotes),
+            tshoe.comp("Top shoe (die set)", [(-SL / 2, -SW / 2, pl + bb.zlen + hb)], material=base.get("material") or "",
+                       make=base.get("make") or "", color="shoe", notes=pnotes),
+            Comp("Trim post", pad_.translate(cq.Vector(DL / 2, DW / 2, -(pl - hb))), [(-DL / 2, -DW / 2, pl - hb)], material=pm, hardness=ph,
+                 color="hard", size=(Polygon(outline).bounds[2] - Polygon(outline).bounds[0],
+                                     Polygon(outline).bounds[3] - Polygon(outline).bounds[1], bb.zlen + hb), drawing="solid",
+                 notes=["Holds the drawn part (inside shape); cutting edge at the trim line", tol_["heat_treat_note"]]),
+            steel.comp("Trim steel (upper)", [(-DL / 2, -DW / 2, pl + bb.zlen)], material=dm, hardness=dh, color="hard",
+                       notes=pnotes + [f"Cutting edge {tol_['finish_working']}", tol_["heat_treat_note"]]),
+        ]
+        notes.append("Trimming of the drawn part: trim line at the rim; scrap cutters and a pressure pad in the trim steel to be "
+                     "detailed by the die designer.")
+        shut0 = (pl + bb.zlen + hb + shoe_h) - (z_shoe_top - shoe_h)
+        ha = bb.zlen + hb                      # top shoe above the trim steel
+        cush = []
+    else:
+        shut0 = None
+    if not trim:
+        comps = [
+            bshoe.comp("Bottom shoe (die set)", [(-SL / 2, -SW / 2, z_shoe_top - shoe_h)], material=base.get("material") or "",
+                       make=base.get("make") or "", color="shoe", notes=pnotes + ["Cushion pin holes for the blank holder"]),
+            tshoe.comp("Top shoe (die set)", [(-SL / 2, -SW / 2, pl + ha)], material=base.get("material") or "", make=base.get("make") or "",
+                       color="shoe", notes=pnotes),
+            Comp("Draw die (cavity)", cavity.translate(cq.Vector(DL / 2, DW / 2, -pl)), [(-DL / 2, -DW / 2, pl)], material=dm, hardness=dh,
+                 color="hard", size=(DL, DW, ha), drawing="solid",
+                 notes=["Cavity = outside of the part; draw radius as the part", tol_["heat_treat_note"], f"Drawing faces {tol_['finish_working']} (polish)"]),
+            Comp("Draw punch", punch.translate(cq.Vector(DL / 2, DW / 2, -(pl - hb))), [(-DL / 2, -DW / 2, pl - hb)], material=pm, hardness=ph,
+                 color="hard", size=(Polygon(outline).bounds[2] - Polygon(outline).bounds[0], Polygon(outline).bounds[3] - Polygon(outline).bounds[1],
+                                     bb.zlen + hb), drawing="solid",
+                 notes=["Punch = inside of the part", tol_["heat_treat_note"], f"Drawing faces {tol_['finish_working']}"]),
+            holder.comp("Blank holder (binder)", [(-DL / 2, -DW / 2, pl - hb)], material=hm, hardness=hh, color="plate",
+                        notes=pnotes + ["Rides on the press cushion through the cushion pins", tol_["heat_treat_note"]]),
+        ]
+    plen = (pl + ha + shoe_h) - (z_shoe_top - shoe_h) - 5
+    comps.append(Comp(f"Guide pillar Ø{pd:g}", cq.Workplane("XY").circle(pd / 2).extrude(plen).val(),
+                      [(x, y, z_shoe_top - shoe_h) for x, y in pillars], kind="std", make=base.get("make") or "",
+                      std=f"Guide pillar Ø{pd:g} {tol_['fit_pillar']} × {_round_up(plen, 5):g}", size=(pd, pd, plen), color="std", drawing="none"))
+    comps.append(Comp(f"Guide bush Ø{pd:g}", cq.Workplane("XY").circle(bush_od / 2).circle(pd / 2).extrude(bush_len).val(),
+                      [(x, y, pl + ha + shoe_h - bush_len) for x, y in pillars], kind="std", make=base.get("make") or "",
+                      std=f"Guide bush Ø{pd:g} {tol_['fit_bush']} × OD {bush_od:g} × {bush_len:g}", size=(bush_od, bush_od, bush_len),
+                      color="std", drawing="none"))
+    if cush:
+        cl = shoe_h + rules("cushion_stroke_mm", 50)
+        comps.append(Comp(f"Cushion pin Ø{cpd:g} × {cl:g}", cq.Workplane("XY").circle(cpd / 2).extrude(cl).val(),
+                          [(x, y, z_shoe_top - cl) for x, y in cush], kind="std", std=f"Cushion pin Ø{cpd:g} × {cl:g}",
+                          size=(cpd, cpd, cl), color="std", drawing="none"))
+    comps.append(Comp("Drawn part (reference)", s, [(0.0, 0.0, 0.0)], kind="ref", size=(bb.xlen, bb.ylen, bb.zlen), color="ref", drawing="none"))
+    order = [c for c in comps if c.kind == "made"] + [c for c in comps if c.kind == "std"] + [c for c in comps if c.kind == "ref"]
+    for i, c in enumerate(order, start=1):
+        c.no = f"{i:02d}" if c.kind != "ref" else "REF"
+    shut = shut0 or (pl + ha + shoe_h) - (z_shoe_top - shoe_h)
+    notes += ([f"Closed: shut height {shut:.1f} mm."] if trim else
+              [f"Draw depth {bb.zlen:.1f} mm; punch–die clearance {clear:.2f} mm per side (t + {rules('draw_clearance_pct', 10):g} %).",
+               f"Closed: shut height {shut:.1f} mm; blank holder on the press cushion ({len(cush)} cushion pins)."]) + [
+        f"Press {((die.get('press') or {}).get('machine_id')) or '-'} for {die.get('force_t') or 0:.1f} t."]
+    return {"name": die["name"], "key": die["key"], "components": order, "notes": notes, "shut_height": round(shut, 1),
+            "die_set": f"{base.get('series', '')} {base.get('size_code', '')} {SL:.0f} × {SW:.0f}",
+            "rules_are_examples": rules.is_example, "punch_len": bb.zlen + hb}
+
+
+# ---------- U-bending die (channels: two parallel bends the same way, one hit) ----------
+
+def u_shape(fp: dict):
+    """The U of a channel: two parallel bends turning the same way with the base between them, else None."""
+    bs = fp.get("bends") or []
+    if len(bs) != 2:
+        return None
+    (a1, a2), (b1, _) = bs[0]["line"], bs[1]["line"]
+    horiz = abs(a2[0] - a1[0]) > abs(a2[1] - a1[1])
+    k = 1 if horiz else 0                       # coordinate across the bend lines
+    ca, cb = a1[k], b1[k]
+    if bs[0]["up"] != bs[1]["up"] or abs(bs[0]["angle_deg"] - 90) > 15 or abs(bs[1]["angle_deg"] - 90) > 15:
+        return None
+    fa, fb = bs[0]["far_side"][k], bs[1]["far_side"][k]
+    if not ((fa - ca) * (cb - ca) < 0 and (fb - cb) * (ca - cb) < 0):
+        return None                             # the far sides must point away from the base (flanges outside)
+    r = max(bs[0]["inner_radius_mm"], bs[1]["inner_radius_mm"])
+    dev = bs[0]["developed_mm"]
+    lo, hi = min(ca, cb), max(ca, cb)
+    flat_across = fp["width_mm"] if horiz else fp["length_mm"]
+    flange_flat = min(lo, flat_across - hi) - dev / 2
+    length = fp["length_mm"] if horiz else fp["width_mm"]
+    return {"horizontal": horiz, "base_flat": hi - lo - dev, "flange_flat": flange_flat, "r": r, "length": length,
+            "centre": (lo + hi) / 2}
+
+
+def u_die_design(part: dict, fp: dict, t: float, die: dict, lines: list) -> dict:
+    u = u_shape(fp)
+    if not u:
+        raise DesignError("Not a U channel.")
+    rules = Rules("sheet_metal")
+    base = die["base"]
+    SL, SW = float(base["length_mm"]), float(base["width_mm"])
+    if die.get("base_turned"):
+        SL, SW = SW, SL
+    shoe_h = float(base.get("clamp_plates_mm") or rules("die_plate_min_mm"))
+    r = u["r"]
+    w_out = u["base_flat"] + 2 * (r + t)
+    h_out = u["flange_flat"] + r + t
+    w_in = w_out - 2 * t
+    gap = t * rules("draw_clearance_pct", 10) / 100            # slot = outside width + small clearance per side
+    slot = w_out + 2 * gap
+    blen = u["length"] + 40
+    wall = rules("die_wall_mm", 35)
+    pad_h = rules("u_die_pad_h_mm", 40)
+    spring_l = rules("spring_len_mm")
+    floor = 25.0
+    Hb = floor + spring_l * 0.6 + pad_h + h_out
+    Wb = slot + 2 * max(wall, 0.6 * h_out)
+    z_die = shoe_h
+    z_top = z_die + Hb
+    z_pad = z_top - h_out - pad_h
+    # die block with the slot
+    die_blk = cq.Workplane("XY").box(blen, Wb, Hb, centered=False).cut(
+        cq.Workplane("XY").workplane(offset=floor).center(blen / 2, Wb / 2).rect(blen + 2, slot).extrude(Hb))
+    die_blk = die_blk.edges("|X and >Z").fillet(min(r + t, wall / 3)) if r + t > 0.5 else die_blk
+    dm, dh = _mat(rules, _line(lines, "Bending die", "Die plate"), "")
+    comps = []
+    comps.append(Comp("U-bending die", die_blk.val(), [(-blen / 2, -Wb / 2, z_die)], material=dm, hardness=dh, color="hard",
+                      size=(blen, Wb, Hb), drawing="solid",
+                      notes=[f"Slot {slot:.2f} mm = outside width {w_out:.2f} + {gap:.2f} per side; entry radius R{r + t:g}",
+                             rules.text("heat_treat_note"), f"Working faces {rules.text('finish_working')}"]))
+    pad = Plate(blen, slot - 1.0, pad_h)
+    pm, ph = _mat(rules, _line(lines, "Pressure pad"), dm)
+    comps.append(pad.comp("Pressure pad (ejector)", [(-blen / 2, -(slot - 1) / 2, z_pad)], material=pm, hardness=ph, color="plate",
+                          notes=["Holds the base flat and lifts the part out", f"Springs below: {rules('pad_springs', 4):g}"]))
+    punch_h = h_out + 30
+    pnch = cq.Workplane("XY").box(u["length"], w_in, punch_h, centered=False)
+    if r > 0.3:
+        pnch = pnch.edges("|X and <Z").fillet(min(r, w_in / 2 - 0.1))
+    bm, bh = _mat(rules, _line(lines, "Bending punch"), dm)
+    comps.append(Comp("U-bending punch", pnch.val(), [(-u["length"] / 2, -w_in / 2, z_pad + pad_h + t)], material=bm, hardness=bh,
+                      color="hard", size=(u["length"], w_in, punch_h), drawing="solid",
+                      notes=[f"Width {w_in:.2f} = inside width of the channel; nose radius R{r:g}", rules.text("heat_treat_note")]))
+    z_holder = z_pad + pad_h + t + punch_h - 15
+    hold_h = rules("punch_plate_h_mm")
+    DL, DW = max(float(die["die_plate"]["die_l"]), blen + 2 * wall), max(float(die["die_plate"]["die_w"]), Wb)
+    hp = Plate(DL, DW, hold_h)
+    hp.opening([[DL / 2 - u["length"] / 2, DW / 2 - w_in / 2], [DL / 2 + u["length"] / 2, DW / 2 - w_in / 2],
+                [DL / 2 + u["length"] / 2, DW / 2 + w_in / 2], [DL / 2 - u["length"] / 2, DW / 2 + w_in / 2],
+                [DL / 2 - u["length"] / 2, DW / 2 - w_in / 2]], "Punch seat", rules.text("fit_punch"))
+    hm, hhd = _mat(rules, _line(lines, "Punch holder"), base.get("material") or "")
+    comps.append(hp.comp("Punch holder plate", [(-DL / 2, -DW / 2, z_holder)], material=hm, hardness=hhd, color="plate"))
+    z_tshoe = z_holder + hold_h
+    pd = _pillar_d(rules, SW)
+    pe = rules("pillar_edge_factor") * pd
+    pillars = [(-SL / 2 + pe, -SW / 2 + pe), (SL / 2 - pe, -SW / 2 + pe), (-SL / 2 + pe, SW / 2 - pe), (SL / 2 - pe, SW / 2 - pe)]
+    bush_od, bush_len = rules("bush_od_factor") * pd, rules("bush_len_factor") * pd
+    bshoe, tshoe = Plate(SL, SW, shoe_h), Plate(SL, SW, shoe_h)
+    for (x, y) in pillars:
+        bshoe.hole(x + SL / 2, y + SW / 2, pd, "fit", f"Ø{pd:g} {rules.text('fit_bush', 'H7')} pillar seat")
+        tshoe.hole(x + SL / 2, y + SW / 2, bush_od, "fit", f"Ø{bush_od:g} {rules.text('fit_bush', 'H7')} bush seat")
+    sod = rules("spring_od_mm")
+    springs = [(x, 0.0) for x in (-blen / 3, blen / 3)] + [(x, 0.0) for x in (-blen / 8, blen / 8)]
+    springs = springs[:int(rules("pad_springs", 4))]
+    comps = [bshoe.comp("Bottom shoe (die set)", [(-SL / 2, -SW / 2, 0.0)], material=base.get("material") or "", make=base.get("make") or "",
+                        color="shoe"),
+             tshoe.comp("Top shoe (die set)", [(-SL / 2, -SW / 2, z_tshoe)], material=base.get("material") or "", make=base.get("make") or "",
+                        color="shoe")] + comps
+    comps.append(Comp(f"Die spring Ø{sod:g} × {spring_l:g}", cq.Workplane("XY").circle(sod / 2).circle(sod / 2 - 4).extrude(z_pad - z_die - floor).val(),
+                      [(x, y, z_die + floor) for x, y in springs], kind="std",
+                      std=f"Die spring ISO 10243 Ø{sod:g} × {spring_l:g}", size=(sod, sod, spring_l), color="std", drawing="none"))
+    plen = z_tshoe + shoe_h - 5
+    comps.append(Comp(f"Guide pillar Ø{pd:g}", cq.Workplane("XY").circle(pd / 2).extrude(plen).val(), [(x, y, 0.0) for x, y in pillars],
+                      kind="std", make=base.get("make") or "", std=f"Guide pillar Ø{pd:g} {rules.text('fit_pillar')} × {_round_up(plen, 5):g}",
+                      size=(pd, pd, plen), color="std", drawing="none"))
+    comps.append(Comp(f"Guide bush Ø{pd:g}", cq.Workplane("XY").circle(bush_od / 2).circle(pd / 2).extrude(bush_len).val(),
+                      [(x, y, z_tshoe + shoe_h - bush_len) for x, y in pillars], kind="std", make=base.get("make") or "",
+                      std=f"Guide bush Ø{pd:g} {rules.text('fit_bush')} × OD {bush_od:g} × {bush_len:g}", size=(bush_od, bush_od, bush_len),
+                      color="std", drawing="none"))
+    gpd = rules("gauge_pin_d_mm")
+    flat_w = u["base_flat"] + 2 * u["flange_flat"] + 2 * fp["bends"][0]["developed_mm"]
+    pins = [(x, s_ * (flat_w / 2 + rules("nest_gap_mm") + gpd / 2)) for x in (-blen / 4, blen / 4) for s_ in (-1, 1)]
+    pins = [(x, y) for x, y in pins if abs(y) < Wb / 2 - gpd]
+    if pins:
+        comps.append(Comp(f"Gauge pin Ø{gpd:g}", cq.Workplane("XY").circle(gpd / 2).extrude(1.5 * gpd + 3 * t).val(),
+                          [(x, y, z_top - 1.5 * gpd) for x, y in pins], kind="std", std=f"Dowel / gauge pin ISO 8734 Ø{gpd:g} m6",
+                          size=(gpd, gpd, 1.5 * gpd + 3 * t), color="std", drawing="none", notes=["Locate the flat blank across the slot"]))
+
+    prof = [(-w_out / 2, 0), (w_out / 2, 0), (w_out / 2, h_out), (w_out / 2 - t, h_out), (w_out / 2 - t, t), (-w_out / 2 + t, t),
+            (-w_out / 2 + t, h_out), (-w_out / 2, h_out)]
+    ref = cq.Workplane("YZ").polyline(prof).close().extrude(u["length"]).translate((-u["length"] / 2, 0, z_pad + pad_h)).val()
+    comps.append(Comp("Bent channel (reference)", ref, [(0.0, 0.0, 0.0)], kind="ref", size=(u["length"], w_out, h_out), color="ref",
+                      drawing="none"))
+    order = [c for c in comps if c.kind == "made"] + [c for c in comps if c.kind == "std"] + [c for c in comps if c.kind == "ref"]
+    for i, c in enumerate(order, start=1):
+        c.no = f"{i:02d}" if c.kind != "ref" else "REF"
+    shut = z_tshoe + shoe_h
+    notes = [f"U channel in one hit: outside width {w_out:.1f} mm, flange height {h_out:.1f} mm, inside radius R{r:g}.",
+             f"Closed: shut height {shut:.1f} mm; pressure pad on {len(springs)} die springs ejects the part.",
+             f"Press {((die.get('press') or {}).get('machine_id')) or '-'} for {die.get('force_t') or 0:.1f} t + pad force."]
+    if not pins:
+        notes.append("Blank wider than the die block: locate it with gauge plates on the die set.")
+    return {"name": die["name"].replace("Bending (V)", "Bending (U)"), "key": die["key"], "components": order, "notes": notes,
+            "shut_height": round(shut, 1), "die_set": f"{base.get('series', '')} {base.get('size_code', '')} {SL:.0f} × {SW:.0f}",
+            "rules_are_examples": rules.is_example, "punch_len": punch_h}

@@ -308,7 +308,7 @@ function toolBlock(p) {
       <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary">Save and calculate</button></div>
       <p class="status span2" id="toolStatus"></p>
     </form></details>`;
-  if (live.part_type === "plastic" || live.part_type === "die_casting") {
+  if (["plastic", "die_casting", "eps", "blow", "foundry"].includes(live.part_type)) {
     html += `<details class="card add-insert"><summary class="btn btn-outline small">Mould concept (opening direction, undercuts, proposals)</summary>
       <p class="note">A proposal from ray casting on the 3D model and the Concept rules in Master data. Check it before you use it.</p>
       <button type="button" class="btn btn-outline small" id="conceptRun">Analyse</button> <span class="status" id="conceptStatus"></span>
@@ -604,6 +604,8 @@ $("panelBody").addEventListener("click", async (e) => {
         <ul>${r.corrections.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
         ${part.loop ? `<button type="button" class="btn btn-outline small" id="simToLoop" data-status="${r.corrections.length ? "corrections_required" : "simulation_ok"}"
           data-comment="${esc(r.corrections.join(" "))}">Put this result in the Design loop form</button>` : ""}
+        ${m.draft_low_cm2 > 0 ? `<button type="button" class="btn btn-primary small" id="fixOpen">Correct the 3D model (draft)</button>` : ""}
+        <div id="fixBox"></div>
         <p>Opening ${esc(r.opening_axis.toUpperCase())} · wall ${fmt(r.wall_mm, 2)} mm · low draft ${fmt(m.draft_low_cm2, 1)} cm² · sink risk ${fmt(m.sink_risk_cm2, 1)} cm² ·
           thin ${fmt(m.thin_cm2, 1)} cm² · undercut ${fmt(m.undercut_cm2, 1)} cm²${r.sampled ? " (faces sampled)" : ""}<br/>
           Cycle <b>${fmt(r.results.cycle_s, 1)} s</b> · clamp <b>${fmt(r.results.clamp_t, 1)} t</b> → machine <b>${esc(mc.machine_id || "none large enough")}</b>${mc.tonnage_t ? ` (${fmt(mc.tonnage_t)} t)` : ""}</p>
@@ -1179,7 +1181,7 @@ $("panelBody").addEventListener("click", async (e) => {
 // design loop: where the simulation result is, by part type (stage 25)
 function simResultBox(p) {
   const pt = p.tool?.live?.part_type || (p.sheet ? "sheet_metal" : "");
-  if (pt === "plastic" || pt === "die_casting") {
+  if (["plastic", "die_casting", "eps", "blow", "foundry"].includes(pt)) {
     return `<div class="card sim-result"><b>Simulation result</b> · wall, draft, sink, undercut maps, cycle time, clamp force and machine.
       <button type="button" class="btn btn-outline small" id="loopSimRun">Run simulation &amp; show result</button>
       <span class="note">It opens <i>Tool cost → Simulation &amp; analysis</i> below; from there <b>Put this result in the Design loop form</b>.</span></div>`;
@@ -1215,8 +1217,9 @@ function simResultBox(p) {
 function fixQuery() {
   const f = $("fixForm");
   const q = new URLSearchParams();
-  if (f?.elements.radius.value) q.set("radius", f.elements.radius.value);
-  if (f?.elements.hole.value) q.set("hole", f.elements.hole.value);
+  if (f?.elements.radius?.value) q.set("radius", f.elements.radius.value);
+  if (f?.elements.hole?.value) q.set("hole", f.elements.hole.value);
+  if (f?.elements.draft?.value) q.set("draft", f.elements.draft.value);
   return q.toString();
 }
 async function fixPreview(first) {
@@ -1228,8 +1231,11 @@ async function fixPreview(first) {
       box.innerHTML = `<form id="fixForm" class="card grid2">
         <p class="span2 note">The software changes the 3D model; the outside dimensions stay, holes and other features are kept.
           Check the picture, download the STEP if you want, then release it as a new revision (old revisions stay).</p>
+        ${r.defaults.kind === "mould" ? `<label>Draft on the walls (°) <input name="draft" type="number" step="0.1" min="0.1" value="${r.defaults.draft_deg}" /></label>
+          <p class="note">Walls along the opening direction ${esc(String(r.defaults.axis).toUpperCase())} get the draft about the parting side; wall thickness kept.
+            Thick sections, ribs and thin walls: in CAD.</p>` : `
         <label>New inside bend radius (mm) <input name="radius" type="number" step="0.1" min="0" value="${r.changes.some((c) => c.what === "inside bend radius") ? r.defaults.radius_mm : ""}" /></label>
-        <label>Smallest hole (mm) <input name="hole" type="number" step="0.1" min="0" value="${r.changes.some((c) => c.what === "hole diameter") ? r.defaults.hole_mm : ""}" /></label>
+        <label>Smallest hole (mm) <input name="hole" type="number" step="0.1" min="0" value="${r.changes.some((c) => c.what === "hole diameter") ? r.defaults.hole_mm : ""}" /></label>`}
         <label>New revision <input name="rev" value="${esc(r.next_rev)}" /></label>
         <label>What changed <input name="note" value="${esc(r.change_note)}" /></label>
         <div class="span2" id="fixOut"></div>
@@ -1237,7 +1243,8 @@ async function fixPreview(first) {
           <button type="submit" class="btn btn-primary small">Release as new revision</button></div>
         <p class="status span2" id="fixStatus"></p></form>`;
     }
-    $("fixOut").innerHTML = `<p><b>Changes:</b> ${r.changes.map((c) => `${esc(c.what)} ${fmt(c.from_mm, 2)} → ${fmt(c.to_mm, 2)} mm`).join(" · ")}
+    $("fixOut").innerHTML = `<p><b>Changes:</b> ${r.changes.map((c) => c.what.startsWith("draft") ? `${esc(c.what)}: ${fmt(c.to_mm, 1)}° on ${c.faces} face(s)`
+      : `${esc(c.what)} ${fmt(c.from_mm, 2)} → ${fmt(c.to_mm, 2)} mm`).join(" · ")}
         · volume ${fmt(r.volume_before_cm3, 2)} → ${fmt(r.volume_after_cm3, 2)} cm³</p>
       <img src="/api/parts/${part.id}/correction.png?${q}&t=${Date.now()}" alt="Before (grey) and after (blue)" style="max-width:100%;border:1px solid #ddd" />
       <p class="note">Left: rev ${esc(r.rev)} · right: corrected. <a class="link" href="/api/parts/${part.id}/correction.step?${q}">⬇ Corrected STEP</a></p>`;
@@ -1302,8 +1309,8 @@ $("panelBody").addEventListener("submit", async (e) => {
     status($("fixStatus"), "Releasing the corrected model…");
     try {
       await api(`/api/parts/${part.id}/correction`, { method: "POST", body: JSON.stringify({
-        radius_mm: f.radius.value ? Number(f.radius.value) : null, hole_mm: f.hole.value ? Number(f.hole.value) : null,
-        rev: f.rev.value, change_note: f.note.value }) });
+        radius_mm: f.radius?.value ? Number(f.radius.value) : null, hole_mm: f.hole?.value ? Number(f.hole.value) : null,
+        draft_deg: f.draft?.value ? Number(f.draft.value) : null, rev: f.rev.value, change_note: f.note.value }) });
       await openPart(part.id);
       await search();
       status($("loopStatus") || $("status"), `Revision ${f.rev.value} released with the corrected 3D model; costs recalculated. `

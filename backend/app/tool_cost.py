@@ -28,9 +28,8 @@ from . import costing_setup, formula, master_data, mould, mould_db, rate_engine,
 from .rm_cost import _parameter_row
 from .trace import EXAMPLE_WARNING, Trace
 
-PART_TYPES = ("plastic", "die_casting", "eps", "blow")
-LATER = {"sheet_metal": "Sheet-metal dies are costed die by die on the part: Parts → the part → Tool cost.",
-         "foundry": "Tool cost of foundry patterns and core boxes comes in a later stage."}
+PART_TYPES = ("plastic", "die_casting", "eps", "blow", "foundry")
+LATER = {"sheet_metal": "Sheet-metal dies are costed die by die on the part: Parts → the part → Tool cost."}
 GROUP_LABEL = {"cutting": "Raw material cutting", "machining": "Machining (CNC, EDM, wire cut, grinding, drilling)",
                "polishing": "Polishing", "treatment": "Heat & surface treatment", "assembly": "Fitting & assembly",
                "design": "Design", "trial": "Try-out"}
@@ -621,7 +620,23 @@ class _Run:
         else:
             fits = sorted((m for m in self.machines.values() if m["process"] == process and (m["tonnage_t"] or 0) >= force),
                           key=lambda m: m["tonnage_t"])
-            if not fits:
+            base = (getattr(self, "sized", None) or {}).get("base") or {}
+            tl, tw = float(base.get("length_mm") or 0), float(base.get("width_mm") or 0)
+
+            def takes(m):          # platen / tie-bar / bed area of the machine takes the tool (either way round); 0 = not checked
+                L, W = float(m.get("length_mm") or 0), float(m.get("width_mm") or 0)
+                return not (L and W and tl and tw) or (L >= tl and W >= tw) or (L >= tw and W >= tl)
+            small = [m for m in fits if not takes(m)]
+            fits = [m for m in fits if takes(m)]
+            if small and fits and small[0]["tonnage_t"] < fits[0]["tonnage_t"]:
+                out["size_note"] = (f"{small[0]['machine_id']} has the tonnage but its platen / bed "
+                                    f"({small[0]['length_mm']:g} × {small[0]['width_mm']:g} mm) does not take the tool ({tl:g} × {tw:g} mm).")
+            if not fits and small:
+                self.miss("trial:machine", "Try-out machine",
+                          f"No '{process}' machine in Master data → Machines takes the tool {tl:g} × {tw:g} mm on its platen / bed "
+                          f"with {force:.0f} t. Add a bigger machine.", "t")
+                mhr_node = "trial:machine"
+            elif not fits:
                 biggest = max((m["tonnage_t"] or 0 for m in self.machines.values() if m["process"] == process), default=0)
                 self.miss("trial:machine", "Try-out machine",
                           f"No '{process}' machine in Master data → Machines takes {force:.0f} t (largest: {biggest:g} t). "
@@ -631,9 +646,12 @@ class _Run:
                 m = fits[0]
                 out["machine"] = m
                 t.add_derived("trial:machine", f"Try-out machine: {m['machine_id']} · {m['name']}", m["tonnage_t"], "t",
-                              f"smallest '{process}' machine in Master data → Machines whose tonnage ≥ the {what}",
+                              f"smallest '{process}' machine in Master data → Machines whose tonnage ≥ the {what}"
+                              + (" and whose platen / bed takes the tool" if tl and tw else ""),
                               {what.replace(" ", "_"): force_node},
-                              description=f"{m['tonnage_t']:g} t ≥ {force:.1f} t. Rule: Parameters → trial_machine_process.")
+                              description=f"{m['tonnage_t']:g} t ≥ {force:.1f} t" + (f"; platen / bed {m.get('length_mm') or 0:g} × "
+                              f"{m.get('width_mm') or 0:g} mm takes the tool {tl:g} × {tw:g} mm" if tl and tw and m.get("length_mm") else "")
+                              + (f". {out['size_note']}" if out.get("size_note") else "") + ". Rule: Parameters → trial_machine_process.")
                 mhr_node = self.mhr(m["machine_id"])
         if trial:
             crew = self.crew(trial | {"pricing": "labour_hour"}, "trial:crew", None) if trial["operators"] else \

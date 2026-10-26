@@ -3021,7 +3021,10 @@ def tool_designs(part_id: int, key: str | None = None) -> tuple[dict, dict, list
     d = part_detail(part_id, with_rm=False)
     tr = tool_trace(part_id)
     if tr.get("dies"):
-        d, rev, fp, sl, res = _layout(part_id)
+        from . import sheet_layout
+        d, rev, shape, blank, res = _sheet_context(part_id)
+        fp = sheet_layout.flat_pattern(shape, rev["geometry"], blank, res["features"]["t"])
+        sl = sheet_layout.strip_layout(fp, res["features"]["t"], len(res["operations"]))
         plan = {p["key"]: p for p in die_cost.plan(res, {"strip": sl})}
         out = []
         for k, die in enumerate(tr["dies"], start=1):
@@ -3030,7 +3033,15 @@ def tool_designs(part_id: int, key: str | None = None) -> tuple[dict, dict, list
             info = die | {f: plan.get(die["key"], {}).get(f) for f in ("progressive", "stations", "pitch", "strip_w")}
             lines = [x for x in tr["lines"] if x.get("die_key") == die["key"]]
             try:
-                des = tool_design.die_design(d, fp, res["features"]["t"], info, lines, sl["best"]["values"])
+                drawn = bool(fp.get("drawn"))
+                if "draw" in die["ops"]:
+                    des = tool_design.draw_die_design(d, shape, res["features"]["t"], info, lines)
+                elif drawn and die["ops"] in (["trim"], ["pierce"], ["trim", "pierce"]) and "trim" in die["ops"]:
+                    des = tool_design.draw_die_design(d, shape, res["features"]["t"], info, lines, trim=True)
+                elif die["ops"] == ["bend"] and tool_design.u_shape(fp):
+                    des = tool_design.u_die_design(d, fp, res["features"]["t"], info, lines)
+                else:
+                    des = tool_design.die_design(d, fp, res["features"]["t"], info, lines, sl["best"]["values"])
             except tool_design.DesignError as exc:
                 raise RegisterError(f"{die['name']}: {exc}") from None
             out.append((k, des | {"part_type": "sheet_metal"}))
@@ -3038,7 +3049,7 @@ def tool_designs(part_id: int, key: str | None = None) -> tuple[dict, dict, list
             raise RegisterError(f"There is no die '{key}' in this tool cost.")
         return d, rev, out
     part_type = (register_setup.processes().get(d["process"]) or {}).get("part_type")
-    if part_type not in ("plastic", "die_casting", "eps", "blow"):
+    if part_type not in ("plastic", "die_casting", "eps", "blow", "foundry"):
         raise RegisterError(f"A detailed tool design is made for sheet-metal dies and for moulds (plastic, die casting, EPS, "
                             f"blow moulding); this part's process is {d['process']}.")
     d, rev, shape = _revision_shape(part_id)
@@ -3047,7 +3058,8 @@ def tool_designs(part_id: int, key: str | None = None) -> tuple[dict, dict, list
     except Exception:
         axis = "z"
     try:
-        des = mould_design.mould_design(d, shape, tr, part_type, axis)
+        des = (mould_design.foundry_design(d | {"wall_mm": (rev.get("geometry") or {}).get("wall_mm")}, shape, tr, axis)
+               if part_type == "foundry" else mould_design.mould_design(d, shape, tr, part_type, axis))
     except tool_design.DesignError as exc:
         raise RegisterError(str(exc)) from None
     return d, rev, [(1, des)]
@@ -3099,14 +3111,33 @@ def forming_report(part_id: int, kind: str = "pdf") -> tuple[bytes, str, str]:
 
 # ---------- 3D correction after the simulation (roadmap stage 27) ----------
 
-def _correction(part_id: int, radius: float | None, hole_d: float | None):
-    """(part, revision, old shape, new shape, changes, defaults) for a sheet-metal part's current revision."""
+def _correction(part_id: int, radius: float | None, hole_d: float | None, draft: float | None = None):
+    """(part, revision, old shape, new shape, changes, defaults) of the current revision: sheet metal - bend radius and
+    small holes; moulded parts (plastic, die casting, EPS, blow, foundry) - draft on the walls along the opening direction."""
     from . import part_fix
+    d0 = part_detail(part_id, with_rm=False)
+    pt = (register_setup.processes().get(d0["process"]) or {}).get("part_type")
+    if pt != "sheet_metal":
+        if pt not in ("plastic", "die_casting", "eps", "blow", "foundry"):
+            raise RegisterError("The software corrects sheet-metal parts (bend radius, holes) and moulded / cast parts (draft).")
+        sim = simulation_result(part_id)
+        d, rev, shape = _revision_shape(part_id)
+        min_draft = float(sim["results"].get("min_draft_deg") or 1) + 0.5     # margin over the minimum of the check
+        defaults = {"draft_deg": min_draft, "axis": sim["opening_axis"], "low_draft_cm2": sim["maps"]["draft_low_cm2"],
+                    "corrections": sim["corrections"], "kind": "mould"}
+        if draft is None and sim["maps"]["draft_low_cm2"] <= 0:
+            raise RegisterError("The simulation found nothing the software can correct in 3D (draft): correct walls, ribs and thick "
+                                "sections in CAD.")
+        try:
+            new, changes = part_fix.add_draft(shape, sim["opening_axis"], draft if draft is not None else min_draft)
+        except part_fix.FixError as exc:
+            raise RegisterError(str(exc)) from None
+        return d, rev, shape, new, changes, defaults
     d, rev, shape, blank, res = _sheet_context(part_id)
     t = res["features"]["t"]
     mv = res["material_values"]
     defaults = {"radius_mm": round(mv.get("min_bend_r_factor", 1) * t, 3), "hole_mm": round(mv.get("min_hole_factor", 1) * t, 3),
-                "t": t, "checks": res.get("checks", [])}
+                "t": t, "checks": res.get("checks", []), "kind": "sheet"}
     new, changes = shape, []
     failed = {c["check"] for c in res.get("checks", []) if not c["passed"]}
     try:
@@ -3125,20 +3156,22 @@ def _correction(part_id: int, radius: float | None, hole_d: float | None):
     return d, rev, shape, new, changes, defaults
 
 
-def correction_preview(part_id: int, radius: float | None = None, hole_d: float | None = None) -> dict:
-    d, rev, old, new, changes, defaults = _correction(part_id, radius, hole_d)
+def correction_preview(part_id: int, radius: float | None = None, hole_d: float | None = None, draft: float | None = None) -> dict:
+    d, rev, old, new, changes, defaults = _correction(part_id, radius, hole_d, draft)
     with db.engine().connect() as conn:
         existing = [r for (r,) in conn.execute(select(db.revisions.c.rev).where(db.revisions.c.part_id == part_id))]
-    note = "; ".join(f"{c['what']} {c['from_mm']:g} → {c['to_mm']:g} mm" for c in changes[:3]) + (" …" if len(changes) > 3 else "")
+    note = "; ".join(f"{c['what']} {c['from_mm']:g} → {c['to_mm']:g}" + ("°" if c["what"].startswith("draft") else " mm")
+                     for c in changes[:3]) + (" …" if len(changes) > 3 else "")
     return {"part_id": part_id, "rev": rev["rev"], "next_rev": _next_rev(existing), "changes": changes, "defaults": defaults,
             "change_note": f"Corrected after simulation: {note}", "volume_before_cm3": round(old.Volume() / 1000, 3),
             "volume_after_cm3": round(new.Volume() / 1000, 3)}
 
 
-def correction_file(part_id: int, kind: str, radius: float | None = None, hole_d: float | None = None) -> tuple[bytes, str, str]:
+def correction_file(part_id: int, kind: str, radius: float | None = None, hole_d: float | None = None,
+                    draft: float | None = None) -> tuple[bytes, str, str]:
     """The corrected model as STEP, or a picture (before | after) as PNG."""
     from . import render3d, tool_design
-    d, rev, old, new, changes, _ = _correction(part_id, radius, hole_d)
+    d, rev, old, new, changes, defaults = _correction(part_id, radius, hole_d, draft)
     if kind == "step":
         return tool_design.step_bytes(new), "application/step", f"{d['part_code']}_corrected_from_rev{rev['rev']}.step"
     import math
@@ -3153,6 +3186,14 @@ def correction_file(part_id: int, kind: str, radius: float | None = None, hole_d
     dr = ImageDraw.Draw(img)
     dr.text((10, 8), f"rev {rev['rev']} (now)", fill=(60, 60, 60))
     dr.text((610, 8), "corrected", fill=(60, 60, 60))
+    if defaults.get("kind") == "mould":          # draft: the side elevation (square to the opening direction) shows the taper
+        ax = defaults["axis"]
+        az, el = {"z": (-90, 0), "x": (-90, 90), "y": (0, 0)}[ax]
+        img.paste(render3d.render(items_old, size=(600, 420), az=az, el=el, sphere=sph, margin=0.05), (0, 420))
+        img.paste(render3d.render(items_new, size=(600, 420), az=az, el=el, sphere=sph, margin=0.05), (600, 420))
+        dr.text((10, 428), "side view: walls without draft", fill=(60, 60, 60))
+        dr.text((610, 428), f"side view: {changes[0]['to_mm']:g}° draft", fill=(60, 60, 60))
+        return render3d.png(img), "image/png", f"{d['part_code']}_correction.png"
     t = _sheet_context(part_id)[4]["features"]["t"]
     bs = part_fix.bends(old, t)
     if any(c["what"] == "inside bend radius" for c in changes) and bs:
@@ -3171,11 +3212,11 @@ def correction_file(part_id: int, kind: str, radius: float | None = None, hole_d
 
 
 def correction_release(part_id: int, radius: float | None = None, hole_d: float | None = None, rev: str = "",
-                       change_note: str = "") -> dict:
+                       change_note: str = "", draft: float | None = None) -> dict:
     """Release the corrected model as a new revision (design loop → Revised, costs recalculated)."""
     from . import tool_design
-    d, cur, old, new, changes, _ = _correction(part_id, radius, hole_d)
-    note = change_note or correction_preview(part_id, radius, hole_d)["change_note"]
+    d, cur, old, new, changes, _ = _correction(part_id, radius, hole_d, draft)
+    note = change_note or correction_preview(part_id, radius, hole_d, draft)["change_note"]
     data = tool_design.step_bytes(new)
     return new_revision_from_upload(part_id, data, f"{d['part_code']}_corrected.step", rev, note)
 

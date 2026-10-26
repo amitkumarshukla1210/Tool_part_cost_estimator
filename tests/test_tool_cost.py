@@ -99,7 +99,7 @@ def test_trial_machine_is_the_smallest_that_takes_the_clamp_force():
 
 
 def test_no_machine_big_enough_is_reported_not_hidden():
-    r = run(projected_area_cm2=900, part_length_mm=100, part_width_mm=90)
+    r = run(projected_area_cm2=20000, part_length_mm=100, part_width_mm=90)
     assert not r["priced"] and r["trial"]["machine"] is None
     assert any("Injection moulding" in m and "takes" in m for m in r["missing"])
 
@@ -123,10 +123,9 @@ def test_missing_rate_marks_the_result_not_priced():
     assert step(r, "trial_material_cost") == 0
 
 
-def test_sheet_metal_and_foundry_tools_come_later():
-    for pt, msg in (("sheet_metal", "costed die by die on the part"), ("foundry", "later stage")):
-        with pytest.raises(tool_cost.ToolCostError, match=msg):
-            run(part_type=pt)
+def test_sheet_metal_tools_are_costed_die_by_die():
+    with pytest.raises(tool_cost.ToolCostError, match="costed die by die on the part"):
+        run(part_type="sheet_metal")
 
 
 def test_every_value_is_traceable():
@@ -286,15 +285,17 @@ def test_parts_without_a_tool_say_why():
 def test_search_dashboard_and_exports_show_the_tool_cost():
     p = project(budget=2_000_000)
     pid = add_part(p)
-    add_part(p, material="Grey cast iron FG260", process="foundry", code="FD-1")   # foundry patterns: no tool cost yet
-    d = detail(pid)
+    fid = add_part(p, material="Grey cast iron FG260", process="foundry", code="FD-1")   # foundry pattern equipment (stage 28)
+    d, f = detail(pid), detail(fid)
+    assert f["tool_capex_inr"] > 0
     rows = client.get("/api/parts", params={"project_id": p["id"], "tool_min": 1}).json()["rows"]
-    assert [r["id"] for r in rows] == [pid] and rows[0]["tool_is_example"]
+    assert sorted(r["id"] for r in rows) == sorted([pid, fid]) and rows[0]["tool_is_example"]
     assert client.get("/api/parts", params={"project_id": p["id"], "tool_missing": "yes"}).json()["total"] == 0
     dash = client.get(f"/api/projects/{p['id']}/dashboard").json()
     cap = dash["capex"]
-    assert cap["tool_cost_inr"] == pytest.approx(d["tool_capex_inr"]) and cap["tool_parts_costed"] == 1
-    assert cap["tool_is_example"] and cap["tool_share_of_budget_pct"] == round(100 * d["tool_capex_inr"] / 2_000_000, 1)
+    total = d["tool_capex_inr"] + f["tool_capex_inr"]
+    assert cap["tool_cost_inr"] == pytest.approx(total) and cap["tool_parts_costed"] == 2
+    assert cap["tool_is_example"] and cap["tool_share_of_budget_pct"] == round(100 * total / 2_000_000, 1)
     x = client.get(f"/api/parts/{pid}/tool-cost/export.xlsx")
     wb = load_workbook(io.BytesIO(x.content))
     assert all(ws["A1"].value == EXAMPLE_WARNING for ws in wb.worksheets)

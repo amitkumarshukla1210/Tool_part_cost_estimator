@@ -151,7 +151,21 @@ def run(family: str, *, country: str, as_of: str | None = None, material: str = 
         nesting = grid_fit(v["sheet_length_mm"] - 2 * v["edge_mm"], v["sheet_width_mm"] - 2 * v["edge_mm"],
                            v["blank_length_mm"], v["blank_width_mm"], v["gap_mm"])
         if nesting["per_sheet"] == 0:
-            raise RMError("The blank does not fit on the sheet. Check blank and sheet sizes.")
+            # large part: the bigger sheet / cut-to-length coil of Parameters (large_sheet_length_mm, large_sheet_width_mm)
+            big = {k: _parameter_row(family, f"large_{k}") for k in ("sheet_length_mm", "sheet_width_mm")}
+            if all(r and isinstance(r["value"], (int, float)) for r in big.values()):
+                for k, r in big.items():
+                    nid_ = f"in:{k}"
+                    trace.add_input(nid_, f"{trace.nodes[names[k]]['label']} (large sheet: the blank does not fit the standard sheet)",
+                                    r["value"], r["unit"] or "mm",
+                                    {"type": "master", "sheet": "Parameters", "row": f"{family} / large_{k}"})
+                    names[k] = nid_
+                v = {k: trace.value(names[k]) for k in NESTING_VARIABLES}
+                nesting = grid_fit(v["sheet_length_mm"] - 2 * v["edge_mm"], v["sheet_width_mm"] - 2 * v["edge_mm"],
+                                   v["blank_length_mm"], v["blank_width_mm"], v["gap_mm"])
+        if nesting["per_sheet"] == 0:
+            raise RMError("The blank does not fit on the sheet, nor on the large sheet (Parameters → large_sheet_length_mm / "
+                          "large_sheet_width_mm). Check blank and sheet sizes.")
         nid = f"in:{var}"
         trace.add_derived(
             nid, label, nesting["per_sheet"], "pcs",

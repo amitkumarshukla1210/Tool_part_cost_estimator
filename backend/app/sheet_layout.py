@@ -47,7 +47,9 @@ def flat_pattern(shape, geometry: dict, blank: dict, thickness: float) -> dict:
                 return {"method": "flat part: real outline from the 3D model", "outline": o, "holes": [mv2(h) for h in holes],
                         "length_mm": max(p[0] for p in o), "width_mm": max(p[1] for p in o),
                         "area_mm2": outer.area - sum(h.area for h in holes)}
-    if not flat and shape is not None:
+    from .geometry import drawn_share
+    drawn = shape is not None and drawn_share(shape) > (master_data.parameters("sheet_metal").get("drawn_min_share") or 0.001)
+    if not flat and shape is not None and not drawn:
         from .unfold import UnfoldError, unfold
         k = (mould_db.design_rules("sheet_metal").get("k_factor") or {}).get("value") or 0.33
         try:
@@ -58,6 +60,10 @@ def flat_pattern(shape, geometry: dict, blank: dict, thickness: float) -> dict:
         except (UnfoldError, ValueError, IndexError, ZeroDivisionError):
             pass
     l, w = blank["length"], blank["width"]
+    if drawn:
+        return {"method": f"drawn part: {blank.get('method') or 'developed blank'} (blank before drawing; trimmed after)",
+                "outline": [[0, 0], [l, 0], [l, w], [0, w], [0, 0]], "holes": [], "length_mm": l, "width_mm": w, "area_mm2": l * w,
+                "drawn": True}
     return {"method": f"bent part: {blank.get('method') or 'developed rectangle'} (no bend lines or hole positions drawn)",
             "outline": [[0, 0], [l, 0], [l, w], [0, w], [0, 0]], "holes": [], "length_mm": l, "width_mm": w, "area_mm2": l * w}
 
