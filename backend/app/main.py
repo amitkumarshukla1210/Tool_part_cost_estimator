@@ -1021,6 +1021,36 @@ def parts_tool_design_file(part_id: int, kind: str, die: Optional[str] = None):
     return Response(data, media_type=media, headers={"Content-Disposition": f'{disp}; filename="{name}"'})
 
 
+# ---------- technical data, release and revision history of the tool drawings (roadmap stage 30) ----------
+
+@app.get("/api/parts/{part_id}/drawing-data")
+def parts_drawing_data(part_id: int):
+    from . import drawing_data
+    return _design_error(lambda: drawing_data.part_data(part_id))
+
+
+@app.put("/api/parts/{part_id}/drawing-data")
+def parts_drawing_data_save(part_id: int, data: dict):
+    """data: {items: [{tool, item, fields: {heat_treatment, surface_treatment, tolerance_class, finish_ra}, notes: [...]}]}."""
+    from . import drawing_data
+    return _design_error(lambda: drawing_data.part_save(part_id, list(data.get("items") or [])))
+
+
+@app.get("/api/parts/{part_id}/drawing-data.xlsx")
+def parts_drawing_data_xlsx(part_id: int):
+    from . import drawing_data
+    content, name = _design_error(lambda: drawing_data.part_xlsx(part_id))
+    return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.post("/api/parts/{part_id}/drawing-data/upload")
+async def parts_drawing_data_upload(part_id: int, file: UploadFile = File(...)):
+    from . import drawing_data
+    content = await file.read()
+    return _design_error(lambda: drawing_data.part_upload(part_id, content))
+
+
 @app.get("/api/parts/{part_id}/sheet-tools")
 def parts_sheet_tools(part_id: int):
     """Sheet-metal tools I: operation sequence, die type, forces, tonnage, press, formability (roadmap stage 9)."""

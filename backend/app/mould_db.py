@@ -12,6 +12,7 @@ Holds the data that sizes a mould or die and builds its BOM:
     tool_processes  how each tool process is priced: machine hours (MHR + operators × labour rate), labour hours,
                     or a rate per unit (kg, cm², ...); its machine, labour grade, operators and cost group
     design_rules    detailed 3D tool design: clearances, fits, plate / pillar / screw sizes, tolerances, finish, shrinkage
+    general_tolerances  ISO 2768-1 linear and angular general tolerances by class, printed on the tool drawings (stage 30)
     time_parameters removal rates, set-up hours and shares that the BOM hour / amount rules use
 
 Every row has an is_example flag: seeded placeholder values are 1 until you
@@ -252,10 +253,21 @@ TABLES = {
         col("description", "Description"),
         col("is_example", "Example", "bool"),
     ]},
+    "general_tolerances": {"title": "General tolerances", "unique": ("tol_class", "kind", "from_mm"), "columns": [
+        col("tol_class", "Class (f, m, c, v of ISO 2768-1)", "text", ("f", "m", "c", "v")),
+        col("kind", "linear (± mm by nominal size) or angular (± arc minutes by shorter leg)", "text", ("linear", "angular")),
+        col("from_mm", "From size (mm, over)", "number"),
+        col("to_mm", "To size (mm, up to and including)", "number"),
+        col("value", "± value (mm for linear, arc minutes for angular)", "number"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes", required=False),
+    ]},
 }
 
 
 def _check(clean: dict) -> None:
+    from . import drawing_data
+    drawing_data.validate(clean)
     from . import concept
     for i, r in enumerate(clean["concept_rules"], start=2):
         try:

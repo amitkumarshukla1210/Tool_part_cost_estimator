@@ -344,6 +344,31 @@ bom_learning = Table(
     Index("ix_bom_learning", "part_type", "element"),
 )
 
+# Technical data of the tool drawings changed by the designer (roadmap stage 30): one row per tool and item of a part.
+tool_drawing_data = Table(
+    "tool_drawing_data", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),
+    Column("tool_key", String(80), nullable=False),
+    Column("item_no", String(20), nullable=False),
+    Column("fields", JSON),
+    Column("notes", JSON),
+    Column("edited_by", String(100), default=""),
+    Column("edited_at", DateTime, default=now),
+    UniqueConstraint("part_id", "tool_key", "item_no", name="uq_tool_drawing_data"),
+)
+
+tool_drawing_edits = Table(
+    "tool_drawing_edits", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),
+    Column("tool_key", String(80), nullable=False),
+    Column("item_no", String(20), nullable=False),
+    Column("summary", String(500), default=""),
+    Column("by", String(100), default=""),
+    Column("at", DateTime, default=now),
+)
+
 # Admin: the lowest role allowed for each action (rows missing = the default in auth.PERMISSIONS).
 role_permissions = Table(
     "role_permissions", meta,

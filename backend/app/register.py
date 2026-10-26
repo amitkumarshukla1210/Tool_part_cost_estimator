@@ -3062,7 +3062,8 @@ def tool_designs(part_id: int, key: str | None = None) -> tuple[dict, dict, list
             out.append((k, des | {"part_type": "sheet_metal"}))
         if key and not out:
             raise RegisterError(f"There is no die '{key}' in this tool cost.")
-        return d, rev, out
+        from . import drawing_data
+        return d, rev, drawing_data.attach(part_id, out)
     part_type = (register_setup.processes().get(d["process"]) or {}).get("part_type")
     if part_type not in ("plastic", "die_casting", "eps", "blow", "foundry"):
         raise RegisterError(f"A detailed tool design is made for sheet-metal dies and for moulds (plastic, die casting, EPS, "
@@ -3077,7 +3078,8 @@ def tool_designs(part_id: int, key: str | None = None) -> tuple[dict, dict, list
                if part_type == "foundry" else mould_design.mould_design(d, shape, tr, part_type, axis))
     except tool_design.DesignError as exc:
         raise RegisterError(str(exc)) from None
-    return d, rev, [(1, des)]
+    from . import drawing_data
+    return d, rev, drawing_data.attach(part_id, [(1, des)])
 
 
 def tool_design_summary(part_id: int) -> dict:

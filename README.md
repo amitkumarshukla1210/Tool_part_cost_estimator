@@ -1077,6 +1077,26 @@ World Bank WDI consumer price index (indexation). The others in the table are no
   The project dashboard totals still include all parts of an open project. With logins off (`DTC_MODE=local`) there are no limits.
 - Code: `backend/app/scope.py`; `users.groups` (added to an existing database automatically). Tests: `tests/test_scope.py`.
 
+## Technical data, release and revision history on the tool drawings (stage 30)
+
+- **On every detail drawing** of the tool design (PDF drawing set and DXF): a *Technical data* block with material grade and hardness
+  (from the tool BOM, change them there), **heat treatment** (hardened grades: the Design rules note), **surface treatment**,
+  **surface roughness Ra** (Design rules `finish_general`), the **ISO 2768 general tolerance class** with its **linear and angular tables**
+  (new master-data table *Mould & die database → General tolerances*, EXAMPLE values: check against your copy of ISO 2768-1) and your
+  **note points**. The tool BOM Excel gets the same columns.
+- **Review and change:** part panel → Tool design → *Drawing data*: one row per made part of every tool (heat and surface treatment, class,
+  Ra, note points; *Save drawing data*), or *Drawing data sheet (Excel)*: change the coloured columns and upload it again.
+  API: `GET / PUT /api/parts/{id}/drawing-data`, `GET …/drawing-data.xlsx`, `POST …/drawing-data/upload`.
+- **Release date and approved by** come from the **design loop**: the drawings are released when the part reaches the last status
+  (*Tool design frozen*): the date and the user who set it are printed (*Released*, *Approved*). Before that the title block says
+  **NOT RELEASED** with the current status; *Approved* keeps the name from Admin → Drawings. Released data is locked: step the design loop
+  back to change it.
+- **Revision history** under the title block (PDF) and above it (DXF): part revisions, releases and every technical-data change of that
+  drawing (date, change, by). The part drawing, tool concept drawing, blank and strip-layout DXF and the tool pack PDF get the release and
+  the history of the part too.
+- Code: `backend/app/drawing_data.py`, `drawing_style.py` (title block), `tool_drawings.py`; tables `tool_drawing_data`, `tool_drawing_edits`.
+  Tests: `tests/test_drawing_data.py`.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:

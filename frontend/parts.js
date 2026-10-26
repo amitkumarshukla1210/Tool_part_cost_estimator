@@ -1274,10 +1274,66 @@ async function toolDesignLoad() {
           ${t.components.map((c) => `<tr><td>${esc(c.no)}</td><td class="num">${c.qty}</td><td>${esc(c.name)}</td><td>${esc(c.material || "—")}</td>
             <td>${esc(c.hardness || "—")}</td><td>${esc(c.std || "—")}</td><td>${c.size.map((v) => fmt(v, 1)).join(" × ")}</td></tr>`).join("")}
           </tbody></table></div></div>`;
-    }).join("") + (r.tools.length > 1 ? `<p><a class="btn btn-primary" href="/api/parts/${part.id}/tool-design.zip">⬇ Release pack of all ${r.tools.length} tools</a></p>` : "");
+    }).join("") + (r.tools.length > 1 ? `<p><a class="btn btn-primary" href="/api/parts/${part.id}/tool-design.zip">⬇ Release pack of all ${r.tools.length} tools</a></p>` : "")
+      + `<div id="ddBox" class="card"></div>`;
+    drawingDataLoad();
   } catch (err) {
     status($("tdStatus"), err.message, "error");
   }
+}
+
+// technical data, release and revision history of the tool drawings (stage 30)
+async function drawingDataLoad() {
+  const box = $("ddBox");
+  if (!box) return;
+  let d;
+  try { d = await api(`/api/parts/${part.id}/drawing-data`); } catch (err) { box.innerHTML = `<p class="status error">${esc(err.message)}</p>`; return; }
+  const dis = d.editable ? "" : "disabled";
+  const rel = d.release.released ? `<span class="badge status">Released ${esc(d.release.date)} · approved by ${esc(d.release.by)}</span>`
+    : `<span class="badge missing">NOT RELEASED</span> <span class="note">released when the design loop reaches the last status (now: ${esc(d.release.status)})</span>`;
+  box.innerHTML = `<h4>Drawing data (technical data on every detail drawing)</h4><p>${rel}</p>
+    <p class="note">Heat treatment, surface treatment, general tolerance class (ISO 2768 f / m / c / v, tables from Mould &amp; die database → General tolerances),
+      roughness Ra and your note points are printed on the detail drawings (PDF and DXF) and in the BOM. Material and hardness come from the tool BOM.
+      ${d.editable ? "" : "<b>Released: step the design loop back to change the data.</b>"}</p>
+    <p class="downloads"><a class="link" href="/api/parts/${part.id}/drawing-data.xlsx">⬇ Drawing data sheet (Excel)</a>
+      ${d.editable ? ` · <input type="file" id="ddFile" accept=".xlsx" /> <button type="button" class="btn btn-outline small" id="ddUp">Upload changed sheet</button>` : ""}</p>
+    ${d.tools.map((t) => `<p><b>Tool ${t.stage}: ${esc(t.name)}</b></p><div class="table-wrap"><table class="cost-table dd" data-tool="${esc(t.key)}"><thead><tr>
+      <th>Item</th><th>Part</th><th>Material · hardness</th><th>Heat treatment</th><th>Surface treatment</th><th>Class</th><th>Ra µm</th><th>Note points (one per line)</th></tr></thead><tbody>
+      ${t.items.map((i) => `<tr data-item="${esc(i.item)}"><td>${esc(i.item)}</td><td>${esc(i.name)}${i.changed ? ' <span class="badge edited">changed</span>' : ""}</td>
+        <td>${esc(i.effective.material)} · ${esc(i.effective.hardness)}</td>
+        <td><input data-k="heat_treatment" value="${esc(i.effective.heat_treatment)}" ${dis} /></td>
+        <td><input data-k="surface_treatment" value="${esc(i.effective.surface_treatment)}" ${dis} /></td>
+        <td><select data-k="tolerance_class" ${dis}>${["f", "m", "c", "v"].map((c) => `<option ${c === i.effective.tolerance_class ? "selected" : ""}>${c}</option>`).join("")}</select></td>
+        <td><input data-k="finish_ra" value="${esc(i.effective.finish_ra)}" size="4" ${dis} /></td>
+        <td><textarea data-notes rows="2" ${dis}>${esc(i.effective.notes.join("\n"))}</textarea></td></tr>`).join("")}</tbody></table></div>`).join("")}
+    ${d.editable ? `<button type="button" class="btn btn-primary small" id="ddSave">Save drawing data</button>` : ""} <span class="status" id="ddStatus"></span>
+    <details><summary>Revision history (${d.history.length})</summary><table class="cost-table"><thead><tr><th>Rev</th><th>Date</th><th>Change</th><th>By</th></tr></thead>
+      <tbody>${d.history.map((h) => `<tr><td>${esc(h.rev)}</td><td>${esc(h.date)}</td><td>${esc(h.text)}</td><td>${esc(h.by)}</td></tr>`).join("")}</tbody></table></details>`;
+  const defaults = {};
+  d.tools.forEach((t) => t.items.forEach((i) => (defaults[`${t.key}|${i.item}`] = i.defaults)));
+  $("ddSave")?.addEventListener("click", async () => {
+    const items = [];
+    box.querySelectorAll("table.dd").forEach((tb) => tb.querySelectorAll("tr[data-item]").forEach((tr) => {
+      const dflt = defaults[`${tb.dataset.tool}|${tr.dataset.item}`] || {}, fields = {};
+      tr.querySelectorAll("[data-k]").forEach((el) => { if (String(el.value).trim() !== String(dflt[el.dataset.k])) fields[el.dataset.k] = el.value.trim(); });
+      items.push({ tool: tb.dataset.tool, item: tr.dataset.item, fields, notes: tr.querySelector("[data-notes]").value.split("\n").map((x) => x.trim()).filter(Boolean) });
+    }));
+    try {
+      const r = await api(`/api/parts/${part.id}/drawing-data`, { method: "PUT", body: JSON.stringify({ items }) });
+      status($("ddStatus"), r.changed.length ? `${r.changed.length} drawing(s) changed: the PDF / DXF now show the new data.` : "No change.", "ok");
+      if (r.changed.length) drawingDataLoad();
+    } catch (err) { status($("ddStatus"), err.message, "error"); }
+  });
+  $("ddUp")?.addEventListener("click", async () => {
+    const f = $("ddFile").files[0];
+    if (!f) return status($("ddStatus"), "Choose the drawing data sheet (.xlsx).", "error");
+    const fd = new FormData(); fd.append("file", f);
+    try {
+      const r = await api(`/api/parts/${part.id}/drawing-data/upload`, { method: "POST", body: fd });
+      status($("ddStatus"), `${r.changed.length} drawing(s) changed, ${r.unchanged} unchanged.`, "ok");
+      drawingDataLoad();
+    } catch (err) { status($("ddStatus"), err.message, "error"); }
+  });
 }
 
 // design loop: status flow, allowed moves, timeline
