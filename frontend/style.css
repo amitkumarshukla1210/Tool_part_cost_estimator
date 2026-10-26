@@ -140,6 +140,6 @@ tr.tf-hidden { display: none; }
 .tf-pop .tf-note, .tf-pop .tf-hint { margin: 4px 0 0; color: #888; font-size: .8rem; }
 .tf-pop .tf-hint:empty { display: none; }
 
-/* Admin → Users: tool-group check boxes (stage 29) */
+/* Admin → Users: tool-group check boxes (stage 30) */
 .group-checks { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .group-checks .flag { white-space: nowrap; font-size: 0.85em; }

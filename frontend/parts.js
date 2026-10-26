@@ -133,6 +133,17 @@ function weightRows() {
 }
 
 // Material choices: estimator materials, then bought-out insert materials.
+// The recommended grade of the material's type (Master data → Materials); the material stays your choice.
+function materialHint(p) {
+  const r = p.material_recommendation;
+  if (!r) return "";
+  return r.is_recommended
+    ? `<p class="note span2">★ ${esc(r.material)} is the recommended ${esc(r.material_type)} grade.</p>`
+    : `<p class="note span2">Recommended ${esc(r.material_type)} grade: <b>★ ${esc(r.material)}</b>
+        <button type="button" class="btn btn-outline small" id="useMaterialRec" data-material="${esc(r.material)}">Use it</button>
+        (other grades of this type: ${r.grades.filter((g) => g !== r.material).map(esc).join(", ")})</p>`;
+}
+
 function materialOptions(value) {
   const opt = (m) => `<option value="${esc(m)}" ${m === value ? "selected" : ""}>${esc(m)}</option>`;
   const known = meta.materials.includes(value) || meta.insert_materials.some((m) => m.name === value);
@@ -398,6 +409,7 @@ function renderPart() {
         <form id="partForm" class="grid2">
           <label class="span2">Part name <input name="name" value="${esc(p.name)}" /></label>
           <label>Material <select name="material">${materialOptions(p.material)}</select></label>
+          ${materialHint(p)}
           <label>Process ${sel("process", meta.processes, p.process)}</label>
           <label>Sourcing ${sel("sourcing", meta.sourcing, p.sourcing)}</label>
           <label>Status ${sel("status", meta.statuses, p.status)}</label>
@@ -695,6 +707,10 @@ $("panelBody").addEventListener("click", async (e) => {
   }
   if (e.target.id === "useSuggestion") {
     $("partForm").elements.namedItem("process").value = part.suggestion.process;
+    $("partForm").requestSubmit();
+  }
+  if (e.target.id === "useMaterialRec") {
+    $("partForm").elements.namedItem("material").value = e.target.dataset.material;
     $("partForm").requestSubmit();
   }
 });
@@ -1255,7 +1271,7 @@ async function fixPreview(first) {
   }
 }
 
-// the production machine of the tool (stage 32): asked before the first tool design, checked, or recommended
+// the production machine of the tool (stage 33): asked before the first tool design, checked, or recommended
 async function machineFirst() {
   let m = null;
   try { m = await api(`/api/parts/${part.id}/machine`); } catch { return toolDesignLoad(); }   // no machine family: design straight away
@@ -1335,7 +1351,7 @@ async function toolDesignLoad() {
   }
 }
 
-// technical data, release and revision history of the tool drawings (stage 30)
+// technical data, release and revision history of the tool drawings (stage 31)
 async function drawingDataLoad() {
   const box = $("ddBox");
   if (!box) return;

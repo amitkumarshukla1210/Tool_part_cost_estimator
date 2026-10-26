@@ -1,4 +1,4 @@
-"""A tolerance on every dimension of the tool detail drawings, in mm or µm (roadmap stage 31).
+"""A tolerance on every dimension of the tool detail drawings, in mm or µm (roadmap stage 32).
 
 The defaults come from the Design rules of the part type (Mould & die database), so the drawing says what the design already
 assumes, and the limits of a fit from the new table *Fit tolerances* (ISO 286):
@@ -25,7 +25,7 @@ _IT = {6: (6, 8, 9, 11, 13, 16, 19, 22, 25, 29, 32, 36, 40), 7: (10, 12, 15, 18,
 _FD = {"g": (-2, -4, -5, -6, -7, -9, -10, -12, -14, -15, -17, -18, -20), "f": (-6, -10, -13, -16, -20, -25, -30, -36, -43, -50, -56, -62, -68),
        "k": (0, 1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 4, 5), "m": (2, 4, 6, 7, 8, 9, 11, 13, 15, 17, 20, 21, 23)}
 FIT_EXAMPLE = "EXAMPLE - ISO 286-2 values as remembered: check them against your copy of the standard"
-NEW_RULES = {"thread_class": ("6H", "Tapped holes: thread tolerance class on the detail drawing (stage 31)"),
+NEW_RULES = {"thread_class": ("6H", "Tapped holes: thread tolerance class on the detail drawing (stage 32)"),
              "hole_clear_tol": ("general", "Through / counterbored holes: size tolerance (general = ISO 2768 by the diameter, or a fit / ± value)")}
 UNITS = ("mm", "µm")
 KEY_RE = re.compile(r"(L|W|H|H\d+(@pos)?|O\d+)")

@@ -234,7 +234,7 @@ def pack_pdf(fp: dict, sl: dict, res: dict, part: dict, rev: str) -> bytes:
               [[str(o["n"]), o["name"], f"{o['force_t']:.1f}", f"{o['stage_weight_g']:.1f}"] for o in res["operations"]], theme, [15 * mm, 80 * mm, 30 * mm, 40 * mm])]
     story.append(Paragraph("Bend and draw stages are shown as the flat blank: the sketches are not formed-shape drawings.", note))
     from . import drawing_data, drawing_style
-    rel, hist = drawing_data.meta_of(part)          # stage 30: logo, release date, approved by, projection, revision history
+    rel, hist = drawing_data.meta_of(part)          # stage 31: logo, release date, approved by, projection, revision history
     story += [Spacer(1, 3 * mm), drawing_style.pdf_title_block(269 * mm, [("Part", f"{part['part_code']} {part.get('name', '')}"),
               ("Material", res.get("material", "")), ("Thickness", f"{res['features']['t']:g} mm"), ("Feed", sl["best"]["feed"])],
               "sheet_metal", "as shown", "1 / 1", f"{part['part_code']}-STRIP", rev, None, rel, hist)]

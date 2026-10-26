@@ -812,6 +812,40 @@ Master data: **Part register setup → Part library** (price per piece or per me
 operators); new EXAMPLE machines (cut-and-strip, crimp press, SMT line, test bench) and rates for 9 countries. **A part that is not in the library is listed as "not priced" and
 counts as 0** until you add it: nothing is guessed. Distributor price APIs (Octopart, Mouser, Digi-Key) are not used. A wire line's length is the total length of its wires.
 
+## Price master and material types (roadmap stage 29)
+
+**Master data → Price master** (`/master-data/prices`) shows the month-wise prices of the rate library as an item × month grid for
+one country: **tool materials** (category `tool_material`), **part raw materials** (`material`) and their **scrap value**
+(`material_scrap`); 24 months by default, plus next month.
+
+- A cell shows the approved price costing uses in that month: yellow = a version starts that month, grey = carried over from an
+  earlier month, empty = no rate yet. The grid starts from the rates you have and fills up as real months are entered; there is
+  no made-up history.
+- **Type a price** under a month: a new version from that month on, saved as a **draft** for Rates → Rate review. Only a
+  user with the permission *Approve rates* sees *Save & approve* (unticked by default) and can approve at once. Old versions
+  are never changed, so stored costs only change when you recalculate.
+- **Excel**: download the grid, type prices under any month, upload: only changed cells become new versions (drafts, unless
+  an approver ticks *Save & approve*).
+- **New grades** are added where they always are: Tool BOM → *+ New grade* (stage 23), Master data → Tool materials or Materials.
+  **Standard parts** keep their catalogue price (Mould & die database → Standard parts) and are not in this grid.
+
+**Material type and recommended grade.** Tool materials and Materials have a *Material type* column (pre-hardened mould steel,
+hot-work, cold-work, stainless, copper alloy, aluminium, plate steel; PP, ABS, aluminium die-cast alloy, carbon steel sheet, ...).
+In Materials one grade per type and part type is marked *recommended*; the part panel shows it next to the material drop-down with
+**Use it** (the drop-down still offers every grade). An older workbook without these columns still loads.
+
+New EXAMPLE grades (EXAMPLE rates in all 9 countries, so the example warning shows wherever they are used): Beryllium copper C17200
+and C17510, NAK80, 1.2316 ESR; PP copolymer (impact), PP talc filled 20 %, ABS flame retardant V0, PA66 GF30 heat stabilised,
+CRCA D513 EDD, Stainless steel 430, Aluminium AlSi10Mg.
+
+**Release name V0**: the `VERSION` file; shown in the page footer, the API docs (`/docs`), Admin → Backups & update and
+`dtc_manager.py status`.
+
+API: `GET /api/price-master/meta`, `GET /api/price-master/grid?group=&country=&months=`, `POST /api/price-master/price`
+(`group, item, country, month, value, approve`), `GET /api/price-master/export.xlsx`, `POST /api/price-master/upload`
+(permission *Edit rates*; `approve` defaults to false, and `approve: true` needs *Approve rates*, as everywhere: every
+approved rate version, on the Rates page too, is checked in `rates.create`).
+
 ## Rates page: country rate library, MHR & labour rates
 
 Open **Rates** in the header. Pick the **producing country** and the **costing month**.
@@ -944,8 +978,9 @@ All planned stages are built: Stages A–C, the rate library and MHR engine, the
 sheet-metal tools (9, 10), country comparison (11), monthly rate update (12), project leader view (13), harness & PCB
 (14–16), server mode (17), EPS and PET blow moulding (18, 19), backup and the Windows update kit (20), the corrections
 from use (21), logins with admin control and the supplier master (22), and sheet-metal dies stage-wise with the
-editable, learning tool BOM (23), correcting any traced value for one part or for the future (24), and the developed blank with the simulation result in
-the design loop (25). The original requirement sets **A** sheet-metal tools, **B** tool / mould / die cost, **C** country
+editable, learning tool BOM (23), correcting any traced value for one part or for the future (24), the developed blank with the simulation result in
+the design loop (25), the work instruction, drawings and PO pack (26), tool design in 3D with drawings, simulation report and
+video (27), large parts with the audit gaps closed (28), and the price master with material types and the V0 release name (29). The original requirement sets **A** sheet-metal tools, **B** tool / mould / die cost, **C** country
 rate library, **D** country comparison and **E** monthly rate update with approval are all covered.
 
 ### Ground rules for everything that follows
@@ -1063,7 +1098,7 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 - **Draft correction:** moulded parts get the draft added to the walls in 3D (default = minimum draft + 0.5°) and are released as a
   new revision; wall and rib changes stay in CAD.
 
-## Head of department and data access by tool group (stage 29)
+## Head of department and data access by tool group (stage 30)
 
 - **Roles:** viewer < engineer < approver < **head** < admin. *Head* (head of department) sees and changes the data of every tool group and
   every user, like an admin, but does not manage login IDs (the permissions per role on Admin → Permissions apply as before).
@@ -1077,7 +1112,7 @@ World Bank WDI consumer price index (indexation). The others in the table are no
   The project dashboard totals still include all parts of an open project. With logins off (`DTC_MODE=local`) there are no limits.
 - Code: `backend/app/scope.py`; `users.groups` (added to an existing database automatically). Tests: `tests/test_scope.py`.
 
-## Technical data, release and revision history on the tool drawings (stage 30)
+## Technical data, release and revision history on the tool drawings (stage 31)
 
 - **On every detail drawing** of the tool design (PDF drawing set and DXF): a *Technical data* block with material grade and hardness
   (from the tool BOM, change them there), **heat treatment** (hardened grades: the Design rules note), **surface treatment**,
@@ -1097,7 +1132,7 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 - Code: `backend/app/drawing_data.py`, `drawing_style.py` (title block), `tool_drawings.py`; tables `tool_drawing_data`, `tool_drawing_edits`.
   Tests: `tests/test_drawing_data.py`.
 
-## A tolerance on every dimension of the tool drawings (stage 31)
+## A tolerance on every dimension of the tool drawings (stage 32)
 
 - Every dimension of a detail drawing (PDF and DXF) carries its tolerance, taken from what the design already assumes
   (Mould & die database → Design rules of the part type):
@@ -1112,7 +1147,7 @@ World Bank WDI consumer price index (indexation). The others in the table are no
   *Dimension tolerances*: `general`, `class`, a fit (`H7`, `g6`, `k6` …), `±0.02`, `+0.02/-0.01` or a thread class (`6H`); empty = as drawn.
   Each change is in the revision history. Code: `backend/app/dim_tolerances.py`. Tests: `tests/test_dim_tolerances.py`.
 
-## The production machine of the tool (stage 32)
+## The production machine of the tool (stage 33)
 
 - **Asked first:** part panel → Tool design → *Make the tool design* opens *Which machine will this tool run on in production?* the first time
   (later: *Production machine…*). Moulding (plastic, die casting, EPS, blow): clamp tonnage, tie-bar clear distance H × V, smallest and largest
@@ -1195,6 +1230,7 @@ backend/app/master_data.py    Reads, checks and saves master_data.xlsx
 backend/app/mould_db.py       Mould & die tables in the costing database
 backend/app/mould.py          Mould sizing (layout, insert, base) from the database
 backend/app/example_values.py Replace example values checklist: counts by category, replace / keep rates and rows
+backend/app/price_master.py   Price master: month-wise price grid by country (tool materials, part materials, scrap), Excel
 backend/app/tool_cost.py      Tool cost engine: BOM, process-wise cost with MHR + labour, try-out, overhead, profit, ... fully traced
 backend/app/formula.py        Safe evaluation of the BOM rules and cost formulas
 backend/app/costing_db.py     The shared SQLite file (costing_db.sqlite)
@@ -1217,6 +1253,7 @@ frontend/app.js               Estimator logic and three.js viewer
 frontend/master-data.*        Master data page (editor for both data sets)
 frontend/help.*               Help page
 frontend/examples.*           Replace example values checklist (Master data)
+frontend/prices.*             Price master (Master data): month-wise prices by country
 frontend/rates.*              Rates page (MHR & labour, rate library, rate review)
 frontend/dashboard.*          Project dashboard
 frontend/parts.*              Part register (search, part details, revisions, history)

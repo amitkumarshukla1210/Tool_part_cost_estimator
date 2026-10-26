@@ -130,7 +130,7 @@ def pdf_title_block(width: float, rows: list[tuple[str, str]], part_type: str = 
                     drawing_no: str = "", rev: str = "", extra_notes: list[str] | None = None, release: dict | None = None,
                     history: list[dict] | None = None, general_tolerance: str | None = None):
     """Title block: logo + company | fields (2 columns) | tolerance, projection, scale, sheet, signatures.
-    release (drawing_data.release, stage 30): release date and approved by from the design loop; history: revision table under it."""
+    release (drawing_data.release, stage 31): release date and approved by from the design loop; history: revision table under it."""
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
     from reportlab.platypus import Paragraph, Table, TableStyle
@@ -193,7 +193,7 @@ HISTORY_ROWS = 6
 
 
 def pdf_history(width: float, history: list[dict]):
-    """Revision history (stage 30): the last HISTORY_ROWS changes, newest at the bottom."""
+    """Revision history (stage 31): the last HISTORY_ROWS changes, newest at the bottom."""
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
     from reportlab.platypus import Paragraph, Table, TableStyle
@@ -253,7 +253,7 @@ def dxf_frame(doc, msp, w: float, h: float, title: str, rows: list[tuple[str, st
               drawing_no: str = "", rev: str = "", sheet: str = "1 / 1", margin: float = 10, extra_notes: list[str] | None = None,
               release: dict | None = None, history: list[dict] | None = None, general_tolerance: str | None = None):
     """Frame around (0, 0)-(w, h) (model units, mm) with the title block at its lower right; returns the title block height.
-    release / history (stage 30): release date, approved by (design loop) and the revision history above the title block."""
+    release / history (stage 31): release date, approved by (design loop) and the revision history above the title block."""
     s = settings()
     tol = tolerances(part_type)
     for name, col in (("FRAME", 7), ("TITLE", 7), ("LOGO", 7)):

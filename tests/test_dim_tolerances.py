@@ -1,4 +1,4 @@
-"""Stage 31: a tolerance on every dimension of the tool detail drawings, in mm or µm."""
+"""Stage 32: a tolerance on every dimension of the tool detail drawings, in mm or µm."""
 
 import io
 import re

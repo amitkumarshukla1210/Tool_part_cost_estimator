@@ -71,7 +71,7 @@ def _img(png: bytes, w, h):
 
 
 def _dt(c, key: str) -> str:
-    """Tolerance text of an overall dimension (stage 31), '' when the part has none attached."""
+    """Tolerance text of an overall dimension (stage 32), '' when the part has none attached."""
     dims = getattr(c, "dims", None)
     return dims["overall"][key]["text"] if dims else ""
 
@@ -163,7 +163,7 @@ def _scale_text(sc_pts_per_mm: float) -> str:
 # ---------- PDF ----------
 
 def _meta(part: dict, design: dict, c=None) -> tuple[dict | None, list | None]:
-    """Release (design loop) and revision history of a drawing (stage 30); none for a part not in the register."""
+    """Release (design loop) and revision history of a drawing (stage 31); none for a part not in the register."""
     if not part.get("id"):
         return None, None
     from . import drawing_data
@@ -266,7 +266,7 @@ SIDE_HOLES = 22      # more holes than this: the hole table goes full width unde
 
 
 def _widths7(widths):
-    """The 5 column widths of the hole table spread over 7 columns (Ø tolerance and position added, stage 31)."""
+    """The 5 column widths of the hole table spread over 7 columns (Ø tolerance and position added, stage 32)."""
     total = sum(widths)
     from reportlab.lib.units import mm
     if total < 120 * mm:                        # side panel
@@ -331,7 +331,7 @@ def _detail_side(c, theme, tol):
 
 
 def _tech_table(tech: dict, theme):
-    """Technical data of a made part and the ISO 2768 tables of its class (stage 30)."""
+    """Technical data of a made part and the ISO 2768 tables of its class (stage 31)."""
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
     from reportlab.platypus import Paragraph, Table, TableStyle

@@ -6,7 +6,9 @@ or directly in Excel. The workbook has two sheets:
 
     Parameters  part_type | parameter | value | unit | description
                 part_type "all" applies to every part type.
-    Materials   part_type | material | density_g_cm3 | notes
+    Materials   part_type | material | material_type | recommended | density_g_cm3 | notes
+                material = the grade; material_type = its family (PP, ABS, aluminium alloy, ...);
+                recommended = "yes" on the grade the part panel recommends for that type and part type.
 
 Material RATES are not here: they are versioned, approved rates in the rate
 library (category "material" and "material_scrap", item = material name, per
@@ -34,8 +36,10 @@ PART_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow")
 # Sheet name -> columns, and which columns must be numbers.
 SHEETS = {
     "Parameters": ["part_type", "parameter", "value", "unit", "description"],
-    "Materials": ["part_type", "material", "density_g_cm3", "notes"],
+    "Materials": ["part_type", "material", "material_type", "recommended", "density_g_cm3", "notes"],
 }
+# Columns added in later versions (roadmap stage 29): an older workbook without them is read with them empty.
+OPTIONAL = {"Materials": {"material_type", "recommended"}}
 NUMERIC = {
     "Materials": {"density_g_cm3"},
 }
@@ -83,12 +87,12 @@ def _read_workbook(p: Path) -> dict:
             raise MasterDataError(f"Master data file has no '{sheet}' sheet.")
         rows = list(wb[sheet].iter_rows(values_only=True))
         header = [str(h).strip() if h is not None else "" for h in rows[0]] if rows else []
-        missing = [c for c in columns if c not in header]
+        missing = [c for c in columns if c not in header and c not in OPTIONAL.get(sheet, ())]
         if missing:
             raise MasterDataError(f"Sheet '{sheet}' is missing column(s): {', '.join(missing)}.")
-        idx = {c: header.index(c) for c in columns}
+        idx = {c: header.index(c) for c in columns if c in header}
         tables[sheet] = [
-            {c: row[idx[c]] if idx[c] < len(row) else None for c in columns}
+            {c: row[idx[c]] if c in idx and idx[c] < len(row) else None for c in columns}
             for row in rows[1:]
             if any(v not in (None, "") for v in row)
         ]
@@ -114,6 +118,20 @@ def parameters(part_type: str) -> dict:
             if row["part_type"] == scope:
                 merged[row["parameter"]] = row["value"]
     return merged
+
+
+def recommended_material(part_type: str, material: str) -> dict | None:
+    """The recommended grade for the type of `material` (Materials sheet), or None when the sheet names none."""
+    rows = [r for r in tables()["Materials"] if r["part_type"] == part_type]
+    mine = next((r for r in rows if r["material"] == material), None)
+    if mine is None or not mine["material_type"]:
+        return None
+    rec = next((r for r in rows if r["recommended"] and r["material_type"].lower() == mine["material_type"].lower()), None)
+    if rec is None:
+        return None
+    return {"material": rec["material"], "material_type": rec["material_type"],
+            "grades": [r["material"] for r in rows if r["material_type"].lower() == mine["material_type"].lower()],
+            "reason": f"Recommended {rec['material_type']} grade for {part_type} (Master data → Materials)"}
 
 
 def require(params: dict, key: str, part_type: str):
@@ -146,6 +164,7 @@ def validate(raw: dict) -> dict:
     for sheet, columns in SHEETS.items():
         rows = []
         seen = set()
+        recommended: dict = {}
         for i, row in enumerate(raw.get(sheet, []), start=2):  # row 1 is the header
             clean = {c: _text(row.get(c)) for c in columns}
             pt = clean["part_type"].lower()
@@ -177,8 +196,17 @@ def validate(raw: dict) -> dict:
                     clean["value"] = sorted(set(nums))
                 else:
                     clean["value"] = _number(value, where)
-            if sheet == "Materials" and clean["density_g_cm3"] <= 0:
-                raise MasterDataError(f"Materials row {i}: density must be greater than zero.")
+            if sheet == "Materials":
+                if clean["density_g_cm3"] <= 0:
+                    raise MasterDataError(f"Materials row {i}: density must be greater than zero.")
+                rec = row.get("recommended")
+                clean["recommended"] = "yes" if (rec is True or str(rec or "").strip().lower() in ("1", "true", "yes", "y", "x")) else ""
+                if clean["recommended"]:
+                    key = (pt, clean["material_type"].lower())
+                    if key in recommended:
+                        raise MasterDataError(f"Materials row {i}: {pt} type '{clean['material_type'] or '(none)'}' already "
+                                              f"has a recommended grade ({recommended[key]}).")
+                    recommended[key] = clean["material"]
             rows.append(clean)
         out[sheet] = rows
     return out

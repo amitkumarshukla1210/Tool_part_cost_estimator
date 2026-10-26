@@ -3,7 +3,7 @@
     logins            every page and API call needs a login (cookie session). The first start, with no user yet, shows
                       /setup to create the first admin. DTC_MODE=local turns logins off: only for the automated tests
                       and developers; the Windows kit always starts with logins.
-    roles             viewer < engineer < approver < head < admin  (head = head of department: sees all data, stage 29)
+    roles             viewer < engineer < approver < head < admin  (head = head of department: sees all data, stage 30)
     tool groups       each login ID has tool groups (scope.py): it sees the parts and projects of those groups
     permissions       the lowest role for each action (PERMISSIONS); the admin changes them on Admin → Permissions
                       (table role_permissions). Managing users and permissions is always admin only.
@@ -48,7 +48,7 @@ PERMISSIONS = {
 CALC_PATHS = ("/api/analyze", "/api/gross-weight", "/api/capacity", "/api/mould/estimate", "/api/tool-cost", "/api/suggest-process")
 MASTER_PATHS = ("/api/master-data", "/api/mould-db", "/api/costing-setup", "/api/register-setup", "/api/examples",
                 "/api/tool-materials", "/api/standard-parts", "/api/master-rows")
-RATE_PATHS = ("/api/rates", "/api/settings")
+RATE_PATHS = ("/api/rates", "/api/settings", "/api/price-master")
 
 _user: contextvars.ContextVar = contextvars.ContextVar("dtc_user", default=None)
 

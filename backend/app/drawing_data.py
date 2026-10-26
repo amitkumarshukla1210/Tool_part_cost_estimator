@@ -1,4 +1,4 @@
-"""Technical data, release and revision history on the tool drawings (roadmap stage 30).
+"""Technical data, release and revision history on the tool drawings (roadmap stage 31).
 
 Every made part of a tool design (tool_design.py / mould_design.py) carries on its detail drawing what the toolmaker
 needs: material grade and hardness (from the editable tool BOM, stage 23), heat treatment, surface treatment, surface
@@ -116,7 +116,7 @@ def effective(comp, part_type: str, over: dict | None) -> dict:
     f["notes"] = list((over or {}).get("notes") or [])
     f["tables"] = tables_text(f["tolerance_class"])
     f["changed"] = bool(over and ((over.get("fields") or {}) or over.get("notes")))
-    from . import dim_tolerances                    # stage 31: a tolerance on every dimension
+    from . import dim_tolerances                    # stage 32: a tolerance on every dimension
     f["dim_overrides"] = dict(((over or {}).get("fields") or {}).get("features") or {})
     f["dims"] = dim_tolerances.for_component(comp, part_type, f["tolerance_class"], f["dim_overrides"], f["tolerance_unit"])
     return f
@@ -295,7 +295,7 @@ def workbook(part: dict, rows: list[dict], hist: list[dict]) -> bytes:
     for i, w in enumerate((16, 8, 30, 6, 24, 22, 28, 22, 14, 12, 60, 16, 14), start=1):
         ws.column_dimensions[ws.cell(1, i).column_letter].width = w
     ws.freeze_panes = "D2"
-    ds = wb.create_sheet("Dimension tolerances")          # stage 31
+    ds = wb.create_sheet("Dimension tolerances")          # stage 32
     ds.append(["Tool", "Item", "Dimension", "What", "Tolerance on the drawing", "Your tolerance (empty = as drawn)"])
     for c in ds[1]:
         c.font, c.fill = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="152238")

@@ -791,7 +791,22 @@ def part_detail(part_id: int, with_rm: bool = True) -> dict:
         out["effective_country"] = (out["country"] or register_setup.settings()["default_country"]).upper()
         out["tool"] = tool_summary(out)
         out["effective_tool_country"] = (out["tool_country"] or out["effective_country"]).upper()
+        out["material_recommendation"] = material_recommendation(out)
     return out
+
+
+def material_recommendation(p: dict) -> dict | None:
+    """The recommended grade of the part material's type (Master data → Materials), shown next to the material."""
+    if p["is_assembly"] or not p["material"]:
+        return None
+    proc = register_setup.processes().get(p["process"])
+    types = [proc["part_type"]] if proc else [r["part_type"] for r in master_data.tables()["Materials"]
+                                                if r["material"] == p["material"]]
+    for pt in types:
+        rec = master_data.recommended_material(pt, p["material"])
+        if rec:
+            return rec | {"part_type": pt, "is_recommended": rec["material"] == p["material"]}
+    return None
 
 
 def revision_trace(part_id: int, rev_id: int | None = None) -> dict:
@@ -3099,7 +3114,7 @@ def tool_design_file(part_id: int, kind: str, key: str | None = None) -> tuple[b
     from . import machine_spec, render3d, tool_design, tool_drawings
     d, rev, designs = tool_designs(part_id, key)
     code = d["part_code"]
-    if kind in ("zip", "pdf"):                 # stage 32: the machine check / recommendation in the notes of every tool
+    if kind in ("zip", "pdf"):                 # stage 33: the machine check / recommendation in the notes of every tool
         line = machine_spec.note_for(part_id, designs, rev)
         for _, des in designs:
             if line:

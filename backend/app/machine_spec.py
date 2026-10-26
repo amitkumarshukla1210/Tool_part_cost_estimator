@@ -1,4 +1,4 @@
-"""The machine the tool will run on in production (roadmap stage 32): asked before the tool design, checked against it,
+"""The machine the tool will run on in production (roadmap stage 33): asked before the tool design, checked against it,
 or recommended when it is skipped.
 
     moulding (plastic, die casting, EPS, blow)   clamp tonnage, tie-bar clear distance (H × V), smallest / largest mould height,
@@ -30,7 +30,7 @@ FIELDS = {
     "flask": [("flask_l_mm", "Flask length (mm)"), ("flask_w_mm", "Flask width (mm)"), ("flask_h_mm", "Flask height, cope + drag (mm)")],
 }
 RULES = {  # new Design rules rows (part type, parameter): (value, unit, description)
-    "rec_tonnage_margin_pct": (15, "%", "Recommended machine: tonnage above the tool's force by this share (stage 32)"),
+    "rec_tonnage_margin_pct": (15, "%", "Recommended machine: tonnage above the tool's force by this share (stage 33)"),
     "rec_platen_margin_mm": (50, "mm", "Recommended machine: tie-bar / bolster clear distance larger than the tool by this (each side together)"),
     "rec_height_margin_mm": (50, "mm", "Recommended machine: mould / shut height range reaches this far below and above the tool height"),
     "rec_stroke_factor": (2, "-", "Recommended machine: opening (press) stroke = factor × part height + rec_stroke_extra_mm"),

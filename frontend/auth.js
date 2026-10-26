@@ -1,7 +1,9 @@
-// Logged-in user in the page header: Admin (users, permissions, activity, backups), the user's name and Log out.
+// Release name (VERSION) in the page footer. Logged-in user in the page header: Admin (users, permissions, activity, backups), the user's name and Log out.
 (async function () {
   try {
     const me = await (await fetch("/api/auth/me")).json();
+    const foot = document.querySelector("footer .footnote");
+    if (foot && me.version) foot.textContent = `© Design to Cost · Part Cost Estimator ${me.version}`;
     const ul = document.querySelector("header nav ul");
     if (!ul) return;
     if (!ul.querySelector('a[href="/admin"]')) {

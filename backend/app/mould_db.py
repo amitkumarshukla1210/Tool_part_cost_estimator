@@ -3,7 +3,7 @@
 Holds the data that sizes a mould or die and builds its BOM:
 
     mould_bases     standard mould base / die holder sizes, plates, weight, cost
-    tool_materials  core/cavity and plate steels, density, rate per kg
+    tool_materials  tool steels and other tool materials: type, grade, density, rate per kg (India)
     bom_elements    BOM lines with formula rules for quantity, cost, weight, hours
     process_rates   machining and other process rates per hour (India values; other countries are in the rate library)
     process_unit_rates  heat treatment per kg, wire cut per cm², polishing per cm², painting per m², transport per kg, ...
@@ -12,8 +12,8 @@ Holds the data that sizes a mould or die and builds its BOM:
     tool_processes  how each tool process is priced: machine hours (MHR + operators × labour rate), labour hours,
                     or a rate per unit (kg, cm², ...); its machine, labour grade, operators and cost group
     design_rules    detailed 3D tool design: clearances, fits, plate / pillar / screw sizes, tolerances, finish, shrinkage
-    general_tolerances  ISO 2768-1 linear and angular general tolerances by class, printed on the tool drawings (stage 30)
-    fit_tolerances  ISO 286 limits of the fits (H7, g6 …) by size: the tolerance of every fitted dimension (stage 31)
+    general_tolerances  ISO 2768-1 linear and angular general tolerances by class, printed on the tool drawings (stage 31)
+    fit_tolerances  ISO 286 limits of the fits (H7, g6 …) by size: the tolerance of every fitted dimension (stage 32)
     time_parameters removal rates, set-up hours and shares that the BOM hour / amount rules use
 
 Every row has an is_example flag: seeded placeholder values are 1 until you
@@ -72,6 +72,7 @@ TABLES = {
     ]},
     "tool_materials": {"title": "Tool materials", "unique": ("code",), "columns": [
         col("code", "Steel / material"),
+        col("material_type", "Material type", required=False),
         col("application", "Used for"),
         col("density_g_cm3", "Density (g/cm³)", "number"),
         col("rate_per_kg", "Rate / kg (India)", "number"),
