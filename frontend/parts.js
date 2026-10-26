@@ -607,10 +607,34 @@ $("panelBody").addEventListener("click", async (e) => {
     }
   }
   if (e.target.id === "simToLoop") {
+    const { status: target, comment } = e.target.dataset;
+    // not yet at Simulation (e.g. still Uploaded / Concept tool): move there first, step by step, then fill the form
+    const path = ["concept_tool", "simulation"];
+    let loop = part.loop;
+    if (!loop.next.includes(target) && path.some((c) => loop.next.includes(c))) {
+      const name = (c) => loop.flow.find((f) => f.code === c)?.name ?? c;
+      const steps = [];
+      for (let next = loop.next; !next.includes(target); ) {
+        const c = path.find((x) => next.includes(x) && !steps.includes(x));
+        if (!c) break;
+        steps.push(c);
+        next = c === "concept_tool" ? ["simulation"] : [target];
+      }
+      if (!confirm(`The result can go in only at the Simulation status. Move this part to ${steps.map(name).join(" → ")} first?`)) return;
+      try {
+        for (const c of steps) await api(`/api/parts/${part.id}/status`, { method: "POST", body: JSON.stringify({ status: c, comment: "Simulation run" }) });
+        await openPart(part.id);
+        search();
+      } catch (err) {
+        return status($("loopStatus"), err.message, "error");
+      }
+      loop = part.loop;
+    }
     const sel = $("loopForm").elements.status;
-    if (![...sel.options].some((o) => o.value === e.target.dataset.status)) return status($("simStatus") || $("loopStatus"), "That status is not an allowed next step from the current status.", "error");
-    sel.value = e.target.dataset.status;
-    $("loopComment").value = e.target.dataset.comment || "Simulation OK, no corrections";
+    if (![...sel.options].some((o) => o.value === target)) return status($("loopStatus"), "That status is not an allowed next step from the current status.", "error");
+    sel.value = target;
+    $("loopComment").value = comment || "Simulation OK, no corrections";
+    status($("loopStatus"), "Result filled in: check the comment, then click Change status.");
     $("loopForm").scrollIntoView({ block: "center" });
   }
   if (e.target.id === "conceptApply") {
