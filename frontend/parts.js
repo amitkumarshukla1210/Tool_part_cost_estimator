@@ -671,7 +671,12 @@ function compareBlock(p) {
     <form id="cmpForm" class="card grid2">
       <label>Freight <select name="mode"><option value="sea">Sea</option><option value="air">Air</option></select></label>
       <label class="check"><input type="checkbox" name="use_fta" checked /> Use FTA / preferential duty where there is one</label>
-      <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary small">Compare all countries</button></div>
+      <fieldset class="span2 cmp-countries"><legend>Countries to compare
+        <button type="button" class="btn btn-outline small" data-cmpall="1">All</button>
+        <button type="button" class="btn btn-outline small" data-cmpall="0">None</button></legend>
+        ${(rmMeta?.countries || []).map((c) => `<label class="check"><input type="checkbox" name="country" value="${esc(c.code)}" checked /> ${esc(c.name)} (${esc(c.currency)})</label>`).join("")}
+      </fieldset>
+      <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary small">Compare the ticked countries</button></div>
       <p class="status span2" id="cmpStatus"></p></form><div id="cmpOut"></div>`;
 }
 
@@ -686,18 +691,19 @@ function renderCompare(res) {
     <div style="display:flex;height:16px;width:${(r.landed.landed / max) * 70}%">${seg(r).map((v, i) => `<span title="${labels[i]} ${fmt(v, 2)}"
       style="background:${CMP_COLORS[i]};width:${(v / r.landed.landed) * 100}%"></span>`).join("")}</div>
     <span class="${r.country === res.cheapest ? "strong" : ""}">${fmt(r.landed.landed, 2)}${r.country === res.cheapest ? " ◀ cheapest" : ""}</span></div>`).join("");
-  const q = `mode=${res.mode}&use_fta=${res.use_fta}`;
+  const q = `mode=${res.mode}&use_fta=${res.use_fta}${res.countries ? `&countries=${encodeURIComponent(res.countries)}` : ""}`;
   return `${ok.some((r) => r.is_example) ? '<p class="note"><span class="badge badge-example">EXAMPLE</span> Uses example rates and duties – not for negotiation.</p>' : ""}
     <div>${bars}</div><p class="note">${labels.map((l, i) => `<span style="color:${CMP_COLORS[i]}">■</span> ${l}`).join(" · ")}</p>
     <div class="table-wrap"><table class="cost-table"><thead><tr><th>Country</th><th class="num">Ex-works (local)</th><th class="num">USD</th><th class="num">Ex-works INR</th>
       <th class="num">Freight+ins.</th><th class="num">BCD+SWS</th><th class="num">IGST</th><th class="num">IGST credit</th><th class="num">Landed INR</th>
-      <th class="num">Forex −${res.fx_pct}% / +${res.fx_pct}%</th><th class="num">Tool landed INR</th></tr></thead><tbody>
-    ${res.rows.map((r) => r.error ? `<tr><td>${esc(r.country)}</td><td colspan="10" class="empty">${esc(r.error)}</td></tr>` : `<tr class="${r.country === res.cheapest ? "total" : ""}">
+      <th class="num">Forex −${res.fx_pct}% / +${res.fx_pct}%</th><th class="num">Tool cost (local)</th><th class="num">Tool ex-works INR</th><th class="num">Tool landed INR</th></tr></thead><tbody>
+    ${res.rows.map((r) => r.error ? `<tr><td>${esc(r.country)}</td><td colspan="12" class="empty">${esc(r.error)}</td></tr>` : `<tr class="${r.country === res.cheapest ? "total" : ""}">
       <td>${esc(r.country)}</td><td class="calc num">${fmt(r.exw_local, 2)} ${esc(r.currency)}</td><td class="calc num">${fmt(r.exw_usd, 2)}</td><td class="calc num">${fmt(r.exw_inr, 2)}</td>
       <td class="calc num">${fmt(r.landed.freight + r.landed.insurance, 2)}</td><td class="calc num">${fmt(r.landed.bcd + r.landed.sws, 2)} <small>${esc(r.landed.duty_basis)}</small></td>
       <td class="calc num">${fmt(r.landed.igst, 2)}</td><td class="calc num">${fmt(r.landed.igst_credit, 2)}</td><td class="calc num"><b>${fmt(r.landed.landed, 2)}</b></td>
       <td class="calc num">${Object.entries(r.forex.scenario).filter(([k]) => k !== "0%").map(([, v]) => fmt(v, 2)).join(" / ")}</td>
-      <td class="calc num">${fmt(r.tool.landed.landed, 0)}</td></tr>`).join("")}</tbody></table></div>
+      <td class="calc num">${fmt(r.tool.cost_local, 0)} ${esc(r.currency)}</td><td class="calc num">${fmt(r.tool.cost_inr, 0)}</td>
+      <td class="calc num ${r.country === res.cheapest_tool ? "strong" : ""}">${fmt(r.tool.landed.landed, 0)}${r.country === res.cheapest_tool ? " ◀" : ""}</td></tr>`).join("")}</tbody></table></div>
     <p class="note">Part and tool made in each country with that country's approved rates; the landed cost adds freight, insurance, duty, IGST (credit shown apart),
       clearance and inland transport in India. Cheapest tool landed: ${esc(res.cheapest_tool || "—")}.
       <a class="link" href="/api/parts/${part.id}/country-comparison/export.xlsx?${q}">Excel</a> · <a class="link" href="/api/parts/${part.id}/country-comparison/export.pdf?${q}">PDF</a></p>`;
@@ -707,14 +713,23 @@ $("panelBody").addEventListener("submit", async (e) => {
   if (e.target.id !== "cmpForm") return;
   e.preventDefault();
   const f = new FormData(e.target);
-  status($("cmpStatus"), "Costing the part in every country…");
+  const countries = f.getAll("country");
+  if (!countries.length) return status($("cmpStatus"), "Tick at least one country.", "error");
+  status($("cmpStatus"), `Costing the part and its tool in ${countries.length} countr${countries.length === 1 ? "y" : "ies"}…`);
   try {
-    const res = await api(`/api/parts/${part.id}/country-comparison?mode=${f.get("mode")}&use_fta=${f.has("use_fta")}`);
+    const res = await api(`/api/parts/${part.id}/country-comparison?mode=${f.get("mode")}&use_fta=${f.has("use_fta")}&countries=${encodeURIComponent(countries.join(","))}`);
+    res.countries = countries.join(",");
     status($("cmpStatus"), "");
     $("cmpOut").innerHTML = renderCompare(res);
   } catch (err) {
     status($("cmpStatus"), err.message, "error");
   }
+});
+
+$("panelBody").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-cmpall]");
+  if (!b) return;
+  b.closest("fieldset").querySelectorAll('input[name="country"]').forEach((c) => (c.checked = b.dataset.cmpall === "1"));
 });
 
 // sheet-metal tools I: operation sequence, die type, forces, press, formability
@@ -890,13 +905,18 @@ function diesTable(tr) {
   const tv = (id, text) => (tr.nodes[id] ? `<button type="button" class="tv" data-tooltrace="${id}">${text}</button>` : text);
   return `<h4 class="block-title">Dies suggested (${tr.mode === "progressive" ? "progressive die" : "one die per operation"})</h4>
     <div class="table-wrap"><table class="cost-table" data-nofilter><thead><tr><th>Die</th><th>Operations</th><th>Die set</th><th>Die plate (mm)</th>
-      <th>Press (force)</th><th class="num">Tool cost (${esc(cur)})</th></tr></thead><tbody>
+      <th>Press (force)</th><th class="num">Tool cost (${esc(cur)})</th><th>Download</th></tr></thead><tbody>
     ${tr.dies.map((d) => `<tr><td><b>${esc(d.name)}</b></td><td>${esc(d.op_names.join(", "))}</td>
       <td>${esc(d.base.series)} ${esc(d.base.size_code)}</td><td>${fmt(d.die_plate.die_l, 0)} × ${fmt(d.die_plate.die_w, 0)} × ${fmt(d.die_plate.die_h, 0)}</td>
       <td>${d.press ? tv(d.machine_node, esc(d.press.machine_id)) : '<span class="badge missing">none</span>'} (${tv(d.force_node, `${fmt(d.force_t, 1)} t`)})</td>
-      <td class="calc num">${tv(d.node, fmt(d.value, 0))}</td></tr>`).join("")}
-      <tr class="total"><td colspan="5">All dies</td><td class="calc num">${tv(tr.root, fmt(tr.value, 0))}</td></tr></tbody></table></div>
-    <p class="note">The die split follows the operations in order and the die type (Sheet-metal tools). Change them there; the dies follow.</p>`;
+      <td class="calc num">${tv(d.node, fmt(d.value, 0))}</td>
+      <td><a class="link" href="/api/parts/${part.id}/tool-cost/export.pdf?die=${encodeURIComponent(d.key)}">PDF</a> ·
+        <a class="link" href="/api/parts/${part.id}/tool-cost/export.xlsx?die=${encodeURIComponent(d.key)}">Excel</a></td></tr>`).join("")}
+      <tr class="total"><td colspan="5">All dies</td><td class="calc num">${tv(tr.root, fmt(tr.value, 0))}</td>
+      <td><a class="link" href="/api/parts/${part.id}/tool-cost/export.pdf">PDF</a> · <a class="link" href="/api/parts/${part.id}/tool-cost/export.xlsx">Excel</a></td></tr></tbody></table></div>
+    <p class="note">The die split follows the operations in order and the die type (Sheet-metal tools). Change them there; the dies follow.
+      <b>Download stage-wise:</b> PDF / Excel of one die (its BOM with grade, make, part numbers), or of all dies (a page / sheet per die).
+      Blank DXF, strip DXF and the tool pack PDF are under <i>Sheet-metal tools → Blank and strip layout</i>.</p>`;
 }
 
 function bomEditor(p, tr) {

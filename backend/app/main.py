@@ -958,14 +958,24 @@ def parts_tool_trace(part_id: int, version: Optional[int] = None):
 
 
 @app.get("/api/parts/{part_id}/tool-cost/export.xlsx")
-def parts_tool_excel(part_id: int, version: Optional[int] = None):
-    return _xlsx(register.export_tool_excel(part_id, version), f"tool_cost_part_{part_id}.xlsx")
+def parts_tool_excel(part_id: int, version: Optional[int] = None, die: Optional[str] = None):
+    """Tool cost workbook; sheet-metal dies get a sheet per die (stage-wise); `die` = one die only."""
+    try:
+        data = register.export_tool_excel(part_id, version, die)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from None
+    return _xlsx(data, f"tool_cost_part_{part_id}{'_' + die if die else ''}.xlsx")
 
 
 @app.get("/api/parts/{part_id}/tool-cost/export.pdf")
-def parts_tool_pdf(part_id: int, version: Optional[int] = None):
-    return Response(register.export_tool_pdf(part_id, version), media_type="application/pdf",
-                    headers={"Content-Disposition": f'attachment; filename="tool_cost_part_{part_id}.pdf"'})
+def parts_tool_pdf(part_id: int, version: Optional[int] = None, die: Optional[str] = None):
+    """Tool cost sheet; sheet-metal dies: summary + one page per die (stage-wise); `die` = one die only."""
+    try:
+        data = register.export_tool_pdf(part_id, version, die)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from None
+    return Response(data, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="tool_cost_part_{part_id}{"_" + die if die else ""}.pdf"'})
 
 
 @app.post("/api/projects/{project_id}/tool-cost/recalculate")

@@ -58,3 +58,29 @@ def test_register_gross_weight_uses_the_developed_blank(tmp_path):
     assert gross < 2 * 15920 / 1000 * 7.85                                   # not the 300 × 100 rectangle any more
     sheet = client.get(f"/api/parts/{pid}/sheet-tools").json()
     assert any(o["code"] == "bend" for o in sheet["operations"]) and sheet["blank"]["chosen"].startswith("Developed")
+
+
+def test_l_bracket_with_a_small_tab_is_still_a_strip_not_a_tray():
+    t = 1.0
+    a = cq.Workplane("XY").box(570, 40, t).translate((285, 20, t / 2))
+    b = cq.Workplane("XY").box(t, 40, 120).translate((t / 2, 20, 60))
+    tab = cq.Workplane("XY").box(10, t, 8).translate((300, 40 + t / 2, 4 + t))
+    r = blank_of(a.union(b).union(tab).val(), t)
+    assert r["chosen"].startswith("Developed straight strip") and r["width"] == pytest.approx(41, abs=0.5)
+
+
+def test_stage_wise_tool_exports_and_country_selection():
+    from tests.test_rm_cost import add_part
+    pid = add_part(project("SW"), "sheet_metal_bracket.step", "Mild steel CRCA / HR", "sheet_metal_multistage", "SW-1")
+    tr = client.get(f"/api/parts/{pid}/tool-cost/trace").json()
+    key = tr["dies"][0]["key"]
+    pdf = client.get(f"/api/parts/{pid}/tool-cost/export.pdf")
+    one = client.get(f"/api/parts/{pid}/tool-cost/export.pdf", params={"die": key})
+    assert pdf.status_code == one.status_code == 200 and pdf.content[:4] == b"%PDF" and len(one.content) < len(pdf.content)
+    from io import BytesIO
+    from openpyxl import load_workbook
+    wb = load_workbook(BytesIO(client.get(f"/api/parts/{pid}/tool-cost/export.xlsx").content))
+    assert "Dies" in wb.sheetnames and any(n.startswith("Die 1") for n in wb.sheetnames) and any(n.startswith("Die 2") for n in wb.sheetnames)
+    assert client.get(f"/api/parts/{pid}/tool-cost/export.pdf", params={"die": "nope"}).status_code == 404
+    res = client.get(f"/api/parts/{pid}/country-comparison", params={"countries": "IN,CN"}).json()
+    assert [r["country"] for r in res["rows"]] == ["IN", "CN"]

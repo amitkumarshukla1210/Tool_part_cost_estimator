@@ -146,3 +146,5 @@ label.check.small { font-size: .75rem; display: inline-flex; gap: 4px; align-ite
 .part-panel.full .panel-body { max-width: 1400px; margin: 0 auto; }
 .sim-result { margin: 8px 0; }
 .sim-result .sim-list { margin: 6px 0 8px 18px; font-size: .92rem; }
+.cmp-countries { display: flex; flex-wrap: wrap; gap: 6px 16px; border: 1px solid var(--grey-border); border-radius: 8px; padding: 8px 12px; }
+.cmp-countries legend { font-size: .8rem; font-weight: 600; display: flex; gap: 6px; align-items: center; }

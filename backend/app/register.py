@@ -1393,7 +1393,7 @@ def _developed_blank(rev: dict, g: dict, thickness: float, shape=None) -> dict:
     """The developed blank of a sheet-metal revision (best material yield, geometry.developed_blank), worked out
     once from the 3D file and kept in the revision's geometry; the old estimate if the file is not there."""
     from .geometry import blank_estimate, developed_blank, load_step
-    key = f"{thickness:g}"
+    key = f"v2:{thickness:g}"   # v2: main bend direction (stage 25 fix); older cached blanks are worked out again
     cached = (g.get("dev_blank") or {}).get(key)
     if cached:
         return cached
@@ -2260,17 +2260,17 @@ def tool_trace(part_id: int, version: int | None = None) -> dict:
         raise RegisterError(str(exc)) from None
 
 
-def export_tool_excel(part_id: int, version: int | None = None) -> bytes:
+def export_tool_excel(part_id: int, version: int | None = None, die: str | None = None) -> bytes:
     d = part_detail(part_id, with_rm=False)
-    return tool_cost_excel(tool_trace(part_id, version), d)
+    return tool_cost_excel(tool_trace(part_id, version), d, die)
 
 
-def export_tool_pdf(part_id: int, version: int | None = None) -> bytes:
+def export_tool_pdf(part_id: int, version: int | None = None, die: str | None = None) -> bytes:
     from .pdf_report import tool_cost_pdf
-    return tool_cost_pdf(tool_trace(part_id, version), part_detail(part_id, with_rm=False))
+    return tool_cost_pdf(tool_trace(part_id, version), part_detail(part_id, with_rm=False), die)
 
 
-def tool_cost_excel(tr: dict, part: dict | None = None) -> bytes:
+def tool_cost_excel(tr: dict, part: dict | None = None, die: str | None = None) -> bytes:
     """Tool cost sheet: Summary, BOM & processes, Steps, Inputs, Rates used, Example values. Also used by the Estimate page."""
     from .trace import source_text
     nodes, cur = tr["nodes"], tr["currency"]
@@ -2317,7 +2317,31 @@ def tool_cost_excel(tr: dict, part: dict | None = None) -> bytes:
                 ["Rate versions used", ", ".join(f"#{x['id']}" for x in tr["rates_used"])],
                 ["Includes EXAMPLE values", f"yes - {EXAMPLE_WARNING}. {ex['detail']}" if ex["any"] else "no"],
                 ["Calculated by / when", f"{tr.get('created_by', '')} {tr.get('created_at', '')}".strip()]]
+    dies = tr.get("dies") or []
+    if die:
+        dies = [x for x in dies if x["key"] == die]
+        if not dies:
+            raise ValueError(f"There is no die '{die}' in this tool cost.")
     sheet("Summary", ["Item", "Value"], summary, first=True)
+    if dies:   # sheet-metal dies, stage-wise: summary + one sheet per die with its BOM
+        sheet("Dies", ["Stage", "Die", "Operations", "Die set", "Plate material", "Die plate L (mm)", "W (mm)", "H (mm)", "Press",
+                       "Force (t)", f"Tool cost ({cur})", "Tool cost INR", "CAPEX INR"],
+              [[tr["dies"].index(x) + 1, x["name"], ", ".join(x["op_names"]), f"{x['base']['series']} {x['base']['size_code']}",
+                x["base"].get("material") or "", x["die_plate"]["die_l"], x["die_plate"]["die_w"], x["die_plate"]["die_h"],
+                (x["press"] or {}).get("machine_id") or "none", x["force_t"], x["value"], x["value_inr"], x.get("capex_inr")] for x in dies])
+        for x in dies:
+            n = tr["dies"].index(x) + 1
+            sheet(f"Die {n} {x['key']}"[:31], ["Element", "Category", "Qty", "Grade", "Grade from", "Make", "Standard part", "Part number",
+                                            "Weight each (kg)", f"Steel ({cur})", f"Bought-out ({cur})", "Process", "Hours",
+                                            f"Process ({cur})", f"Line total ({cur})", ""],
+                  [[l["element"], l["category"], l["quantity"], l.get("grade", ""), l.get("grade_reason", ""), l.get("make", ""),
+                    l.get("std_part", ""), l.get("part_number", ""), l["weight_each_kg"], l["material_cost"], l["bought_out_cost"],
+                    l["process"], l["hours"], l["process_cost"], l["total"], "EXAMPLE" if l["is_example"] else ""]
+                   for l in tr["lines"] if l.get("die_key") == x["key"]])
+        if die:
+            buf = io.BytesIO()
+            wb.save(buf)
+            return buf.getvalue()
     sheet("Cost build-up", ["Step", "Formula", "Value", "Unit"],
           [[nodes[g["node"]]["label"], "Σ BOM lines of the group", v(g["node"]), cur] for g in tr["groups"]] +
           [[nodes[s["node"]]["label"], nodes[s["node"]]["formula"], v(s["node"]), nodes[s["node"]]["unit"]] for s in tr["steps"]])

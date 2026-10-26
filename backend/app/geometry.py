@@ -343,23 +343,35 @@ def developed_blank(shape: cq.Shape, volume_mm3: float, bbox_mm: dict, thickness
     options = [opt("Rectangle keeping the formed width", old["length"], old["width"],
                    "part width × developed length: wide blank, low yield when the part is L / U shaped")]
     axes = bend_axes(shape, thickness)
-    strip = None
-    if len(axes) == 1:
-        w = extent_along(shape, axes[0])
+    # the main bend direction: the one most of the sheet area is bent around (faces whose normal is square to it);
+    # small stiffeners, embossings or tabs add other directions but do not make the part a tray
+    faces = _sheet_faces(shape, thickness)
+    total = sum(f.Area() for f in faces) or 1.0
+    def share(d):
+        return sum(f.Area() for f in faces if abs(sum(a * b for a, b in zip(d, f.normalAt().toTuple()))) < 0.05) / total
+    main = max(axes, key=share) if axes else None
+    main_share = share(main) if main else 0.0
+    strip = tray = None
+    if main and (len(axes) == 1 or main_share >= 0.9):
+        w = extent_along(shape, main)
         if w > thickness:
             strip = opt("Developed straight strip + bending stage", flat_area / w, w,
                         "strip width = part size along the bend line; length = flat area ÷ width; "
-                        "the L / U / Z shape is formed in a bending stage")
+                        f"the L / U / Z shape is formed in a bending stage ({100 * main_share:.0f} % of the sheet bends this way)")
             options.append(strip)
-    elif len(axes) >= 2:          # bends two ways (the third direction is the vertical corner of a tray / box)
+    if len(axes) >= 2 and not strip:  # bends two ways (the third direction is the vertical corner of a tray / box)
         h = bbox_mm["height"] - thickness
-        strip = opt("Tray / box blank (L + 2·H) × (W + 2·H)", bbox_mm["length"] + 2 * h, bbox_mm["width"] + 2 * h,
-                    "flanges on both sides folded up in bending stages; corners notched (relief)")
-        options.append(strip)
+        tray = opt("Tray / box blank (L + 2·H) × (W + 2·H)", bbox_mm["length"] + 2 * h, bbox_mm["width"] + 2 * h,
+                   "flanges on both sides folded up in bending stages; corners notched (relief)")
+        options.append(tray)
     valid = [o for o in options if o["yield_pct"] <= 100.5] or options   # a blank smaller than the flat part is impossible
-    # the developed blank of the bends (straight strip, or tray / box blank) is the true one; the rectangle that keeps
-    # the formed width only has the same area by chance
-    best = strip if strip in valid else max(valid, key=lambda o: o["yield_pct"])
+    rect = options[0]
+    if strip in valid:
+        best = strip                     # the true developed blank of a part bent one way
+    elif tray in valid and (rect not in valid or rect["yield_pct"] >= 99):
+        best = tray                      # the rectangle only matches the area by chance: a tray needs its flanges
+    else:
+        best = max(valid, key=lambda o: o["yield_pct"])
     return {"length": best["length"], "width": best["width"], "method": best["name"], "options": options,
             "chosen": best["name"], "flat_area_mm2": round(flat_area, 1), "bends": 1 if len(axes) == 1 else len(axes),
             "bend_axes": len(axes)}
