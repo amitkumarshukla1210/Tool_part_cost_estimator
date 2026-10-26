@@ -1179,6 +1179,16 @@ World Bank WDI consumer price index (indexation). The others in the table are no
   The simulation (its rules and results) is not changed: the setting sheet uses the material window on top of it.
 - API: `GET /api/parts/{id}/process-parameters` (`.xlsx`, `.pdf`). Code: `backend/app/process_params.py`. Tests: `tests/test_process_params.py`.
 
+## Logo and name on every Excel and PDF download (stage 35)
+
+- Every Excel the software hands out gets a picture with the **logo and the company name** (Admin → Drawings: your logo and company; default
+  *Design to Cost*) to the right of the used cells of the first sheet, and the name in the **print header** of every sheet. No cell is moved or
+  written, so the layout and values stay as each exporter made them (on paper the picture is on the page right of the data).
+- PDFs that do not show the name yet get the logo and name in the top margin of every page (drawings and reports that already have the title
+  block / header are left as they are). ZIP packs: the same for the Excel and PDF files inside.
+- Files meant to be uploaded again stay plain: master-data, mould & die, costing setup, rates and register setup downloads, the import template
+  and the price master export. Code: `backend/app/branding.py` (middleware in `main.py`). Tests: `tests/test_branding.py`.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:

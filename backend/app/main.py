@@ -1775,5 +1775,20 @@ def part_suppliers_remove(part_id: int, link_id: int):
     return suppliers.unlink(part_id, link_id)
 
 
+@app.middleware("http")
+async def brand_downloads(request: Request, call_next):
+    """Logo and company name on every Excel and PDF (and ZIP of them) the software hands out (stage 35; branding.py)."""
+    from . import branding
+    response = await call_next(request)
+    kind = branding.MEDIA.get((response.headers.get("content-type") or "").split(";")[0].strip())
+    path = request.url.path
+    if not kind or not path.startswith("/api/") or any(path.endswith(x) for x in branding.SKIP) or response.status_code != 200:
+        return response
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    body = branding.stamp(body, "x." + kind)
+    headers = {k: v for k, v in response.headers.items() if k.lower() != "content-length"}
+    return Response(body, status_code=200, headers=headers, media_type=response.headers.get("content-type"))
+
+
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 app.mount("/theme", StaticFiles(directory=THEME_DIR), name="theme")
