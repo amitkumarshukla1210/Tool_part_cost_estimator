@@ -142,4 +142,6 @@ tr.tf-hidden { display: none; }
 
 /* Admin → Users: tool-group check boxes (stage 30) */
 .group-checks { display: flex; flex-wrap: wrap; gap: 4px 10px; }
-.group-checks .flag { white-space: nowrap; font-size: 0.85em; }
+.group-checks .flag { white-space: nowrap; font-size: 0.85em; display: inline-flex; flex-direction: row; align-items: center; gap: 4px;
+  text-transform: none; letter-spacing: normal; font-weight: 400; }
+.group-checks .flag input { width: auto; margin: 0; }

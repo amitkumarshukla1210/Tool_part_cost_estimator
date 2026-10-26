@@ -1393,7 +1393,7 @@ async function drawingDataLoad() {
     <p class="downloads"><a class="link" href="/api/parts/${part.id}/drawing-data.xlsx">⬇ Drawing data sheet (Excel)</a>
       ${d.editable ? ` · <input type="file" id="ddFile" accept=".xlsx" /> <button type="button" class="btn btn-outline small" id="ddUp">Upload changed sheet</button>` : ""}</p>
     ${d.tools.map((t) => `<p><b>Tool ${t.stage}: ${esc(t.name)}</b></p><div class="table-wrap"><table class="cost-table dd" data-tool="${esc(t.key)}"><thead><tr>
-      <th>Item</th><th>Part</th><th>Material · hardness</th><th>Heat treatment</th><th>Surface treatment</th><th>Class</th><th>Ra µm</th><th>Note points (one per line)</th><th>Dimension tolerances</th></tr></thead><tbody>
+      <th>Item</th><th>Part</th><th>Material · hardness</th><th>Heat treatment</th><th>Surface treatment</th><th>Class</th><th>Ra (micron)</th><th>Note points (one per line)</th><th>Dimension tolerances</th></tr></thead><tbody>
       ${t.items.map((i) => `<tr data-item="${esc(i.item)}"><td>${esc(i.item)}</td><td>${esc(i.name)}${i.changed ? ' <span class="badge edited">changed</span>' : ""}</td>
         <td>${esc(i.effective.material)} · ${esc(i.effective.hardness)}</td>
         <td><input data-k="heat_treatment" value="${esc(i.effective.heat_treatment)}" ${dis} /></td>
