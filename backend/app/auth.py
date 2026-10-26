@@ -47,7 +47,7 @@ PERMISSIONS = {
 CALC_PATHS = ("/api/analyze", "/api/gross-weight", "/api/capacity", "/api/mould/estimate", "/api/tool-cost", "/api/suggest-process")
 MASTER_PATHS = ("/api/master-data", "/api/mould-db", "/api/costing-setup", "/api/register-setup", "/api/examples",
                 "/api/tool-materials", "/api/standard-parts", "/api/master-rows")
-RATE_PATHS = ("/api/rates", "/api/settings")
+RATE_PATHS = ("/api/rates", "/api/settings", "/api/price-master")
 
 _user: contextvars.ContextVar = contextvars.ContextVar("dtc_user", default=None)
 

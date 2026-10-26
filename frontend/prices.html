@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design to Cost — Part Cost Estimator · Price master</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/register.css" />
+  <link rel="stylesheet" href="/static/rates.css" />
+  <link rel="stylesheet" href="/static/master-data.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img src="/theme/logo.png" alt="Design to Cost logo" />
+        <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/dashboard">Dashboard</a></li>
+          <li><a href="/parts">Parts</a></li>
+          <li><a href="/suppliers">Suppliers</a></li>
+          <li><a href="/import">Import</a></li>
+          <li><a href="/bom-extract">Harness &amp; PCB</a></li>
+          <li><a href="/">Estimate</a></li>
+          <li><a href="/rates">Rates</a></li>
+          <li><a href="/master-data" class="active" aria-current="page">Master data</a></li>
+          <li><a href="/help">Help</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="bg-grey rates-head">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker"><a class="link" href="/master-data">Master data</a> · price master</p>
+          <h2>Price master: month-wise prices by country</h2>
+          <p>Tool materials and part raw materials (type and grade), and the scrap value, month by month for each country.
+            Type a price under a month to save it as a new version from that month on; old versions are kept, so stored costs
+            only change when you recalculate them. Enter next month's prices in the last column. Tool and part costing use the
+            latest approved price on or before their costing month. A month without a price shows the earlier one (grey).
+            New grades: Tool BOM → <b>+ New grade</b>, or Master data → Tool materials / Materials. Standard parts keep their
+            catalogue price (Master data → Mould &amp; die database → Standard parts).</p>
+        </div>
+        <div class="rates-toolbar card">
+          <div class="tabs" role="tablist" id="groups"></div>
+          <label class="inline">Country <select id="country"></select></label>
+          <label class="inline">Months <select id="months">
+            <option value="12">12</option><option value="24" selected>24</option><option value="36">36</option></select></label>
+          <label class="inline">Type <select id="type"><option value="">All types</option></select></label>
+          <label class="inline grow">Search <input type="search" id="q" placeholder="grade, make, element…" /></label>
+          <label class="check"><input type="checkbox" id="approve" checked /> Save &amp; approve</label>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="container">
+        <div id="approverBox" class="card ex-approver" hidden>
+          <label>Your name for approvals <input id="approverName" placeholder="e.g. Amit" /></label>
+          <button type="button" class="btn btn-primary small" id="approverSave">Save</button>
+          <span class="note">Prices you save and approve are approved in your name.</span>
+        </div>
+        <p class="status" id="status" role="status"></p>
+        <div class="table-wrap tall price-wrap"><table class="cost-table price-grid" id="grid"></table></div>
+        <p class="legend">
+          <span class="key input"></span> you can type a price (— = no price yet)
+          <b>bold box</b> a price starts in this month
+          <span class="key calc"></span> carried over from an earlier month
+          <span class="key mark-example"></span> EXAMPLE value
+          <b>D</b> open draft (Rates → Rate review) · ★ recommended grade
+        </p>
+        <div class="md-actions">
+          <a class="btn btn-outline" id="download">Download Excel</a>
+          <label class="btn btn-outline">Upload Excel <input type="file" id="upload" accept=".xlsx" hidden /></label>
+          <span class="note">Download, type prices under any month, upload: every changed cell becomes a new version for that month.</span>
+        </div>
+
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container"><p class="footnote">© Design to Cost</p></div>
+  </footer>
+
+  <script src="/static/common.js"></script>
+  <script src="/static/prices.js"></script>
+  <script src="/static/auth.js"></script>
+</body>
+</html>

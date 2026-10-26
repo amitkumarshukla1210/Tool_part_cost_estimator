@@ -28,7 +28,9 @@ const DATASETS = {
         title: "Materials",
         columns: [
           { key: "part_type", label: "Part type", kind: "part_type" },
-          { key: "material", label: "Material", kind: "text" },
+          { key: "material", label: "Material (grade)", kind: "text" },
+          { key: "material_type", label: "Material type", kind: "text" },
+          { key: "recommended", label: "Recommended grade of its type", kind: "yesno" },
           { key: "density_g_cm3", label: "Density (g/cm³)", kind: "number" },
           { key: "notes", label: "Notes", kind: "wide" },
         ],
@@ -170,6 +172,8 @@ function cell(col, row, i) {
       return `<select ${attrs}>${options(col.kind === "part_type_all" ? ["all", ...PART_TYPES] : PART_TYPES, v)}</select>`;
     case "material":
       return `<select ${attrs}>${options(data.tool_materials.map((m) => m.code), v, true)}</select>`;
+    case "yesno":
+      return `<select ${attrs}>${options(["", "yes"], v)}</select>`;
     case "category":
       return `<select ${attrs}>${options(["made", "bought_out", "process"], v)}</select>`;
     case "process":

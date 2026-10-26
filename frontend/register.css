@@ -148,3 +148,22 @@ label.check.small { font-size: .75rem; display: inline-flex; gap: 4px; align-ite
 .sim-result .sim-list { margin: 6px 0 8px 18px; font-size: .92rem; }
 .cmp-countries { display: flex; flex-wrap: wrap; gap: 6px 16px; border: 1px solid var(--grey-border); border-radius: 8px; padding: 8px 12px; }
 .cmp-countries legend { font-size: .8rem; font-weight: 600; display: flex; gap: 6px; align-items: center; }
+
+/* ===== Price master (stage 29) ===== */
+.price-wrap { max-height: 640px; }
+.price-grid th, .price-grid td { white-space: nowrap; }
+.price-grid .sticky0, .price-grid .sticky1 { position: sticky; z-index: 1; background: var(--white); }
+.price-grid thead .sticky0, .price-grid thead .sticky1 { background: var(--table-head-dark); z-index: 2; }
+.price-grid .sticky0 { left: 0; min-width: 150px; max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+.price-grid .sticky1 { left: 150px; min-width: 190px; box-shadow: inset -1px 0 0 var(--grey-border); }
+.price-grid th.now { box-shadow: inset 0 -3px 0 var(--accent); }
+.price-grid td.price { padding: 2px 3px; position: relative; }
+.price-grid td.price input[type="number"] { width: 78px; text-align: right; border: 1px solid transparent; background: transparent; padding: 3px 4px; font: inherit; }
+.price-grid td.price input[type="number"]:focus { border-color: var(--brand); background: var(--white); outline: none; }
+.price-grid td.starts input[type="number"] { background: var(--input-cell-bg); border-color: var(--input-cell-border); font-weight: 700; }
+.price-grid td.carried input[type="number"] { color: var(--grey); background: var(--calc-cell-bg); }
+.price-grid td.example { box-shadow: inset 3px 0 0 var(--accent); }
+.price-grid td.now { outline: 1px solid var(--accent); outline-offset: -1px; }
+.price-grid b.draft { position: absolute; top: 1px; right: 2px; font-size: 9px; color: var(--brand); }
+.price-grid tr.orphan td { color: var(--grey); font-style: italic; }
+.price-grid caption { caption-side: bottom; text-align: left; padding-top: 6px; }
