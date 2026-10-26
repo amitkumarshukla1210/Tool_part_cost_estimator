@@ -11,7 +11,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import PageBreak, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from .trace import EXAMPLE_WARNING
 
@@ -160,8 +160,9 @@ def rm_cost_pdf(part: dict, tr: dict) -> bytes:
     return buf.getvalue()
 
 
-def tool_cost_pdf(tr: dict, part: dict | None = None) -> bytes:
-    """Tool cost sheet of one mould / die: result, cost build-up, BOM & processes, steps, inputs with sources, rates."""
+def tool_cost_pdf(tr: dict, part: dict | None = None, die: str | None = None) -> bytes:
+    """Tool cost sheet of one mould / die: result, cost build-up, BOM & processes, steps, inputs with sources, rates.
+    Sheet-metal dies: a dies summary and one section (page) per die (stage-wise); `die` = one die only."""
     from .tool_cost import examples
     from .trace import source_text
     theme = _theme()
@@ -195,6 +196,39 @@ def tool_cost_pdf(tr: dict, part: dict | None = None) -> bytes:
                        + (f"version {tr['version']}" if tr.get("version") else "live preview, not stored"), note)]
     if ex["any"]:
         story += [Spacer(1, 2 * mm), _example_banner(ss, ex["detail"])]
+    dies = tr.get("dies") or []
+    if die:
+        dies = [d for d in dies if d["key"] == die]
+        if not dies:
+            raise ValueError(f"There is no die '{die}' in this tool cost.")
+    if dies:
+        rows = [[wrap(d["name"]), wrap(", ".join(d["op_names"])), wrap(f"{d['base']['series']} {d['base']['size_code']} · {d['base'].get('material') or ''}"),
+                 f"{d['die_plate']['die_l']:.0f} × {d['die_plate']['die_w']:.0f} × {d['die_plate']['die_h']:.0f}",
+                 wrap(f"{(d['press'] or {}).get('machine_id') or 'none'} ({d['force_t']:.1f} t)"), num(d["value"]), num(d["value_inr"]),
+                 num(d.get("capex_inr"))] for d in dies]
+        story += [Paragraph("Dies, stage-wise" + (f" · {dies[0]['name']}" if die else ""), h2), _table(
+            [["Die", "Operations", "Die set · plate material", "Die plate L × W × H (mm)", "Press (force)", f"Tool cost ({cur})",
+              "Tool cost INR", "CAPEX INR"]] + rows, theme, [40 * mm, 40 * mm, 48 * mm, 34 * mm, 32 * mm, 26 * mm, 26 * mm, 26 * mm])]
+        for d in dies:
+            lines = [l for l in tr["lines"] if l.get("die_key") == d["key"]]
+            story += [PageBreak(), Paragraph(f"STAGE {tr['dies'].index(d) + 1} OF {len(tr['dies'])}", kicker),
+                      Paragraph(f"{d['name']} · {', '.join(d['op_names'])}", h1),
+                      Paragraph(f"Work area {d['work_note']} · die plate {d['die_plate']['die_l']:.0f} × {d['die_plate']['die_w']:.0f} × "
+                                f"{d['die_plate']['die_h']:.0f} mm · die set {d['base']['series']} {d['base']['size_code']} "
+                                f"({d['base'].get('material') or '—'}) · press {(d['press'] or {}).get('machine_id') or 'none'} for "
+                                f"{d['force_t']:.1f} t · tool cost {num(d['value'])} {cur} = {num(d['value_inr'])} INR", note),
+                      Paragraph("Bill of material", h2), _table(
+                          [["Element", "Category", "Qty", "Grade", "Make", "Standard part / part no.", "Weight each (kg)", "Line total"]] +
+                          [[wrap(l["element"] + (" •" if l["is_example"] else "")), l["category"].replace("_", " "), num(l["quantity"]),
+                            wrap(l.get("grade") or ""), wrap(l.get("make") or ""),
+                            wrap(" ".join(x for x in (l.get("std_part") or "", l.get("part_number") or "") if x)),
+                            f"{l['weight_each_kg']:,.2f}" if l["weight_each_kg"] else "", f"{l['total']:,.0f}"] for l in lines],
+                          theme, [60 * mm, 22 * mm, 14 * mm, 36 * mm, 34 * mm, 40 * mm, 24 * mm, 26 * mm])]
+        if die:
+            story += [Spacer(1, 4 * mm), Paragraph("© Design to Cost", note)]
+            doc.build(story)
+            return buf.getvalue()
+        story += [PageBreak()]
     story += [Paragraph("Result", h2), _table([
         ["", cur, "INR"], ["Tool cost per tool", num(tr["value"]), num(tr["value_inr"])],
         [f"Tool CAPEX ({tr['tools_count']} tools over the programme)", num(tr.get("capex")), num(tr.get("capex_inr"))]],

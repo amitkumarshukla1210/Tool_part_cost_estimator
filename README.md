@@ -597,6 +597,7 @@ yield = flat part area ÷ blank area; holes are added back, because they are pun
 | Flat part | Its own length × width |
 | Bends all running the same way (L, U, Z, channel, angle bracket) | A **developed straight strip**: width = the part's size along the bend line, length = flat area ÷ width. The L / U shape is then formed in a **bending stage**, which the operations include. |
 | Bends both ways (tray / box) | (L + 2·H) × (W + 2·H), corners notched |
+| Mostly one way (≥ 90 % of the sheet area) with small tabs, ribs or embossings the other way | Still the developed straight strip |
 
 Before, a bent part kept its formed width. For an L bracket 300 × 100 mm made from a 20 mm strip, that gave a 300 × 100
 blank at 26.5 % yield; the developed strip is 398 × 20 at about 100 % (gross weight then adds only the gap between blanks).
@@ -608,6 +609,16 @@ blank at 26.5 % yield; the developed strip is 398 × 20 at about 100 % (gross we
 The *Sheet-metal tools* block shows the options with their yield, the chosen one ticked. The gross weight, RM cost, nesting,
 strip layout and dies use the chosen blank, and the RM / tool cost asks for a recalculation when it changes. Other sizes can
 still be typed under RM inputs.
+
+**Downloads, stage-wise (sheet-metal dies).** The *Dies suggested* table has **PDF · Excel** per die: the die (operations,
+work area, die plate L × W × H, die set and plate material, press and force, cost) and its full bill of material with grade,
+make and standard part numbers. The *All dies* row (and *Tool cost → Excel / PDF*) gives a dies summary plus one page / sheet
+per die (Stage 1 of N, …). Blank DXF, strip DXF and the tool pack PDF stay under *Sheet-metal tools → Blank and strip layout*.
+
+**Comparing countries.** *Country comparison and landed cost* on the part: tick the countries (or **All** / **None**) and
+**Compare the ticked countries**. Each row has the part ex-works and landed in India, plus the **tool cost in the country's
+currency, ex-works in INR and landed in INR** (cheapest marked). Excel and PDF keep the same countries. The *Tool country*
+of the part (Tool features) is still one country: the one its stored tool cost is calculated for.
 
 **Base material of moulds and dies.** *Mould bases* now have a **plate material** (grade from Tool materials; C45 / S50C for
 the example bases, EN8 (080M40) added with an example price in every country) and a **make**. The traceability of the base
