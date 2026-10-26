@@ -277,7 +277,11 @@ function toolBlock(p) {
     <p class="note">${stored ? "" : "<b>Live preview, not stored yet.</b> "}Tool country ${esc(tr.country)} · rates of ${esc(tr.as_of)}. Click any value for its formula,
       inputs, sources and rate versions.${stored ? ` Stored ${esc(v.created_at.slice(0, 16).replace("T", " "))} by ${esc(v.created_by)} · ${esc(v.reason)}.` : ""}
       ${stored ? `<a class="link" href="/api/parts/${p.id}/tool-cost/export.xlsx">Excel</a> · <a class="link" href="/api/parts/${p.id}/tool-cost/export.pdf">PDF</a>` : ""}
-      ${p.file_id ? ` · <a class="link" href="/?part=${p.id}">Open in Estimate (full BOM)</a>` : ""}</p>`;
+      ${p.file_id ? ` · <a class="link" href="/?part=${p.id}">Open in Estimate (full BOM)</a>` : ""}</p>
+    <p class="note downloads">${tr.dies ? "<b>Tool drawings per stage</b>: in the Dies table above." :
+      `<b>Mould concept drawing</b> (plan, plate stack, main BOM): <a class="link" href="/api/parts/${p.id}/tool-drawing.pdf">PDF</a> ·
+      <a class="link" href="/api/parts/${p.id}/tool-drawing.dxf">DXF</a>.`}
+      <a class="btn btn-primary small" href="/api/parts/${p.id}/po-pack.zip" title="Part STEP and drawing, tool drawings and cost sheets per stage, blank / strip, costs">⬇ PO pack (ZIP)</a></p>`;
   }
   if (tr?.lines) html += bomEditor(p, tr);
   const typed = p.tool_inputs || {};
@@ -409,6 +413,8 @@ function renderPart() {
     </div>
 
     <h3 class="block-title">Geometry · rev ${esc(cur?.rev ?? "—")}</h3>
+    ${p.file_id ? `<p class="note downloads"><b>Part drawing</b> (three views, dimensions, title block):
+      <a class="link" href="/api/parts/${p.id}/drawing.pdf">PDF</a> · <a class="link" href="/api/parts/${p.id}/drawing.dxf">DXF</a></p>` : ""}
     <div class="table-wrap"><table class="cost-table"><tbody>${geometryRows(cur?.geometry) || '<tr><td class="empty">No 3D file for this revision.</td></tr>'}</tbody></table></div>
 
     ${loopBlock(p)}
@@ -910,7 +916,9 @@ function diesTable(tr) {
       <td>${esc(d.base.series)} ${esc(d.base.size_code)}</td><td>${fmt(d.die_plate.die_l, 0)} × ${fmt(d.die_plate.die_w, 0)} × ${fmt(d.die_plate.die_h, 0)}</td>
       <td>${d.press ? tv(d.machine_node, esc(d.press.machine_id)) : '<span class="badge missing">none</span>'} (${tv(d.force_node, `${fmt(d.force_t, 1)} t`)})</td>
       <td class="calc num">${tv(d.node, fmt(d.value, 0))}</td>
-      <td><a class="link" href="/api/parts/${part.id}/tool-cost/export.pdf?die=${encodeURIComponent(d.key)}">PDF</a> ·
+      <td>Drawing <a class="link" href="/api/parts/${part.id}/tool-drawing.pdf?die=${encodeURIComponent(d.key)}">PDF</a> ·
+        <a class="link" href="/api/parts/${part.id}/tool-drawing.dxf?die=${encodeURIComponent(d.key)}">DXF</a><br/>
+        Cost <a class="link" href="/api/parts/${part.id}/tool-cost/export.pdf?die=${encodeURIComponent(d.key)}">PDF</a> ·
         <a class="link" href="/api/parts/${part.id}/tool-cost/export.xlsx?die=${encodeURIComponent(d.key)}">Excel</a></td></tr>`).join("")}
       <tr class="total"><td colspan="5">All dies</td><td class="calc num">${tv(tr.root, fmt(tr.value, 0))}</td>
       <td><a class="link" href="/api/parts/${part.id}/tool-cost/export.pdf">PDF</a> · <a class="link" href="/api/parts/${part.id}/tool-cost/export.xlsx">Excel</a></td></tr></tbody></table></div>

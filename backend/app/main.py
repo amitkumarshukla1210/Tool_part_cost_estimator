@@ -858,6 +858,44 @@ def parts_piece_pdf(part_id: int, version: Optional[int] = None):
                     headers={"Content-Disposition": f'attachment; filename="part_cost_{part_id}.pdf"'})
 
 
+# ---------- drawings and PO pack (roadmap stage 26) ----------
+
+def _drawing_response(fn, filename: str):
+    try:
+        data = fn()
+    except (register.RegisterError, ValueError, register.ToolNotApplicable) as exc:
+        raise HTTPException(400, str(exc)) from None
+    kind = filename.rsplit(".", 1)[-1]
+    return Response(data, media_type={"pdf": "application/pdf", "dxf": "application/dxf", "zip": "application/zip"}[kind],
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@app.get("/api/parts/{part_id}/drawing.{kind}")
+def parts_drawing(part_id: int, kind: str):
+    """Part drawing: three views of the 3D model, overall dimensions, title block (PDF A3 or DXF)."""
+    if kind not in ("pdf", "dxf"):
+        raise HTTPException(404, "pdf or dxf")
+    code = register.part_detail(part_id, with_rm=False)["part_code"]
+    return _drawing_response(lambda: register.part_drawing(part_id, kind), f"{code}_part_drawing.{kind}")
+
+
+@app.get("/api/parts/{part_id}/tool-drawing.{kind}")
+def parts_tool_drawing(part_id: int, kind: str, die: Optional[str] = None):
+    """Concept drawing of the mould, or of one die stage (?die=key): plan, plate stack, main BOM, title block."""
+    if kind not in ("pdf", "dxf"):
+        raise HTTPException(404, "pdf or dxf")
+    code = register.part_detail(part_id, with_rm=False)["part_code"]
+    return _drawing_response(lambda: register.tool_drawing(part_id, kind, die), f"{code}_tool_drawing{'_' + die if die else ''}.{kind}")
+
+
+@app.get("/api/parts/{part_id}/po-pack.zip")
+def parts_po_pack(part_id: int):
+    """Everything for a quotation / PO: part STEP and drawing, tool drawings and cost sheets per stage, blank / strip, costs."""
+    from . import drawings
+    data, name = drawings.po_pack(part_id)
+    return Response(data, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
 @app.get("/api/parts/{part_id}/sheet-tools")
 def parts_sheet_tools(part_id: int):
     """Sheet-metal tools I: operation sequence, die type, forces, tonnage, press, formability (roadmap stage 9)."""
