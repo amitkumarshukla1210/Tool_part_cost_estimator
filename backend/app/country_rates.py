@@ -52,7 +52,7 @@ def _exists(con, category: str, item: str, country: str) -> bool:
                        (category, item, country)).fetchone() is not None
 
 
-def sync_base(month: str | None = None, approver: str = "") -> int:
+def sync_base(month: str | None = None, approver: str = "", system: bool = False) -> int:
     """Master-data values of the base country → first approved library version. Never changes an existing rate."""
     month = month or rates.current_month()
     base = base_country()["code"]
@@ -75,7 +75,8 @@ def sync_base(month: str | None = None, approver: str = "") -> int:
     for category, item, value, unit, example, sheet in todo:
         rates.create({"category": category, "item": item, "country": base, "value": value, "unit": unit,
                       "currency": cur, "month": month, "source": f"{SEED_SOURCE} ({sheet})",
-                      "comment": "", "is_example": example}, approve=True, origin="seed", approver=approver or "Example seed")
+                      "comment": "", "is_example": example}, approve=True, origin="seed", approver=approver or "Example seed",
+                     system=system)
         made += 1
     return made
 
@@ -88,7 +89,8 @@ def _round(value: float) -> float:
     return int(out) if digits <= 0 else out
 
 
-def propose(month: str | None = None, approve: bool = False, approver: str = "", origin: str = "index proposal") -> dict:
+def propose(month: str | None = None, approve: bool = False, approver: str = "", origin: str = "index proposal",
+            system: bool = False) -> dict:
     """Rates for countries that have none yet: base value × country index ÷ forex. Drafts unless `approve`."""
     month = month or rates.current_month()
     base = base_country()
@@ -122,15 +124,15 @@ def propose(month: str | None = None, approve: bool = False, approver: str = "",
                 "source": f"Proposed: {base['code']} rate × {GROUPS[row['category']][1].replace('_', ' ')} {factor} ÷ forex",
                 "comment": f"{base['code']} {a['value']} {a['unit']} ({a['month']}) × {factor} ÷ {inr_per_unit} INR per {c['currency']}. "
                            "EXAMPLE: replace with a supplier quote or market rate.",
-            }, approve=approve, origin=origin, approver=approver)
+            }, approve=approve, origin=origin, approver=approver, system=system)
             created += 1
     return {"created": created, "skipped": skipped, "status": "approved" if approve else "draft"}
 
 
 def seed(month: str | None = None) -> dict:
     """First set-up: master-data values into the library, other countries as approved EXAMPLE seeds."""
-    moved = sync_base(month)
-    return {"moved": moved} | propose(month, approve=True, approver="Example seed", origin="seed")
+    moved = sync_base(month, system=True)
+    return {"moved": moved} | propose(month, approve=True, approver="Example seed", origin="seed", system=True)
 
 
 def grid(as_of: str | None = None) -> dict:

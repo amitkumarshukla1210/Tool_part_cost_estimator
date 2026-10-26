@@ -16,10 +16,15 @@ async function init() {
     `<button role="tab" class="btn btn-outline" data-group="${k}" aria-selected="${k === group}">${esc(title)}</button>`).join("");
   $("country").innerHTML = meta.countries.map((c) =>
     `<option value="${esc(c.code)}" ${c.code === meta.base ? "selected" : ""}>${esc(c.name)} (${esc(c.currency)})</option>`).join("");
+  // Prices are drafts for Rates → Rate review; only a user who may approve rates sees (unticked) "Save & approve".
+  $("approveBox").hidden = !meta.may_approve;
+  $("approve").checked = false;
   const [s, me] = await Promise.all([api("/api/settings"), api("/api/auth/me")]);
-  $("approverBox").hidden = me.mode === "server" || !!s.approver_name;  // with logins the approver is the logged-in user
+  $("approverBox").hidden = !meta.may_approve || me.mode === "server" || !!s.approver_name;  // with logins: the logged-in user
   await load();
 }
+
+const approving = () => meta.may_approve && $("approve").checked;
 
 async function load() {
   status($("status"), "Loading…");
@@ -64,7 +69,7 @@ function render() {
   wrap.scrollLeft = wrap.scrollWidth;  // open on the latest months (older ones fill up as real prices are entered)
 }
 
-// A typed price: a new version from that month on (approved, or a draft for the Rate review).
+// A typed price: a new version from that month on (a draft for the Rate review, or approved by an approver).
 $("grid").addEventListener("change", async (e) => {
   const inp = e.target.closest("input[data-item]");
   if (!inp || inp.value === "") return;
@@ -72,9 +77,9 @@ $("grid").addEventListener("change", async (e) => {
   try {
     await api("/api/price-master/price", { method: "POST", body: JSON.stringify({
       group, item: inp.dataset.item, country: grid.country, month: inp.dataset.month, value: Number(inp.value),
-      approve: $("approve").checked }) });
+      approve: approving() }) });
     await load();
-    status($("status"), `${inp.dataset.item} ${inp.dataset.month}: saved${$("approve").checked ? " and approved" : " as a draft (Rates → Rate review)"}.`, "ok");
+    status($("status"), `${inp.dataset.item} ${inp.dataset.month}: saved${approving() ? " and approved" : " as a draft (Rates → Rate review)"}.`, "ok");
   } catch (err) {
     status($("status"), err.message, "error");
   }
@@ -97,7 +102,7 @@ $("upload").addEventListener("change", async (e) => {
   const form = new FormData();
   form.append("group", group);
   form.append("country", grid.country);
-  form.append("approve", $("approve").checked);
+  form.append("approve", approving());
   form.append("file", file);
   status($("status"), "Uploading…");
   try {

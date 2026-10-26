@@ -195,12 +195,20 @@ def keys_used(trace_rates: list[dict]) -> list[dict]:
 
 # ---------- writing (append-only for approved rows) ----------
 
-def create(data: dict, approve: bool = False, origin: str = "manual", approver: str = "") -> dict:
+def create(data: dict, approve: bool = False, origin: str = "manual", approver: str = "", system: bool = False) -> dict:
+    """A new rate version: a draft, or approved when `approve` (needs the permission Approve rates, like set_status).
+    `system=True` is only for the first set-up seeding (country_rates.seed): no logged-in user, approved as `approver`."""
     row = _clean(data)
     now = date.today().isoformat()
     row |= {"status": "draft", "approved_by": "", "approved_date": "", "origin": origin, "created_at": now}
     if approve:
-        row |= {"status": "approved", "approved_by": _approver() if _server() else approver or _approver(), "approved_date": now}
+        if system:
+            by = approver or "Example seed"
+        else:
+            from . import auth
+            auth.require_perm("approve_rates")
+            by = _approver() if _server() else approver or _approver()
+        row |= {"status": "approved", "approved_by": by, "approved_date": now}
     cols = list(row)
     with closing(_connect()) as con, con:
         cur = con.execute(f"INSERT INTO rates ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",

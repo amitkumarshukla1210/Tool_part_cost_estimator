@@ -113,7 +113,7 @@ def test_grid_starts_from_the_rates_in_main_and_shows_no_made_up_history():
 def test_typed_price_is_a_new_version_from_that_month_on():
     approver()
     r = client.post("/api/price-master/price", json={"group": "tool_material", "item": "NAK80", "country": "IN",
-                                                     "month": "2026-11", "value": 700})
+                                                     "month": "2026-11", "value": 700, "approve": True})
     assert r.status_code == 200 and r.json()["status"] == "approved" and not r.json()["is_example"]
     _, cells = row("tool_material", "IN", "NAK80")
     assert cells["cells"]["2026-11"]["value"] == 700 and cells["cells"]["2026-11"]["starts"]
@@ -159,3 +159,84 @@ def test_release_name_v0_in_the_api_and_admin():
     assert client.get("/api/auth/me").json()["version"] == "V0"
     assert app.version == "V0"
     assert client.get("/api/admin/about").json()["release"] == "V0"
+
+
+# ---------- approvals: drafts by default, approving needs the permission Approve rates ----------
+
+PW = "correct horse battery"
+
+
+@pytest.fixture
+def server(monkeypatch):
+    monkeypatch.setenv("DTC_MODE", "server")
+    monkeypatch.setenv("DTC_ADMIN_PASSWORD", PW)
+    with TestClient(app) as c:            # the startup hook creates the first admin from DTC_ADMIN_PASSWORD
+        for name, role in (("eric", "engineer"), ("alan", "approver")):
+            c.post("/api/auth/login", json={"username": "admin", "password": PW})
+            assert c.post("/api/users", json={"username": name, "password": PW, "role": role, "name": name.title()}).status_code == 200
+            c.post("/api/auth/logout")
+        yield c
+
+
+def as_user(c, name):
+    c.post("/api/auth/logout")
+    assert c.post("/api/auth/login", json={"username": name, "password": PW}).status_code == 200
+
+
+def price(c, approve=None, value=701):
+    body = {"group": "tool_material", "item": "NAK80", "country": "IN", "month": "2026-11", "value": value}
+    if approve is not None:
+        body["approve"] = approve
+    return c.post("/api/price-master/price", json=body)
+
+
+def upload(c, approve=None, value=702):
+    x = c.get("/api/price-master/export.xlsx", params={"group": "tool_material", "country": "IN"})
+    wb = load_workbook(io.BytesIO(x.content))
+    ws = wb.active
+    head = [cell.value for cell in ws[1]]
+    r = next(i for i in range(2, ws.max_row + 1) if ws.cell(row=i, column=1).value == "NAK80")
+    ws.cell(row=r, column=head.index("2026-11") + 1).value = value
+    buf = io.BytesIO()
+    wb.save(buf)
+    data = {"group": "tool_material", "country": "IN"} | ({"approve": str(approve).lower()} if approve is not None else {})
+    return c.post("/api/price-master/upload", data=data, files={"file": ("p.xlsx", buf.getvalue())})
+
+
+def test_engineer_saves_drafts_but_may_not_approve(server):
+    as_user(server, "eric")
+    assert server.get("/api/price-master/meta").json()["may_approve"] is False
+    assert price(server).json()["status"] == "draft"                       # default: a draft for Rate review
+    r = price(server, approve=True)
+    assert r.status_code == 403 and "Approve rates" in r.json()["detail"]
+    assert upload(server).json() == {"versions_created": 1, "status": "draft"}
+    r = upload(server, approve=True, value=703)
+    assert r.status_code == 403 and "Approve rates" in r.json()["detail"]
+    r = server.post("/api/rates", json={"category": "tool_material", "item": "NAK80", "country": "IN", "value": 1,
+                                        "unit": "INR/kg", "currency": "INR", "month": "2026-12", "approve": True})
+    assert r.status_code == 403                                             # the Rates page goes through the same check
+    assert rates.lookup("tool_material", "NAK80", "IN", "2026-12")["value"] == 650  # nothing was approved
+
+
+def test_approver_may_approve_from_the_price_master(server):
+    as_user(server, "alan")
+    assert server.get("/api/price-master/meta").json()["may_approve"] is True
+    assert price(server).json()["status"] == "draft"                       # unticked: still a draft
+    ok = price(server, approve=True, value=710).json()
+    assert ok["status"] == "approved" and ok["approved_by"] == "Alan"
+    assert upload(server, approve=True, value=720).json() == {"versions_created": 1, "status": "approved"}
+    assert rates.lookup("tool_material", "NAK80", "IN", "2026-11")["value"] == 720
+
+
+def test_first_set_up_seeding_still_approves_examples_with_logins_on(monkeypatch):
+    from backend.app import costing_db, country_rates
+    monkeypatch.setenv("DTC_MODE", "server")                                # logins on, nobody logged in
+    with costing_db.connect() as con:
+        con.execute("DELETE FROM rates WHERE category = 'tool_material' AND item = 'NAK80'")
+    with pytest.raises(Exception):                                          # a user call without the permission is refused
+        rates.create({"category": "tool_material", "item": "NAK80", "country": "IN", "value": 1, "month": MONTH}, approve=True)
+    res = country_rates.seed(MONTH)
+    assert res["moved"] >= 1 and res["created"] >= 8
+    seeded = rates.lookup("tool_material", "NAK80", "DE", MONTH)
+    assert seeded["approved_by"] == "Example seed" and seeded["is_example"]
+    assert rates.lookup("tool_material", "NAK80", "IN", MONTH)["approved_by"] == "Example seed"

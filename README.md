@@ -821,9 +821,11 @@ one country: **tool materials** (category `tool_material`), **part raw materials
 - A cell shows the approved price costing uses in that month: yellow = a version starts that month, grey = carried over from an
   earlier month, empty = no rate yet. The grid starts from the rates you have and fills up as real months are entered; there is
   no made-up history.
-- **Type a price** under a month: a new version from that month on (approved at once with *Save & approve*, else a draft for
-  Rates → Rate review). Old versions are never changed, so stored costs only change when you recalculate.
-- **Excel**: download the grid, type prices under any month, upload: only changed cells become new versions.
+- **Type a price** under a month: a new version from that month on, saved as a **draft** for Rates → Rate review. Only a
+  user with the permission *Approve rates* sees *Save & approve* (unticked by default) and can approve at once. Old versions
+  are never changed, so stored costs only change when you recalculate.
+- **Excel**: download the grid, type prices under any month, upload: only changed cells become new versions (drafts, unless
+  an approver ticks *Save & approve*).
 - **New grades** are added where they always are: Tool BOM → *+ New grade* (stage 23), Master data → Tool materials or Materials.
   **Standard parts** keep their catalogue price (Mould & die database → Standard parts) and are not in this grid.
 
@@ -841,7 +843,8 @@ CRCA D513 EDD, Stainless steel 430, Aluminium AlSi10Mg.
 
 API: `GET /api/price-master/meta`, `GET /api/price-master/grid?group=&country=&months=`, `POST /api/price-master/price`
 (`group, item, country, month, value, approve`), `GET /api/price-master/export.xlsx`, `POST /api/price-master/upload`
-(permission *Edit rates*; an approval needs *Approve rates*).
+(permission *Edit rates*; `approve` defaults to false, and `approve: true` needs *Approve rates*, as everywhere: every
+approved rate version, on the Rates page too, is checked in `rates.create`).
 
 ## Rates page: country rate library, MHR & labour rates
 

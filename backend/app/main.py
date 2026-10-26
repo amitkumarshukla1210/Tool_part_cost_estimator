@@ -417,14 +417,14 @@ class PriceIn(BaseModel):
     country: str
     month: str
     value: float
-    approve: bool = True
+    approve: bool = False           # a draft for Rates → Rate review unless an approver ticks Save & approve
     comment: str = ""
 
 
 @app.get("/api/price-master/meta")
 def price_master_meta():
     return {"groups": {k: v["title"] for k, v in price_master.GROUPS.items()}, "month": rates.current_month(),
-            "base": country_rates.base_country()["code"],
+            "base": country_rates.base_country()["code"], "may_approve": auth.may("approve_rates"),
             "countries": [{"code": c["code"], "name": c["name"], "currency": c["currency"]}
                           for c in costing_setup.tables()["countries"]]}
 
@@ -446,7 +446,7 @@ def price_master_export(group: str, country: str, end: Optional[str] = None, mon
 
 
 @app.post("/api/price-master/upload")
-async def price_master_upload(group: str = Form(...), country: str = Form(...), approve: bool = Form(True),
+async def price_master_upload(group: str = Form(...), country: str = Form(...), approve: bool = Form(False),
                               file: UploadFile = File(...)):
     _require_xlsx(file)
     return price_master.import_excel(group, country, await file.read(), approve)

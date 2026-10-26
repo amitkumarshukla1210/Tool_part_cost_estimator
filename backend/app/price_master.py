@@ -11,8 +11,8 @@ item × month grid for one country:
 Standard parts keep their catalogue price (Mould & die database → Standard parts); they are not in this grid.
 
 A cell shows the approved value that costing uses in that month (the latest approved version on or before it) and
-whether a version starts in that month. Typing a price saves a NEW version for that month (approved at once with
-"Save & approve", else a draft for the Rate review); old versions are never changed, so stored costs only move when
+whether a version starts in that month. Typing a price saves a NEW version for that month: a draft for Rates → Rate
+review, or approved at once when a user with the permission Approve rates ticks "Save & approve"; old versions are never changed, so stored costs only move when
 you recalculate them. Nothing is filled in for months without a rate: the grid fills up as real months are entered.
 New grades are added where they always are (Tool BOM → + New grade, Master data → Tool materials / Materials).
 """
@@ -119,7 +119,7 @@ def _cells(versions: list[dict], cols: list[str]) -> dict:
     return cells
 
 
-def set_price(group: str, item: str, country: str, month: str, value, approve: bool = True, comment: str = "",
+def set_price(group: str, item: str, country: str, month: str, value, approve: bool = False, comment: str = "",
               source: str = "") -> dict:
     """A new version of one price for that month (approved, or a draft for review)."""
     g = _group(group)
@@ -166,7 +166,7 @@ def to_excel(group: str, country: str, end: str | None = None, count: int = MONT
     return buf.getvalue()
 
 
-def import_excel(group: str, country: str, content: bytes, approve: bool = True) -> dict:
+def import_excel(group: str, country: str, content: bytes, approve: bool = False) -> dict:
     """Every cell that differs from the value costing uses in that month becomes a new version for that month."""
     current = grid(group, country, rates.current_month(), 1)  # only to check the country and group
     try:
