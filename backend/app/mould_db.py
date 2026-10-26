@@ -13,6 +13,7 @@ Holds the data that sizes a mould or die and builds its BOM:
                     or a rate per unit (kg, cm², ...); its machine, labour grade, operators and cost group
     design_rules    detailed 3D tool design: clearances, fits, plate / pillar / screw sizes, tolerances, finish, shrinkage
     general_tolerances  ISO 2768-1 linear and angular general tolerances by class, printed on the tool drawings (stage 30)
+    fit_tolerances  ISO 286 limits of the fits (H7, g6 …) by size: the tolerance of every fitted dimension (stage 31)
     time_parameters removal rates, set-up hours and shares that the BOM hour / amount rules use
 
 Every row has an is_example flag: seeded placeholder values are 1 until you
@@ -262,12 +263,22 @@ TABLES = {
         col("is_example", "Example", "bool"),
         col("notes", "Notes", required=False),
     ]},
+    "fit_tolerances": {"title": "Fit tolerances", "unique": ("fit", "from_mm"), "columns": [
+        col("fit", "Tolerance class of ISO 286 (H7, H6, g6, h6, k6, m6 …)"),
+        col("from_mm", "From size (mm, over)", "number"),
+        col("to_mm", "To size (mm, up to and including)", "number"),
+        col("upper_um", "Upper deviation (µm, with sign: +15, -7, 0)"),
+        col("lower_um", "Lower deviation (µm, with sign)"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes", required=False),
+    ]},
 }
 
 
 def _check(clean: dict) -> None:
-    from . import drawing_data
+    from . import dim_tolerances, drawing_data
     drawing_data.validate(clean)
+    dim_tolerances.validate(clean)
     from . import concept
     for i, r in enumerate(clean["concept_rules"], start=2):
         try:

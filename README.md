@@ -1097,6 +1097,21 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 - Code: `backend/app/drawing_data.py`, `drawing_style.py` (title block), `tool_drawings.py`; tables `tool_drawing_data`, `tool_drawing_edits`.
   Tests: `tests/test_drawing_data.py`.
 
+## A tolerance on every dimension of the tool drawings (stage 31)
+
+- Every dimension of a detail drawing (PDF and DXF) carries its tolerance, taken from what the design already assumes
+  (Mould & die database → Design rules of the part type):
+  overall length and width: **ISO 2768** of the drawing's class by size (`397.4 ±0.5`); plate thickness: `plate_thk_tol` (`±0.02`);
+  fitted holes: the hole fit in their label (`Ø10 m6 / H7 dowel` → `H7 +0.015/0`) with **position** `position_tol` (`±0.01`);
+  tapped holes: `thread_class` (`M10 … 6H`); other holes: `hole_clear_tol` (general by the diameter) and position general by the coordinate;
+  openings: their own tolerance (`die_opening_tol`, `+0.01/0`). The hole table gets the columns *Ø tol.* and *Pos. ±*.
+- Fit limits come from the new master-data table **Fit tolerances** (ISO 286: H6, H7, H8, h6, h7, g6, f7, k6, m6 by size range;
+  EXAMPLE values from memory: check them against your copy of the standard). New Design rules rows: `thread_class`, `hole_clear_tol`.
+- **mm or µm** per part (`H7 +15/0 µm`, `±20 µm`): *Drawing data* → *Dimension tolerances* → *Shown in*.
+- **Change any tolerance** on the part panel (*Drawing data* → *Dimension tolerances*: L, W, H, H1, H1@pos, O1 …) or in the Excel sheet
+  *Dimension tolerances*: `general`, `class`, a fit (`H7`, `g6`, `k6` …), `±0.02`, `+0.02/-0.01` or a thread class (`6H`); empty = as drawn.
+  Each change is in the revision history. Code: `backend/app/dim_tolerances.py`. Tests: `tests/test_dim_tolerances.py`.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:

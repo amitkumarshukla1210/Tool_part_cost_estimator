@@ -85,7 +85,7 @@ def test_excel_round_trip():
     pid = bracket("DD3")
     _, tool, dp = die_plate(pid)
     wb = load_workbook(io.BytesIO(client.get(f"/api/parts/{pid}/drawing-data.xlsx").content))
-    assert wb.sheetnames == ["Drawing data", "How to use", "Tolerance tables", "Revision history"]
+    assert wb.sheetnames == ["Drawing data", "Dimension tolerances", "How to use", "Tolerance tables", "Revision history"]
     ws = wb["Drawing data"]
     top = next(r for r in range(1, 10) if ws.cell(r, 1).value == "Tool")
     row = next(r for r in range(top + 1, ws.max_row + 1) if ws.cell(r, 1).value == tool["key"] and str(ws.cell(r, 2).value) == dp["item"])

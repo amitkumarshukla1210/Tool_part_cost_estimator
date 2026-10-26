@@ -23,9 +23,10 @@ from . import auth, mould_db, register_setup
 from . import projects_db as db
 
 CLASSES = ("f", "m", "c", "v")
-FIELDS = ("heat_treatment", "surface_treatment", "tolerance_class", "finish_ra")
+FIELDS = ("heat_treatment", "surface_treatment", "tolerance_class", "finish_ra", "tolerance_unit")
 LABELS = {"heat_treatment": "Heat treatment", "surface_treatment": "Surface treatment",
-          "tolerance_class": "General tolerance class (f, m, c, v)", "finish_ra": "Surface roughness Ra (µm)"}
+          "tolerance_class": "General tolerance class (f, m, c, v)", "finish_ra": "Surface roughness Ra (µm)",
+          "tolerance_unit": "Tolerances shown in (mm or µm)"}
 MAX_NOTES, MAX_NOTE = 12, 300
 EXAMPLE = "EXAMPLE - ISO 2768-1 values as remembered: check them against your copy of the standard"
 LINEAR = ((0.5, 3), (3, 6), (6, 30), (30, 120), (120, 400), (400, 1000), (1000, 2000), (2000, 4000))
@@ -104,7 +105,7 @@ def defaults(comp, part_type: str) -> dict:
     return {"heat_treatment": (rules.get("heat_treat_note") or "Harden and temper") if hardened else "none (as supplied)",
             "surface_treatment": "none",
             "tolerance_class": tolerance_class(rules.get("general_tolerance", "ISO 2768-mK")),
-            "finish_ra": _ra(rules.get("finish_general", "Ra 3.2"))}
+            "finish_ra": _ra(rules.get("finish_general", "Ra 3.2")), "tolerance_unit": "mm"}
 
 
 def effective(comp, part_type: str, over: dict | None) -> dict:
@@ -115,6 +116,9 @@ def effective(comp, part_type: str, over: dict | None) -> dict:
     f["notes"] = list((over or {}).get("notes") or [])
     f["tables"] = tables_text(f["tolerance_class"])
     f["changed"] = bool(over and ((over.get("fields") or {}) or over.get("notes")))
+    from . import dim_tolerances                    # stage 31: a tolerance on every dimension
+    f["dim_overrides"] = dict(((over or {}).get("fields") or {}).get("features") or {})
+    f["dims"] = dim_tolerances.for_component(comp, part_type, f["tolerance_class"], f["dim_overrides"], f["tolerance_unit"])
     return f
 
 
@@ -128,13 +132,21 @@ def stored(conn, part_id: int) -> dict:
 
 
 def clean(fields: dict | None, notes) -> tuple[dict, list]:
+    from . import dim_tolerances
     out = {}
     for k, v in (fields or {}).items():
-        if k not in FIELDS:
+        if k not in FIELDS and k != "features":
             raise auth.AuthError(f"'{k}' cannot be changed here ({', '.join(FIELDS)}); material and hardness are changed in the tool BOM.", 400)
+        if k == "features":
+            feats = dim_tolerances.clean_overrides(v)
+            if feats:
+                out["features"] = feats
+            continue
         if v in (None, ""):
             continue
-        if k == "tolerance_class":
+        if k == "tolerance_unit":
+            v = dim_tolerances.clean_unit(v)
+        elif k == "tolerance_class":
             v = str(v).strip().lower()
             if v not in CLASSES:
                 raise auth.AuthError("General tolerance class must be f, m, c or v.", 400)
@@ -156,8 +168,10 @@ def clean(fields: dict | None, notes) -> tuple[dict, list]:
 
 def _summary(old: dict, fields: dict, notes: list) -> str:
     of = old.get("fields") or {}
-    bits = [f"{LABELS[k].split(' (')[0].lower()} {of.get(k, 'default')} → {v}" for k, v in fields.items() if of.get(k) != v]
-    bits += [f"{LABELS[k].split(' (')[0].lower()} back to default" for k in of if k not in fields]
+    bits = [f"{LABELS[k].split(' (')[0].lower()} {of.get(k, 'default')} → {v}" for k, v in fields.items() if k != "features" and of.get(k) != v]
+    bits += [f"{LABELS[k].split(' (')[0].lower()} back to default" for k in of if k not in fields and k != "features"]
+    oft, nft = of.get("features") or {}, fields.get("features") or {}
+    bits += [f"tolerance {k} {oft.get(k, 'as drawn')} → {nft.get(k, 'as drawn')}" for k in sorted(set(oft) | set(nft)) if oft.get(k) != nft.get(k)]
     if (old.get("notes") or []) != notes:
         bits.append(f"note points {len(old.get('notes') or [])} → {len(notes)}")
     return "Technical data changed: " + "; ".join(bits)
@@ -193,6 +207,7 @@ def attach(part_id: int, designs: list) -> list:
                 continue
             o = over.get((des["key"], c.no))
             c.tech = effective(c, pt, o)
+            c.dims = c.tech["dims"]
             if o and o.get("notes"):
                 c.notes = list(c.notes) + [n for n in o["notes"] if n not in c.notes]
     return designs
@@ -254,7 +269,8 @@ def _naive(at) -> datetime:
 # ---------- the drawing data sheet (Excel) ----------
 
 HEAD = ["Tool", "Item", "Part", "Qty", "Material (tool BOM)", "Hardness (tool BOM)", "Heat treatment", "Surface treatment",
-        "General tolerance class (f, m, c, v)", "Surface roughness Ra (µm)", "Note points (one per line)", "Last edited by"]
+        "General tolerance class (f, m, c, v)", "Surface roughness Ra (µm)", "Note points (one per line)", "Last edited by",
+        "Tolerances shown in (mm / µm)"]
 
 
 def workbook(part: dict, rows: list[dict], hist: list[dict]) -> bytes:
@@ -271,20 +287,35 @@ def workbook(part: dict, rows: list[dict], hist: list[dict]) -> bytes:
     for r in rows:
         e = r["eff"]
         ws.append([r["tool"], r["item"], r["name"], r["qty"], e["material"], e["hardness"], e["heat_treatment"], e["surface_treatment"],
-                   e["tolerance_class"], e["finish_ra"], "\n".join(e["notes"]), r.get("edited_by") or ""])
-        for c in ws[ws.max_row][6:11]:
+                   e["tolerance_class"], e["finish_ra"], "\n".join(e["notes"]), r.get("edited_by") or "", e.get("tolerance_unit", "mm")])
+        for c in list(ws[ws.max_row][6:11]) + [ws[ws.max_row][12]]:
             c.fill = PatternFill("solid", fgColor="FFF7E6")              # the cells you may change
         for c in ws[ws.max_row]:
             c.alignment = Alignment(wrap_text=True, vertical="top")
-    for i, w in enumerate((16, 8, 30, 6, 24, 22, 28, 22, 14, 12, 60, 16), start=1):
+    for i, w in enumerate((16, 8, 30, 6, 24, 22, 28, 22, 14, 12, 60, 16, 14), start=1):
         ws.column_dimensions[ws.cell(1, i).column_letter].width = w
     ws.freeze_panes = "D2"
+    ds = wb.create_sheet("Dimension tolerances")          # stage 31
+    ds.append(["Tool", "Item", "Dimension", "What", "Tolerance on the drawing", "Your tolerance (empty = as drawn)"])
+    for c in ds[1]:
+        c.font, c.fill = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="152238")
+    for r in rows:
+        ov = r["eff"].get("dim_overrides") or {}
+        for f in r.get("dimensions") or []:
+            ds.append([r["tool"], r["item"], f["key"], f["what"], f["tolerance"], ov.get(f["key"], "")])
+            ds.cell(ds.max_row, 6).fill = PatternFill("solid", fgColor="FFF7E6")
+    for col_, w in zip("ABCDEF", (16, 8, 12, 46, 26, 30)):
+        ds.column_dimensions[col_].width = w
+    ds.freeze_panes = "A2"
     ins = wb.create_sheet("How to use")
     for line in [f"Drawing data of the tool design of {part['part_code']} {part['name']}", "",
                  "1. Change the coloured columns: heat treatment, surface treatment, general tolerance class (f, m, c, v), roughness Ra, note points.",
                  "2. Material and hardness come from the tool BOM: change them there (part panel → Tool cost → tool BOM).",
                  "3. Upload this file on the part panel (Tool design → Drawing data → Upload). The PDF and DXF drawings follow.",
                  "4. Do not change the Tool and Item columns or the sheet names. An empty cell goes back to the default.",
+                 "4b. Sheet 'Dimension tolerances': every dimension of every detail drawing with its tolerance. Type a new one in the last column:"
+                 " general (ISO 2768), class (the fit of the hole label), a fit (H7, g6, k6 …), ±0.02, +0.02/-0.01 (mm) or a thread class (6H)."
+                 " Last column of 'Drawing data': show the tolerances in mm or µm.",
                  "5. Every change is kept and printed in the revision history of the drawing."]:
         ins.append([line])
     ins.column_dimensions["A"].width = 140
@@ -320,9 +351,20 @@ def read_workbook(content: bytes) -> list[dict]:
             continue
         r = list(r) + [None] * len(HEAD)
         out.append({"tool": str(r[0]).strip(), "item": str(r[1]).strip(),
-                    "fields": {k: r[i] for k, i in (("heat_treatment", 6), ("surface_treatment", 7), ("tolerance_class", 8), ("finish_ra", 9))
-                               if r[i] not in (None, "")},
+                    "fields": {k: r[i] for k, i in (("heat_treatment", 6), ("surface_treatment", 7), ("tolerance_class", 8), ("finish_ra", 9),
+                                                    ("tolerance_unit", 12)) if r[i] not in (None, "")},
                     "notes": [x for x in str(r[10] or "").splitlines() if x.strip()]})
+    if "Dimension tolerances" in wb.sheetnames:
+        by = {(o["tool"], o["item"]): o for o in out}
+        drows = list(wb["Dimension tolerances"].iter_rows(values_only=True))
+        top = next((i for i, r in enumerate(drows[:12]) if r and str(r[0] or "").strip() == "Tool" and str(r[2] or "").strip() == "Dimension"), None)
+        for r in (drows[top + 1:] if top is not None else []):
+            if not r or len(r) < 6 or not r[0] or r[5] in (None, ""):
+                continue
+            key = (str(r[0]).strip(), str(r[1]).strip())
+            if key not in by:
+                raise auth.AuthError(f"Dimension tolerances: tool {key[0]} item {key[1]} is not on the sheet 'Drawing data'.", 400)
+            by[key]["fields"].setdefault("features", {})[str(r[2]).strip()] = str(r[5]).strip()
     return out
 
 
@@ -343,8 +385,10 @@ def part_data(part_id: int) -> dict:
                 continue
             o = over.get((des["key"], c.no)) or {}
             eff = getattr(c, "tech", None) or effective(c, des.get("part_type", ""), o)
+            from . import dim_tolerances
             items.append({"item": c.no, "name": c.name, "qty": c.qty, "defaults": defaults(c, des.get("part_type", "")),
-                          "effective": {k2: eff[k2] for k2 in (*FIELDS, "material", "hardness", "notes")}, "changed": eff["changed"],
+                          "effective": {k2: eff[k2] for k2 in (*FIELDS, "material", "hardness", "notes", "dim_overrides")}, "changed": eff["changed"],
+                          "dimensions": dim_tolerances.rows(eff["dims"], c),
                           "edited_by": o.get("edited_by"), "edited_at": o.get("edited_at")})
         tools.append({"stage": k, "key": des["key"], "name": des["name"], "items": items})
     return {"part_id": part_id, "part_code": d["part_code"], "rev": rev["rev"], "release": rel, "editable": not rel["released"],
@@ -379,7 +423,7 @@ def part_xlsx(part_id: int) -> tuple[bytes, str]:
     part = register.part_detail(part_id, with_rm=False)
     with db.engine().connect() as conn:
         over = stored(conn, part_id)
-    rows = [{"tool": t["key"], "item": i["item"], "name": i["name"], "qty": i["qty"], "eff": i["effective"],
+    rows = [{"tool": t["key"], "item": i["item"], "name": i["name"], "qty": i["qty"], "eff": i["effective"], "dimensions": i["dimensions"],
              "edited_by": (over.get((t["key"], i["item"])) or {}).get("edited_by")} for t in data["tools"] for i in t["items"]]
     return workbook(part, rows, data["history"]), f"{part['part_code']}_rev{data['rev']}_drawing_data.xlsx"
 
@@ -401,7 +445,10 @@ def part_upload(part_id: int, content: bytes) -> dict:
                 except (TypeError, ValueError):
                     return False
             return str(v).strip().lower() == str(dflt.get(k)).strip().lower()
-        items.append({"tool": r["tool"], "item": r["item"], "fields": {k: v for k, v in r["fields"].items() if not same(k, v)}, "notes": r["notes"]})
+        fields = {k: v for k, v in r["fields"].items() if k != "features" and not same(k, v)}
+        if r["fields"].get("features"):
+            fields["features"] = r["fields"]["features"]
+        items.append({"tool": r["tool"], "item": r["item"], "fields": fields, "notes": r["notes"]})
     out = part_save(part_id, items)
     out["rows_in_sheet"] = len(items)
     return out

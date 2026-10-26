@@ -1298,14 +1298,20 @@ async function drawingDataLoad() {
     <p class="downloads"><a class="link" href="/api/parts/${part.id}/drawing-data.xlsx">⬇ Drawing data sheet (Excel)</a>
       ${d.editable ? ` · <input type="file" id="ddFile" accept=".xlsx" /> <button type="button" class="btn btn-outline small" id="ddUp">Upload changed sheet</button>` : ""}</p>
     ${d.tools.map((t) => `<p><b>Tool ${t.stage}: ${esc(t.name)}</b></p><div class="table-wrap"><table class="cost-table dd" data-tool="${esc(t.key)}"><thead><tr>
-      <th>Item</th><th>Part</th><th>Material · hardness</th><th>Heat treatment</th><th>Surface treatment</th><th>Class</th><th>Ra µm</th><th>Note points (one per line)</th></tr></thead><tbody>
+      <th>Item</th><th>Part</th><th>Material · hardness</th><th>Heat treatment</th><th>Surface treatment</th><th>Class</th><th>Ra µm</th><th>Note points (one per line)</th><th>Dimension tolerances</th></tr></thead><tbody>
       ${t.items.map((i) => `<tr data-item="${esc(i.item)}"><td>${esc(i.item)}</td><td>${esc(i.name)}${i.changed ? ' <span class="badge edited">changed</span>' : ""}</td>
         <td>${esc(i.effective.material)} · ${esc(i.effective.hardness)}</td>
         <td><input data-k="heat_treatment" value="${esc(i.effective.heat_treatment)}" ${dis} /></td>
         <td><input data-k="surface_treatment" value="${esc(i.effective.surface_treatment)}" ${dis} /></td>
         <td><select data-k="tolerance_class" ${dis}>${["f", "m", "c", "v"].map((c) => `<option ${c === i.effective.tolerance_class ? "selected" : ""}>${c}</option>`).join("")}</select></td>
         <td><input data-k="finish_ra" value="${esc(i.effective.finish_ra)}" size="4" ${dis} /></td>
-        <td><textarea data-notes rows="2" ${dis}>${esc(i.effective.notes.join("\n"))}</textarea></td></tr>`).join("")}</tbody></table></div>`).join("")}
+        <td><textarea data-notes rows="2" ${dis}>${esc(i.effective.notes.join("\n"))}</textarea></td>
+        <td><details><summary>${i.dimensions.length} dimensions${i.dimensions.some((x) => x.changed) ? ' <span class="badge edited">changed</span>' : ""}</summary>
+          <label>Shown in <select data-k="tolerance_unit" ${dis}>${["mm", "µm"].map((u) => `<option ${u === i.effective.tolerance_unit ? "selected" : ""}>${u}</option>`).join("")}</select></label>
+          <table class="cost-table"><thead><tr><th>Dim.</th><th>What</th><th>On the drawing</th><th>Change to</th></tr></thead><tbody>
+          ${i.dimensions.map((x) => `<tr><td>${esc(x.key)}</td><td>${esc(x.what)}</td><td>${esc(x.tolerance)}</td>
+            <td><input data-f="${esc(x.key)}" value="${esc((i.effective.dim_overrides || {})[x.key] || "")}" placeholder="as drawn" size="10" ${dis} /></td></tr>`).join("")}
+          </tbody></table><p class="note">general (ISO 2768), class (fit of the hole label), a fit (H7, g6 …), ±0.02, +0.02/-0.01 or a thread class (6H)</p></details></td></tr>`).join("")}</tbody></table></div>`).join("")}
     ${d.editable ? `<button type="button" class="btn btn-primary small" id="ddSave">Save drawing data</button>` : ""} <span class="status" id="ddStatus"></span>
     <details><summary>Revision history (${d.history.length})</summary><table class="cost-table"><thead><tr><th>Rev</th><th>Date</th><th>Change</th><th>By</th></tr></thead>
       <tbody>${d.history.map((h) => `<tr><td>${esc(h.rev)}</td><td>${esc(h.date)}</td><td>${esc(h.text)}</td><td>${esc(h.by)}</td></tr>`).join("")}</tbody></table></details>`;
@@ -1316,6 +1322,9 @@ async function drawingDataLoad() {
     box.querySelectorAll("table.dd").forEach((tb) => tb.querySelectorAll("tr[data-item]").forEach((tr) => {
       const dflt = defaults[`${tb.dataset.tool}|${tr.dataset.item}`] || {}, fields = {};
       tr.querySelectorAll("[data-k]").forEach((el) => { if (String(el.value).trim() !== String(dflt[el.dataset.k])) fields[el.dataset.k] = el.value.trim(); });
+      const features = {};
+      tr.querySelectorAll("[data-f]").forEach((el) => { if (el.value.trim()) features[el.dataset.f] = el.value.trim(); });
+      if (Object.keys(features).length) fields.features = features;
       items.push({ tool: tb.dataset.tool, item: tr.dataset.item, fields, notes: tr.querySelector("[data-notes]").value.split("\n").map((x) => x.trim()).filter(Boolean) });
     }));
     try {
