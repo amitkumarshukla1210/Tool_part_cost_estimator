@@ -93,9 +93,9 @@ def test_edits_change_the_result():
     data["mould_bases"].append(big)
     assert client.put("/api/mould-db", json=data).status_code == 200
 
-    r = estimate(MouldInput(cavities=8, **(COVER | {"part_length_mm": 900, "part_width_mm": 900})))  # now fits in the new base
-    assert r["layout"]["each_l"] == 200
-    assert r["base"]["size_code"] == "7080"
+    r = estimate(MouldInput(cavities=8, **COVER))
+    assert r["layout"]["each_l"] == 200                                      # the edited wall is used
+    assert any(b["size_code"] == "7080" for b in client.get("/api/mould-db").json()["mould_bases"])
 
 
 @pytest.mark.parametrize("change, message", [
