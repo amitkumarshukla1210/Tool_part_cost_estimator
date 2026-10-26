@@ -1065,6 +1065,25 @@ def parts_tool_design_file(part_id: int, kind: str, die: Optional[str] = None):
     return Response(data, media_type=media, headers={"Content-Disposition": f'{disp}; filename="{name}"'})
 
 
+# ---------- process parameters for the best part quality (roadmap stage 34) ----------
+
+@app.get("/api/parts/{part_id}/process-parameters")
+def parts_process_parameters(part_id: int):
+    """Machine settings for the first trial with their range, from the simulation and the material window, and quality warnings."""
+    from . import process_params
+    return _design_error(lambda: process_params.compute(part_id))
+
+
+@app.get("/api/parts/{part_id}/process-parameters.{kind}")
+def parts_process_parameters_file(part_id: int, kind: str):
+    from . import process_params
+    if kind not in ("xlsx", "pdf"):
+        raise HTTPException(404, "xlsx or pdf")
+    content, name = _design_error(lambda: (process_params.xlsx if kind == "xlsx" else process_params.pdf)(part_id))
+    media = "application/pdf" if kind == "pdf" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return Response(content, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
 # ---------- the production machine of the tool (roadmap stage 33) ----------
 
 @app.get("/api/parts/{part_id}/machine")

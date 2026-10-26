@@ -330,7 +330,8 @@ function toolBlock(p) {
       <button type="button" class="btn btn-outline small" id="simRun">Analyse</button>
       <a class="link" href="/api/parts/${p.id}/simulation/report.pdf">PDF report with maps</a> ·
       <a class="link" href="/api/parts/${p.id}/simulation/video" title="Takes about 30 s to make">▶ Video (MP4)</a> <span class="status" id="simStatus"></span>
-      <div id="simOut"></div></details>`;
+      <div id="simOut"></div></details>
+      ${processBox(p)}`;
   }
   if (t.versions) {
     html += `<details class="card add-insert"><summary class="btn btn-outline small">Tool cost versions (${t.versions})</summary>
@@ -627,6 +628,20 @@ $("panelBody").addEventListener("click", async (e) => {
     } catch (err) {
       status($("simStatus"), err.message, "error");
     }
+  }
+  if (e.target.id === "ppRun") {
+    status($("ppStatus"), "Working out…");
+    try {
+      const r = await api(`/api/parts/${part.id}/process-parameters`);
+      status($("ppStatus"), "");
+      $("ppOut").innerHTML = `${r.is_example ? '<p class="note"><b>Uses EXAMPLE process windows / rules.</b></p>' : ""}
+        <p class="note">From ${esc(r.source)}.</p>
+        ${r.risks.length ? `<h4>Quality warnings</h4><ul>${r.risks.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "<p>No quality warning.</p>"}
+        <div class="table-wrap"><table class="cost-table"><thead><tr><th>Setting</th><th class="num">Value</th><th>Range</th><th>Unit</th><th>Why</th></tr></thead><tbody>
+        ${r.parameters.map((x) => `<tr><td>${esc(x.label)}</td><td class="num"><b>${fmt(x.value, 2)}</b></td><td>${x.min == null ? "" : `${fmt(x.min, 2)} – ${fmt(x.max, 2)}`}</td>
+          <td>${esc(x.unit)}</td><td class="note">${esc(x.why)}</td></tr>`).join("")}</tbody></table></div><p class="note">${esc(r.note)}</p>`;
+    } catch (err) { status($("ppStatus"), err.message, "error"); }
+    return;
   }
   if (e.target.id === "tdRun") return machineFirst();
   if (e.target.id === "tdMachine") return machineForm(false);
@@ -1228,7 +1243,18 @@ function simResultBox(p) {
       ${s.problems.some((x) => ["bend_radius", "hole_diameter"].includes(x.check)) ?
         ` · <button type="button" class="btn btn-primary small" id="fixOpen">Correct the 3D model</button>` : ""}</p>
     <div id="fixBox"></div>
-    <span class="note">Details: <i>Sheet-metal tools</i> below (operations, forces, strip layout, blank DXF).</span></div>`;
+    <span class="note">Details: <i>Sheet-metal tools</i> below (operations, forces, strip layout, blank DXF).</span>
+    ${processBox(p)}</div>`;
+}
+
+// process parameters for the best part quality, from the simulation (stage 34)
+function processBox(p) {
+  return `<details class="card add-insert"><summary class="btn btn-outline small">Process parameters (machine settings for the first trial)</summary>
+    <p class="note">Settings with their range, worked out from the simulation and the material window (Mould &amp; die database → Process windows,
+      Process parameters; EXAMPLE values until you replace them), and the quality warnings with the remedy.</p>
+    <button type="button" class="btn btn-outline small" id="ppRun">Work out</button>
+    <a class="link" href="/api/parts/${p.id}/process-parameters.xlsx">⬇ Excel</a> · <a class="link" href="/api/parts/${p.id}/process-parameters.pdf">⬇ PDF</a>
+    <span class="status" id="ppStatus"></span><div id="ppOut"></div></details>`;
 }
 
 // 3D correction after the simulation: preview, download, release as a new revision (stage 27)

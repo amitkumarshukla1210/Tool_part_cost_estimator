@@ -1163,6 +1163,22 @@ World Bank WDI consumer price index (indexation). The others in the table are no
   changed, and the 3D design is not re-shaped by the machine (the advice says what to add). API: `GET / PUT /api/parts/{id}/machine`,
   `GET /api/parts/{id}/machine-check`. Code: `backend/app/machine_spec.py`. Tests: `tests/test_machine_spec.py`.
 
+## Process parameters for the best part quality (stage 34)
+
+- **Part panel → Process parameters → Work out** (also *Excel* and *PDF*): the machine settings for the first trial, each with its value,
+  range and why: injection moulding (melt and mould temperature, fill time, injection rate, injection pressure, hold pressure and time,
+  cooling time, back pressure, clamp force, ejection temperature, drying, cycle), die casting (metal and die temperature, slow and fast shot speed,
+  fill time, intensification pressure, dwell, spray, clamp force), sheet metal (press tonnage, blank-holder force, strokes per minute, die
+  clearance, overbend, draw speed), foundry (pouring temperature, poured weight, pouring time, solidification, shake-out), EPS (steam pressure,
+  steaming and cooling time) and blow moulding (preform temperature, pre-blow and blow pressure, mould temperature and cooling).
+- Worked out from the **simulation of the part** (fill, cooling and solidification time, flow ratio, injection pressure, clamp force and the thin /
+  sink-risk / low-draft / undercut maps) or the **sheet-metal forces** (stages, draw ratio, springback), and the **material window**.
+  Thin walls, sink-risk sections, long flow, low draft, undercuts, draw ratio and springback become **quality warnings with the remedy**.
+- New master-data tables (Mould & die database): **Process windows** (temperatures and drying per material) and **Process parameters**
+  (one formula row per setting, with min and max; `risk` rows for the warnings). All EXAMPLE values until you replace them with your shop's.
+  The simulation (its rules and results) is not changed: the setting sheet uses the material window on top of it.
+- API: `GET /api/parts/{id}/process-parameters` (`.xlsx`, `.pdf`). Code: `backend/app/process_params.py`. Tests: `tests/test_process_params.py`.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:
