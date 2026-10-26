@@ -108,6 +108,7 @@ parts = Table(
     Column("piece_cost_inr", Float),
     # your changes of traced values for this part (traceability panel): {"rm" | "tool" | "piece": {node id: {...}}}
     Column("trace_overrides", JSON),
+    Column("machine", JSON),             # production machine typed before the tool design (stage 32): {spec, skipped}
     Column("created_by", String(100), default=""),
     Column("created_at", DateTime, default=now),
     Column("updated_at", DateTime, default=now, onupdate=now),

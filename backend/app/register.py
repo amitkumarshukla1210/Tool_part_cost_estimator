@@ -3096,9 +3096,14 @@ def tool_design_summary(part_id: int) -> dict:
 def tool_design_file(part_id: int, kind: str, key: str | None = None) -> tuple[bytes, str, str]:
     """(content, media type, file name) of a tool design download: zip (release pack), step (assembly), pdf (drawing
     set) or png (iso picture)."""
-    from . import render3d, tool_design, tool_drawings
+    from . import machine_spec, render3d, tool_design, tool_drawings
     d, rev, designs = tool_designs(part_id, key)
     code = d["part_code"]
+    if kind in ("zip", "pdf"):                 # stage 32: the machine check / recommendation in the notes of every tool
+        line = machine_spec.note_for(part_id, designs, rev)
+        for _, des in designs:
+            if line:
+                des["notes"] = list(des.get("notes", [])) + [line]
     if kind == "zip":
         tag = f"_{tool_drawings._safe(key)}" if key else ""
         return tool_drawings.release_zip(d, designs, rev["rev"]), "application/zip", f"{code}_tool_design{tag}.zip"

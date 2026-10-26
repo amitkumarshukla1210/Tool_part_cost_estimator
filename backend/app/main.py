@@ -1021,6 +1021,28 @@ def parts_tool_design_file(part_id: int, kind: str, die: Optional[str] = None):
     return Response(data, media_type=media, headers={"Content-Disposition": f'{disp}; filename="{name}"'})
 
 
+# ---------- the production machine of the tool (roadmap stage 32) ----------
+
+@app.get("/api/parts/{part_id}/machine")
+def parts_machine(part_id: int):
+    from . import machine_spec
+    return _design_error(lambda: machine_spec.get(part_id))
+
+
+@app.put("/api/parts/{part_id}/machine")
+def parts_machine_save(part_id: int, data: dict):
+    """data: {spec: {tonnage_t, tie_bar_h_mm, …, machine_id?} | null, skipped: bool}."""
+    from . import machine_spec
+    return _design_error(lambda: machine_spec.save(part_id, data.get("spec"), bool(data.get("skipped"))))
+
+
+@app.get("/api/parts/{part_id}/machine-check")
+def parts_machine_check(part_id: int):
+    """Each tool against the typed machine (tool needs / machine has / ok), or the recommended machine."""
+    from . import machine_spec
+    return _design_error(lambda: machine_spec.evaluate(part_id))
+
+
 # ---------- technical data, release and revision history of the tool drawings (roadmap stage 30) ----------
 
 @app.get("/api/parts/{part_id}/drawing-data")

@@ -1112,6 +1112,22 @@ World Bank WDI consumer price index (indexation). The others in the table are no
   *Dimension tolerances*: `general`, `class`, a fit (`H7`, `g6`, `k6` …), `±0.02`, `+0.02/-0.01` or a thread class (`6H`); empty = as drawn.
   Each change is in the revision history. Code: `backend/app/dim_tolerances.py`. Tests: `tests/test_dim_tolerances.py`.
 
+## The production machine of the tool (stage 32)
+
+- **Asked first:** part panel → Tool design → *Make the tool design* opens *Which machine will this tool run on in production?* the first time
+  (later: *Production machine…*). Moulding (plastic, die casting, EPS, blow): clamp tonnage, tie-bar clear distance H × V, smallest and largest
+  mould height, opening stroke, ejector stroke, locating ring; press (sheet metal): tonnage, bolster L × W, smallest and largest shut height, stroke;
+  foundry: flask L × W × H. Or pick a machine of Master data → Machines (its tonnage and platen / bed are filled in). Empty = not checked.
+- **Checked:** every tool of the design (its force from the tool cost, its base / die set from the tool cost, its shut / mould height from the
+  3D tool design, the part height for the strokes) against the machine: *tool needs / machine has / ok*, with what to do: a **riser / parallel of
+  x mm** when the tool is lower than the machine takes, a bigger machine, fewer cavities, a longer stroke.
+- **Skipped:** the software gives the machine the tool needs (tonnage + margin, tie bars / bolster, height range, strokes; margins in the new
+  Design rules rows `rec_tonnage_margin_pct`, `rec_platen_margin_mm`, `rec_height_margin_mm`, `rec_stroke_factor`, `rec_stroke_extra_mm`, EXAMPLE)
+  and the **nearest machine** of Master data → Machines.
+- The result is one line in the notes of the drawing set and the release pack. The tool cost and its try-out machine (stages 4 and 28) are not
+  changed, and the 3D design is not re-shaped by the machine (the advice says what to add). API: `GET / PUT /api/parts/{id}/machine`,
+  `GET /api/parts/{id}/machine-check`. Code: `backend/app/machine_spec.py`. Tests: `tests/test_machine_spec.py`.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:

@@ -286,8 +286,9 @@ function toolBlock(p) {
       <p class="note">Every ${tr.dies ? "die stage" : "mould"} designed in 3D from the part and the tool cost: plates, punches / core and cavity,
         pillars, bushes, standard parts, screws; an assembly drawing and a detail drawing of every made part with tolerances,
         material, hardness and your logo. A first-cut design by the Design rules (Master data) for your tool designer to check and release.</p>
-      <button type="button" class="btn btn-primary small" id="tdRun">Make the tool design</button> <span class="status" id="tdStatus"></span>
-      <div id="tdOut"></div></details>`;
+      <button type="button" class="btn btn-primary small" id="tdRun">Make the tool design</button>
+      <button type="button" class="btn btn-outline small" id="tdMachine">Production machine…</button> <span class="status" id="tdStatus"></span>
+      <div id="mcBox"></div><div id="tdOut"></div></details>`;
   }
   if (tr?.lines) html += bomEditor(p, tr);
   const typed = p.tool_inputs || {};
@@ -615,7 +616,8 @@ $("panelBody").addEventListener("click", async (e) => {
       status($("simStatus"), err.message, "error");
     }
   }
-  if (e.target.id === "tdRun") return toolDesignLoad();
+  if (e.target.id === "tdRun") return machineFirst();
+  if (e.target.id === "tdMachine") return machineForm(false);
   if (e.target.id === "fixOpen") return fixPreview(true);
   if (e.target.id === "fixRefresh") return fixPreview(false);
   if (e.target.id === "simToLoop") {
@@ -1253,6 +1255,56 @@ async function fixPreview(first) {
   }
 }
 
+// the production machine of the tool (stage 32): asked before the first tool design, checked, or recommended
+async function machineFirst() {
+  let m = null;
+  try { m = await api(`/api/parts/${part.id}/machine`); } catch { return toolDesignLoad(); }   // no machine family: design straight away
+  if (!m.asked) return machineForm(true, m);
+  return toolDesignLoad();
+}
+
+async function machineForm(thenDesign, m = null) {
+  const box = $("mcBox");
+  try { m = m || await api(`/api/parts/${part.id}/machine`); } catch (err) { status($("tdStatus"), err.message, "error"); return; }
+  const sp = m.spec || {};
+  box.innerHTML = `<form class="card grid2" id="mcForm"><h4 class="span2">Which machine will this tool run on in production?</h4>
+    <p class="note span2">Type what you know (empty = not checked) or take the size from a machine of Master data → Machines. The tool design is checked
+      against it (tool needs / machine has). <b>Skip</b>: the software designs the tool and tells you the machine it needs.</p>
+    <label class="span2">From the machine list <select name="machine_id"><option value="">—</option>${m.catalog.map((x) =>
+      `<option value="${esc(x.machine_id)}" ${sp.machine_id === x.machine_id ? "selected" : ""}>${esc(x.machine_id)} · ${esc(x.name)} · ${fmt(x.tonnage_t, 0)} t${x.length_mm ? ` · ${fmt(x.length_mm, 0)} × ${fmt(x.width_mm, 0)} mm` : ""}</option>`).join("")}</select></label>
+    ${m.fields.map((f) => `<label>${esc(f.label)} <input name="${esc(f.key)}" type="number" step="any" min="0" value="${sp[f.key] ?? ""}" /></label>`).join("")}
+    <div class="span2 dialog-actions"><button type="button" class="btn btn-outline small" id="mcSkip">Skip: recommend the machine</button>
+      <button type="submit" class="btn btn-primary small">Save machine${thenDesign ? " and design" : ""}</button></div><p class="status span2" id="mcStatus"></p></form>`;
+  const done = async (body) => {
+    try {
+      await api(`/api/parts/${part.id}/machine`, { method: "PUT", body: JSON.stringify(body) });
+      box.innerHTML = "";
+      if (thenDesign) toolDesignLoad(); else machineCheck();
+    } catch (err) { status($("mcStatus"), err.message, "error"); }
+  };
+  $("mcSkip").addEventListener("click", () => done({ spec: null, skipped: true }));
+  $("mcForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const spec = Object.fromEntries([...new FormData(e.target)].filter(([, v]) => v !== ""));
+    done({ spec: Object.keys(spec).length ? spec : null, skipped: !Object.keys(spec).length });
+  });
+}
+
+async function machineCheck() {
+  const box = $("mcBox");
+  try {
+    const r = await api(`/api/parts/${part.id}/machine-check`);
+    const lab = Object.fromEntries(r.fields.map((f) => [f.key, f.label]));
+    box.innerHTML = `<div class="card"><h4>Production machine</h4><p>${esc(r.note)}</p>
+      ${r.check.length ? `<div class="table-wrap"><table class="cost-table"><thead><tr><th>Tool</th><th>Check</th><th>Tool needs</th><th>Machine has</th><th></th></tr></thead><tbody>
+        ${r.check.map((c) => `<tr><td>${esc(c.tool)}</td><td>${esc(c.what)}</td><td>${esc(c.needs)}</td><td>${esc(c.has)}</td>
+          <td>${c.ok ? '<span class="badge status">ok</span>' : `<span class="badge missing">no</span> ${esc(c.advice)}`}</td></tr>`).join("")}</tbody></table></div>` : ""}
+      <details ${r.spec ? "" : "open"}><summary>Machine the tool needs (recommended, EXAMPLE margins: Design rules rec_…)</summary><ul>
+        ${Object.entries(r.recommended.values).map(([k, v]) => `<li>${esc(lab[k] || k)}: <b>${fmt(v, 0)}</b></li>`).join("")}</ul>
+        <p class="note">${r.recommended.nearest ? `Nearest in Master data → Machines: <b>${esc(r.recommended.nearest.machine_id)}</b> · ${esc(r.recommended.nearest.name)}` : "No machine of the list takes it."}</p></details></div>`;
+  } catch (err) { box.innerHTML = `<p class="status error">${esc(err.message)}</p>`; }
+}
+
 // detailed tool design: every die stage / the mould in 3D with drawings (stage 27)
 async function toolDesignLoad() {
   const out = $("tdOut");
@@ -1277,6 +1329,7 @@ async function toolDesignLoad() {
     }).join("") + (r.tools.length > 1 ? `<p><a class="btn btn-primary" href="/api/parts/${part.id}/tool-design.zip">⬇ Release pack of all ${r.tools.length} tools</a></p>` : "")
       + `<div id="ddBox" class="card"></div>`;
     drawingDataLoad();
+    machineCheck();
   } catch (err) {
     status($("tdStatus"), err.message, "error");
   }
