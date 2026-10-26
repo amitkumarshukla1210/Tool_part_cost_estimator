@@ -159,10 +159,16 @@ def run(feat: dict, material: str, typed: dict, default_mode: str = "") -> dict:
         for o in ops:
             o["press"] = press_for(o["force_t"] * safety)
         total, design, press = sum(o["force_t"] for o in ops), max((o["force_t"] for o in ops), default=0) * safety, {}
-    problems = []
+    problems, checks = [], []
     for r in mould_db.tables()["sheet_checks"]:
-        if formula.evaluate(r["condition"], env):
-            problems.append({"check": r["name"], "message": r["message"].format(**env), "is_example": r["is_example"]})
+        failed = bool(formula.evaluate(r["condition"], env))
+        try:
+            text = r["message"].format(**env)
+        except (KeyError, IndexError, ValueError):
+            text = r["message"]
+        checks.append({"check": r["name"], "condition": r["condition"], "passed": not failed, "message": text})
+        if failed:
+            problems.append({"check": r["name"], "message": text, "is_example": r["is_example"]})
     biggest = [x for x in press.values() if not x["machine_id"]] + [o["press"] for o in ops if "press" in o and not o["press"]["machine_id"]]
     for x in biggest:
         problems.append({"check": "press", "message": f"No press takes this tonnage (largest {x['biggest_t']:g} t): split the operations or use a larger press.",
@@ -170,6 +176,6 @@ def run(feat: dict, material: str, typed: dict, default_mode: str = "") -> dict:
     return {"material": material, "mode": mode, "recommended": "progressive" if env.get("progressive_ok") else "multi_stage",
             "sequence_source": source, "features": feat, "values": {s["name"]: s["value"] for s in steps}, "steps": steps,
             "operations": ops, "available_operations": [{"code": r["code"], "name": r["name"]} for r in lib],
-            "total_force_t": total, "design_force_t": design, "press": press, "problems": problems,
+            "total_force_t": total, "design_force_t": design, "press": press, "problems": problems, "checks": checks,
             "safety_factor": safety, "is_example": m["is_example"] or any(s["is_example"] for s in steps),
             "material_values": {k: m[k] for k in MATERIAL_VARS}}

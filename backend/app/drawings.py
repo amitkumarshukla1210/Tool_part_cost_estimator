@@ -124,7 +124,7 @@ def part_drawing_pdf(part: dict, rev: dict, shape, info: dict) -> bytes:
     """A3 part drawing: top, front and side views (third-angle layout), overall dimensions, title block."""
     from reportlab.graphics.shapes import Drawing, PolyLine, Rect, String
     from reportlab.lib.units import mm
-    from reportlab.platypus import Paragraph, Spacer
+    from reportlab.platypus import Spacer
     theme, ss, st = _styles()
     vs = {v["title"]: v for v in views(shape)}
     top, front, side = vs["TOP VIEW"], vs["FRONT VIEW"], vs["SIDE VIEW"]
@@ -159,11 +159,22 @@ def part_drawing_pdf(part: dict, rev: dict, shape, info: dict) -> bytes:
             ["Overall size L × W × H", f"{g['bbox_mm']['length']:.1f} × {g['bbox_mm']['width']:.1f} × {g['bbox_mm']['height']:.1f} mm" if g.get("bbox_mm") else "—",
              "Blank (developed)", info.get("blank", "—")],
             ["3D file (master)", rev.get("original_name", ""), "Date / by", f"{date.today().isoformat()} · Design to Cost"]]
+    from . import drawing_style
     buf = io.BytesIO()
     doc = _doc(buf, f"Design to Cost — Part drawing {part['part_code']}")
-    doc.build([Paragraph("PART DRAWING", st["k"]), Paragraph(f"{part['part_code']} · {part['name']} · rev {rev.get('rev', '')}", st["h1"]),
-               d, Spacer(1, 3 * mm), _title_block(rows, theme, 396 * mm), Spacer(1, 2 * mm), _frame_note(st)])
+    fields = [(a, b) for r in rows[:-1] for a, b in ((r[0], r[1]), (r[2], r[3]))]
+    doc.build([drawing_style.pdf_header(st, "PART DRAWING", f"{part['part_code']} · {part['name']} · rev {rev.get('rev', '')}"),
+               d, Spacer(1, 2 * mm),
+               drawing_style.pdf_title_block(396 * mm, fields, part.get("part_type", ""), _scale_label(sc), "1 / 1", part["part_code"],
+                                             rev.get("rev", ""), ["The 3D model (STEP) is the master for all geometry; dimensions "
+                                                                  "not shown are taken from it."])])
     return buf.getvalue()
+
+
+def _scale_label(sc) -> str:
+    from reportlab.lib.units import mm
+    r = sc / mm
+    return f"1:{1 / r:.2g}" if r < 1 else f"{r:.2g}:1"
 
 
 def part_drawing_dxf(part: dict, rev: dict, shape) -> bytes:
@@ -179,7 +190,29 @@ def part_drawing_dxf(part: dict, rev: dict, shape) -> bytes:
         x += v["w"] + 30
     msp.add_text(f"{part['part_code']} {part['name']} rev {rev.get('rev', '')} - views of the 3D model (STEP is master)",
                  dxfattribs={"layer": "TEXT", "height": 4}).set_placement((0, -20))
+    _dxf_frame(doc, msp, "Part drawing", part, rev.get("rev", ""), [("Material", part.get("material") or "-")])
     return _dxf_bytes(doc)
+
+
+def _dxf_frame(doc, msp, title, part, rev, rows, part_type=""):
+    """Move what is drawn up and right, then put the frame with logo and title block around it."""
+    from ezdxf import bbox
+    from ezdxf.math import Matrix44
+    from . import drawing_style
+    xs, ys = [], []
+    for e in msp:
+        try:
+            box = bbox.extents([e])
+            if box.has_data:
+                xs += [box.extmin.x, box.extmax.x]
+                ys += [box.extmin.y, box.extmax.y]
+        except Exception:
+            pass
+    x0, y0, x1, y1 = (min(xs), min(ys), max(xs), max(ys)) if xs else (0, 0, 400, 250)
+    for e in list(msp):
+        e.transform(Matrix44.translate(10 - x0, 80 - y0, 0))
+    drawing_style.dxf_frame(doc, msp, max(x1 - x0 + 20, 420), y1 - y0 + 90, f"{title} {part['part_code']}",
+                            [("Part", f"{part['part_code']} {part['name']}")] + rows, part_type, "1:1", part["part_code"], rev)
 
 
 def _dxf_bytes(doc) -> bytes:
@@ -290,14 +323,18 @@ def tool_drawing_pdf(part: dict, tr: dict, die: str | None = None) -> bytes:
     bom = [["Element", "Qty", "Grade", "Make", "Part no."]] + [
         [l["element"][:38], f"{l['quantity']:g}", (l.get("grade") or "")[:22], (l.get("make") or "")[:22],
          " ".join(x for x in (l.get("std_part") or "", l.get("part_number") or "") if x)[:24]] for l in main]
+    from . import drawing_style
     buf = io.BytesIO()
     doc = _doc(buf, f"Design to Cost — Tool drawing {part['part_code']} {lay['title']}")
-    doc.build([Paragraph(f"TOOL CONCEPT DRAWING · {lay['stage'].upper()}", st["k"]),
-               Paragraph(f"{part['part_code']} · {lay['title']}", st["h1"]),
+    fields = [(a, b) for r in rows for a, b in ((r[0], r[1]), (r[2], r[3]))]
+    doc.build([drawing_style.pdf_header(st, f"TOOL CONCEPT DRAWING · {lay['stage'].upper()}", f"{part['part_code']} · {lay['title']}"),
                Table([[plan, elev]], colWidths=[PW_, EW]), Spacer(1, 2 * mm),
-               _title_block(rows, theme, 396 * mm), Spacer(1, 3 * mm),
                Paragraph("Main bill of material (processes are in the tool cost sheet)", st["k"]),
-               _table(bom, theme, [110 * mm, 18 * mm, 70 * mm, 70 * mm, 70 * mm]), Spacer(1, 2 * mm), _frame_note(st)])
+               _table(bom, theme, [110 * mm, 18 * mm, 70 * mm, 70 * mm, 70 * mm]), Spacer(1, 2 * mm),
+               drawing_style.pdf_title_block(396 * mm, fields, lay.get("part_type", ""), "as shown", "1 / 1",
+                                             f"{part['part_code']}-C-{lay['stage'].replace(' ', '')}", "",
+                                             ["CONCEPT layout for quotation and PO reference; the detailed tool design (3D and "
+                                              "drawings of every part) is in Tool design → release pack."])])
     return buf.getvalue()
 
 
@@ -323,6 +360,7 @@ def tool_drawing_dxf(part: dict, tr: dict, die: str | None = None) -> bytes:
         msp.add_circle((x, y), r, dxfattribs={"layer": "OUTLINE"})
     msp.add_text(f"{part['part_code']} {lay['title']} {lay['stage']} - base {lay['base']['series']} {lay['base']['size_code']} "
                  f"{OL:.0f}x{OW:.0f}, {lay['plate_label']} {pl:.1f}x{pw:.1f} - CONCEPT", dxfattribs={"layer": "TEXT", "height": 5}).set_placement((0, -15))
+    _dxf_frame(doc, msp, f"Tool concept {lay['stage']}", part, "", [("Tool", lay["title"])])
     return _dxf_bytes(doc)
 
 

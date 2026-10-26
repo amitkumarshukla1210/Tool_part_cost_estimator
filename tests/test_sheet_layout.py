@@ -27,9 +27,23 @@ def test_flat_pattern_is_the_real_outline_with_holes():
     assert fp["area_mm2"] == pytest.approx(80 * 60 - 4 * 3.14159 * 9, rel=0.01)
 
 
-def test_bent_part_gets_the_developed_rectangle():
-    fp = sheet_layout.flat_pattern(flat_plate(), {"bbox_mm": {"length": 80, "width": 60, "height": 30}, "bend_count": 1}, BLANK, 2.0)
+def test_bent_part_without_a_model_gets_the_developed_rectangle():
+    fp = sheet_layout.flat_pattern(None, {"bbox_mm": {"length": 80, "width": 60, "height": 30}, "bend_count": 1}, BLANK, 2.0)
     assert fp["holes"] == [] and "developed rectangle" in fp["method"] and fp["area_mm2"] == 80 * 60
+
+
+def test_bent_part_is_unfolded_with_its_holes_and_bend_line():
+    from pathlib import Path
+    from backend.app.geometry import load_step
+    shape = load_step(str(Path(__file__).resolve().parents[1] / "samples" / "example_bracket_revA.step"))
+    g = {"bbox_mm": {"length": 250, "width": 40, "height": 80}, "bend_count": 1}
+    fp = sheet_layout.flat_pattern(shape, g, BLANK, 2.0)
+    assert "unfolded" in fp["method"] and len(fp["holes"]) == 6 and fp["width_mm"] == pytest.approx(40, abs=0.01)
+    # legs 250 + 80 outside, t 2, R 0.5: flat = 248 - 0.5... = (250 - 2.5) + (80 - 2.5) + pi/2 * (0.5 + 0.33 * 2)
+    assert fp["length_mm"] == pytest.approx(247.5 + 77.5 + 1.5708 * (0.5 + 0.33 * 2), abs=0.05)
+    (b,) = fp["bends"]
+    assert b["angle_deg"] == pytest.approx(90) and b["inner_radius_mm"] == pytest.approx(0.5)
+    assert b["line"][0][0] == pytest.approx(247.5 + 1.5708 * 1.16 / 2, abs=0.05)
 
 
 def test_strip_layout_by_hand_and_best_direction():
@@ -52,7 +66,8 @@ def test_dxf_and_pdf_pack():
     fp = sheet_layout.flat_pattern(flat_plate(), GEOM, BLANK, 2.0)
     sl = sheet_layout.strip_layout(fp, 2.0, 2)
     doc = ezdxf.read(io.StringIO(sheet_layout.blank_dxf(fp, "P1").decode()))
-    assert len(list(doc.modelspace().query("LWPOLYLINE"))) == 5            # outline + 4 holes
+    assert len(list(doc.modelspace().query('LWPOLYLINE[layer=="CUT"]'))) == 5    # outline + 4 holes
+    assert doc.modelspace().query('HATCH[layer=="LOGO"]') and doc.modelspace().query('TEXT[layer=="TITLE"]')   # title block + logo
     strip = ezdxf.read(io.StringIO(sheet_layout.strip_dxf(fp, sl, "P1").decode()))
     assert len(list(strip.modelspace().query("CIRCLE"))) == 4              # stations + 1 pilots
 

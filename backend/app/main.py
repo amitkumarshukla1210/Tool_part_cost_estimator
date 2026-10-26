@@ -432,6 +432,61 @@ def register_setup_schema():
     return register_setup.schema()
 
 
+# ---------- drawing settings: logo, company, signatures (roadmap stage 27) ----------
+
+DRAWING_KEYS = ("drawing_company", "drawing_projection", "drawing_drawn_by", "drawing_checked_by", "drawing_approved_by",
+                "drawing_notes")
+
+
+@app.get("/api/register-setup/drawing")
+def drawing_settings_get():
+    s = register_setup.settings()
+    rows = {r["key"]: r for r in register_setup.tables()["register_settings"]}
+    return {"settings": {k: s.get(k, "") for k in DRAWING_KEYS}, "labels": {k: (rows.get(k) or {}).get("description", k) for k in DRAWING_KEYS},
+            "logo": s.get("drawing_logo") or "default"}
+
+
+@app.put("/api/register-setup/drawing")
+def drawing_settings_put(data: dict):
+    t = register_setup.tables()
+    have = {r["key"]: r for r in t["register_settings"]}
+    for k in DRAWING_KEYS:
+        if k in data:
+            v = str(data[k]).strip() or "-"
+            if k in have:
+                have[k]["value"] = v
+            else:
+                t["register_settings"].append({"key": k, "value": v, "description": f"Drawings: {k}"})
+    try:
+        register_setup.write(t)
+    except register_setup.RegisterSetupError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return drawing_settings_get()
+
+
+@app.post("/api/register-setup/drawing/logo")
+async def drawing_logo_upload(file: UploadFile = File(...)):
+    from . import drawing_style
+    try:
+        drawing_style.save_logo(await file.read())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return drawing_settings_get()
+
+
+@app.delete("/api/register-setup/drawing/logo")
+def drawing_logo_reset():
+    from . import drawing_style
+    drawing_style.reset_logo()
+    return drawing_settings_get()
+
+
+@app.get("/api/drawing-logo.png")
+def drawing_logo():
+    from . import drawing_style
+    return Response(drawing_style.logo_path().read_bytes(), media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/register-setup")
 def register_setup_get():
     return register_setup.tables()
@@ -896,6 +951,75 @@ def parts_po_pack(part_id: int):
     return Response(data, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
+@app.get("/api/parts/{part_id}/forming-simulation.{kind}")
+def parts_forming_simulation(part_id: int, kind: str):
+    """Sheet-metal forming simulation report: pdf, or video (MP4, GIF when no ffmpeg) of the stages."""
+    if kind not in ("pdf", "video"):
+        raise HTTPException(404, "pdf or video")
+    try:
+        data, media, name = register.forming_report(part_id, kind)
+    except (register.RegisterError, ValueError, register.ToolNotApplicable) as exc:
+        raise HTTPException(400, str(exc)) from None
+    return Response(data, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.get("/api/parts/{part_id}/correction")
+def parts_correction_preview(part_id: int, radius: Optional[float] = None, hole: Optional[float] = None):
+    """What the software can correct in the 3D model after the simulation (bend radius, small holes), with the new values."""
+    try:
+        return register.correction_preview(part_id, radius, hole)
+    except (register.RegisterError, register.ToolNotApplicable) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/correction.{kind}")
+def parts_correction_file(part_id: int, kind: str, radius: Optional[float] = None, hole: Optional[float] = None):
+    """The corrected 3D model (step) or a before | after picture (png)."""
+    if kind not in ("step", "png"):
+        raise HTTPException(404, "step or png")
+    try:
+        data, media, name = register.correction_file(part_id, kind, radius, hole)
+    except (register.RegisterError, register.ToolNotApplicable) as exc:
+        raise HTTPException(400, str(exc)) from None
+    return Response(data, media_type=media, headers={"Content-Disposition": f'{"inline" if kind == "png" else "attachment"}; filename="{name}"'})
+
+
+@app.post("/api/parts/{part_id}/correction")
+def parts_correction_release(part_id: int, data: dict):
+    """Release the corrected model as a new revision: {radius_mm?, hole_mm?, rev?, change_note?}."""
+    try:
+        return register.correction_release(part_id, data.get("radius_mm"), data.get("hole_mm"), data.get("rev") or "",
+                                           data.get("change_note") or "")
+    except (register.RegisterError, register.ToolNotApplicable) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+# ---------- detailed tool design: 3D, drawings, release pack (roadmap stage 27) ----------
+
+def _design_error(fn):
+    try:
+        return fn()
+    except (register.RegisterError, ValueError, register.ToolNotApplicable) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/tool-design")
+def parts_tool_design(part_id: int):
+    """Each tool (die stage or mould) designed in 3D: its parts with material, hardness, standard part."""
+    return _design_error(lambda: register.tool_design_summary(part_id))
+
+
+@app.get("/api/parts/{part_id}/tool-design.{kind}")
+def parts_tool_design_file(part_id: int, kind: str, die: Optional[str] = None):
+    """zip = release pack (3D STEP of the assembly and every part, PDF and DXF drawings, BOM) of all tools or one (?die=key);
+    step = assembly of one tool; pdf = its drawing set; png = its iso picture."""
+    if kind not in ("zip", "step", "pdf", "png"):
+        raise HTTPException(404, "zip, step, pdf or png")
+    data, media, name = _design_error(lambda: register.tool_design_file(part_id, kind, die))
+    disp = "inline" if kind == "png" else "attachment"
+    return Response(data, media_type=media, headers={"Content-Disposition": f'{disp}; filename="{name}"'})
+
+
 @app.get("/api/parts/{part_id}/sheet-tools")
 def parts_sheet_tools(part_id: int):
     """Sheet-metal tools I: operation sequence, die type, forces, tonnage, press, formability (roadmap stage 9)."""
@@ -963,6 +1087,16 @@ def parts_simulation(part_id: int):
         return register.simulation_result(part_id)
     except register.ToolNotApplicable as exc:
         raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/simulation/video")
+def parts_simulation_video(part_id: int):
+    """Video (MP4, GIF without ffmpeg) of the wall-thickness, draft and risk maps turning, with the result."""
+    try:
+        data, media, name = register.simulation_video(part_id)
+    except (register.RegisterError, register.ToolNotApplicable, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from None
+    return Response(data, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @app.get("/api/parts/{part_id}/simulation/report.pdf")

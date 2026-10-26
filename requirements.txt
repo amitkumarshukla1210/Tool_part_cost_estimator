@@ -8,3 +8,6 @@ sqlalchemy>=2.0
 reportlab>=4.0
 ezdxf>=1.1
 pdfplumber>=0.11
+pillow>=10.0
+matplotlib>=3.7
+imageio-ffmpeg>=0.4

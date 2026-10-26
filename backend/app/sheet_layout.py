@@ -47,6 +47,16 @@ def flat_pattern(shape, geometry: dict, blank: dict, thickness: float) -> dict:
                 return {"method": "flat part: real outline from the 3D model", "outline": o, "holes": [mv2(h) for h in holes],
                         "length_mm": max(p[0] for p in o), "width_mm": max(p[1] for p in o),
                         "area_mm2": outer.area - sum(h.area for h in holes)}
+    if not flat and shape is not None:
+        from .unfold import UnfoldError, unfold
+        k = (mould_db.design_rules("sheet_metal").get("k_factor") or {}).get("value") or 0.33
+        try:
+            u = unfold(shape, thickness, k)
+            return {"method": f"bent part unfolded from the 3D model (k-factor {k:g}): real outline, holes and bend lines",
+                    "outline": u["outline"], "holes": u["holes"], "bends": u["bends"], "length_mm": u["length_mm"],
+                    "width_mm": u["width_mm"], "area_mm2": u["area_mm2"]}
+        except (UnfoldError, ValueError, IndexError, ZeroDivisionError):
+            pass
     l, w = blank["length"], blank["width"]
     return {"method": f"bent part: {blank.get('method') or 'developed rectangle'} (no bend lines or hole positions drawn)",
             "outline": [[0, 0], [l, 0], [l, w], [0, w], [0, 0]], "holes": [], "length_mm": l, "width_mm": w, "area_mm2": l * w}
@@ -89,9 +99,18 @@ def blank_dxf(fp: dict, part_code: str) -> bytes:
     msp.add_lwpolyline(fp["outline"], close=True, dxfattribs={"layer": "CUT"})
     for h in fp["holes"]:
         msp.add_lwpolyline(h, close=True, dxfattribs={"layer": "CUT"})
+    if fp.get("bends"):
+        doc.layers.add("BEND", color=1, linetype="DASHED")
+        for b in fp["bends"]:
+            msp.add_line(b["line"][0], b["line"][1], dxfattribs={"layer": "BEND"})
+            msp.add_text(f"BEND {'UP' if b['up'] > 0 else 'DOWN'} {b['angle_deg']:g}° R{b['inner_radius_mm']:g}",
+                         dxfattribs={"layer": "BEND", "height": 2.5}).set_placement((b["line"][0][0] + 1, b["line"][0][1] + 2))
     msp.add_linear_dim(base=(0, -12), p1=(0, 0), p2=(fp["length_mm"], 0), dimstyle="EZDXF").render()
     msp.add_linear_dim(base=(-12, 0), p1=(0, 0), p2=(0, fp["width_mm"]), angle=90, dimstyle="EZDXF").render()
     msp.add_text(f"{part_code} blank", dxfattribs={"layer": "DIM", "height": 4}).set_placement((0, fp["width_mm"] + 8))
+    from .drawings import _dxf_frame
+    _dxf_frame(doc, msp, "Blank", {"part_code": part_code, "name": ""}, "",
+               [("Blank", f"{fp['length_mm']:.2f} x {fp['width_mm']:.2f} mm"), ("Flat pattern", fp["method"][:60])], "sheet_metal")
     return _dxf_bytes(doc)
 
 
@@ -125,6 +144,9 @@ def strip_dxf(fp: dict, sl: dict, part_code: str) -> bytes:
     msp.add_linear_dim(base=(0, -14), p1=(0, 0), p2=(v["pitch_mm"], 0), dimstyle="EZDXF").render()
     msp.add_linear_dim(base=(-14, 0), p1=(0, 0), p2=(0, v["strip_width_mm"]), angle=90, dimstyle="EZDXF").render()
     msp.add_text(f"{part_code} strip, feed {sl['best']['feed']}, pitch {v['pitch_mm']:.1f}", dxfattribs={"height": 4}).set_placement((0, v["strip_width_mm"] + 8))
+    from .drawings import _dxf_frame
+    _dxf_frame(doc, msp, "Strip layout", {"part_code": part_code, "name": ""}, "",
+               [("Pitch", f"{v['pitch_mm']:.2f} mm"), ("Strip width", f"{v['strip_width_mm']:.2f} mm")], "sheet_metal")
     return _dxf_bytes(doc)
 
 

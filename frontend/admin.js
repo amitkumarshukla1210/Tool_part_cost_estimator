@@ -19,7 +19,7 @@ async function init() {
   $("usersNoAdmin").hidden = isAdmin;
   $("newRole").innerHTML = info.roles.map((r) => `<option ${r === "engineer" ? "selected" : ""}>${r}</option>`).join("");
   $("roleHelp").textContent = ROLE_HELP.engineer;
-  const tabOk = { users: true, perms: true, activity: info.mine.view_activity, backups: info.mine.backups };
+  const tabOk = { users: true, perms: true, activity: info.mine.view_activity, backups: info.mine.backups, drawings: true };
   document.querySelectorAll("#tabs [data-tab]").forEach((b) => (b.hidden = !tabOk[b.dataset.tab]));
   $("permsActions").hidden = !isAdmin;
   const want = new URLSearchParams(location.search).get("tab");
@@ -32,7 +32,7 @@ function show(tab) {
   document.querySelectorAll(".tab-pane").forEach((p) => (p.hidden = p.id !== `tab-${tab}`));
   history.replaceState(null, "", `?tab=${tab}`);
   status($("status"), "");
-  ({ perms: renderPerms, activity: () => loadActivity(false), backups: loadBackups })[tab]?.();
+  ({ perms: renderPerms, activity: () => loadActivity(false), backups: loadBackups, drawings: loadDrawing })[tab]?.();
 }
 $("tabs").addEventListener("click", (e) => {
   const b = e.target.closest("[data-tab]");
@@ -175,3 +175,36 @@ $("backupNow").addEventListener("click", async () => {
 });
 
 init().catch((err) => status($("status"), err.message, "error"));
+
+// ---------- drawings: logo and title block ----------
+async function loadDrawing() {
+  const d = await api("/api/register-setup/drawing");
+  $("logoImg").src = `/api/drawing-logo.png?t=${Date.now()}`;
+  $("logoNote").textContent = d.logo === "default" ? "The app logo is used." : "Your logo is used on every drawing.";
+  $("drawForm").innerHTML = Object.entries(d.settings).map(([k, v]) => `<label>${esc(d.labels[k].replace(/^Drawings: /, ""))}
+    ${k === "drawing_projection" ? `<select name="${k}">${["Third angle", "First angle"].map((o) => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select>`
+      : `<input name="${k}" value="${esc(v)}" />`}</label>`).join("") +
+    `<div class="span2 dialog-actions"><button class="btn btn-primary small" type="submit">Save</button></div>`;
+}
+$("drawForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    await api("/api/register-setup/drawing", { method: "PUT", body: JSON.stringify(Object.fromEntries(new FormData(e.target))) });
+    status($("status"), "Drawing settings saved: they are on the next drawing you download.", "ok");
+  } catch (err) {
+    status($("status"), err.message, "error");
+  }
+});
+$("logoForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const res = await fetch("/api/register-setup/drawing/logo", { method: "POST", body: new FormData(e.target) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) return status($("status"), body.detail || "Upload failed.", "error");
+  e.target.reset();
+  status($("status"), "Logo saved: it is on every drawing from now on.", "ok");
+  loadDrawing();
+});
+$("logoReset").addEventListener("click", async () => {
+  await api("/api/register-setup/drawing/logo", { method: "DELETE" });
+  loadDrawing();
+});

@@ -11,6 +11,7 @@ Holds the data that sizes a mould or die and builds its BOM:
     sizing_rules    walls and gaps that turn part size into insert size
     tool_processes  how each tool process is priced: machine hours (MHR + operators × labour rate), labour hours,
                     or a rate per unit (kg, cm², ...); its machine, labour grade, operators and cost group
+    design_rules    detailed 3D tool design: clearances, fits, plate / pillar / screw sizes, tolerances, finish, shrinkage
     time_parameters removal rates, set-up hours and shares that the BOM hour / amount rules use
 
 Every row has an is_example flag: seeded placeholder values are 1 until you
@@ -242,6 +243,15 @@ TABLES = {
         col("description", "Description"),
         col("is_example", "Example", "bool"),
     ]},
+    "design_rules": {"title": "Design rules", "unique": ("part_type", "parameter"), "columns": [
+        col("part_type", "Part type", "part_type", PART_TYPES),
+        col("parameter", "Parameter"),
+        col("value", "Value (number)", "number", required=False),
+        col("text", "Value (text: fit, tolerance, finish, note)", required=False),
+        col("unit", "Unit", required=False),
+        col("description", "Description"),
+        col("is_example", "Example", "bool"),
+    ]},
 }
 
 
@@ -395,6 +405,11 @@ def from_excel(content: bytes) -> None:
 
 def sizing_rules(part_type: str) -> dict:
     return {r["parameter"]: r for r in tables()["sizing_rules"] if r["part_type"] == part_type}
+
+
+def design_rules(part_type: str) -> dict:
+    """Detailed tool design rules (roadmap stage 27): clearances, fits, plate and standard-part sizes, tolerances."""
+    return {r["parameter"]: r for r in tables()["design_rules"] if r["part_type"] == part_type}
 
 
 def time_parameters(part_type: str) -> dict:

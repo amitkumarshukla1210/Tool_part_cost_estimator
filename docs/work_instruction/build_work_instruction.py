@@ -60,12 +60,20 @@ STEPS = {
                         "Forming simulation: 1 correction required (bend radius 0.5 mm < 1 × thickness).",
                         "Put this result in the Design loop form → Corrections required with the comment → Change status.",
                         "Send the comment to the product designer for a corrected model."], "Status Corrections required, comment in the timeline."),
+    "fix_3d": ("Simulation report, video and correcting the 3D model", ["Forming simulation box: ⬇ PDF (every check OK / FAIL, blank and yield, stages with force and press, a picture after every stage) and ▶ Video (MP4: blank, piercing, bending, the failing bend in red).",
+               "Correct the 3D model: the software proposes the new inside bend radius (and hole size if a hole is too small); before / after picture with the bend profile; ⬇ Corrected STEP.",
+               "Release as new revision makes the next revision with the corrected model (old revisions stay) and recalculates all costs. In this example the designer sends Rev B instead (next step) - both ways end the same."],
+               "EX26-0001_revA_forming_simulation.pdf / .mp4, EX26-0001_corrected_from_revA.step"),
     "revision": ("Upload the corrected model (Rev B)", ["Part panel → Upload a new revision: STEP file, Rev no. B, what changed → Upload revision.",
                  "Rev A, its files and costs stay; the status moves to Revised by itself and all costs are recalculated."], "Rev B, status Revised."),
     "loop_ok": ("Design loop: simulation OK", ["Move to → Simulation → Change status: No corrections required.",
                 "Put this result in the Design loop form → Simulation OK → Change status."], "Status Simulation OK."),
     "loop_frozen": ("Design loop: tool design frozen", ["Move to → Tool design frozen (comment: concept frozen for quotation) → Change status.",
                     "What changed, who, when: every move, revision and comment."], "Status Tool design frozen: ready for RFQ / PO."),
+    "tool_design": ("Tool design: every die in 3D with drawings", ["Tool cost → Tool design → Make the tool design: each die stage is designed in 3D from the flat pattern, the die set and the Design rules (clearance, fits, plate, pillar and screw sizes).",
+                    "Per tool: Assembly 3D (STEP), Drawing set (PDF: assembly with iso, exploded and section views and the BOM, then a detail drawing of every made part with hole table, tolerances, material, hardness and your logo) and the Release pack (ZIP: STEP of the assembly and of every part, PDF and DXF of every drawing, BOM Excel).",
+                    "A first-cut design by rules: your tool designer checks it, completes it (e.g. pilots, sensors) and releases it."],
+                    "EX26-0001_tool_design_release_pack.zip"),
     "trace_base": ("Traceability: die set / mould base", ["Click the die set or mould base price: every base of that type with size, weight, price.",
                    "Use for this part, or + Add a row (saved to master data, then selectable)."], "—"),
     "trace_grade": ("Traceability: steel grade", ["Click a steel rate (e.g. Steel rate · D2): why this grade (Grade rule / learned / your choice).",
@@ -81,9 +89,16 @@ STEPS = {
                 "blank / strip DXF, tool pack, RM and part cost. Send it with the RFQ; attach it to the PO."], "EX26-0001_PO_pack.zip"),
     "mould": ("A plastic part: the mould", ["Import plastic_cover.step with material ABS: the mould is sized (cavities, base, inserts) and costed.",
               "Mould concept drawing PDF / DXF and the PO pack, the same way."], "EX26-0002_mould_drawing.pdf"),
+    "mould_design": ("A plastic part: the mould design", ["Tool design for a moulded part: core and cavity cut from the part with the shrinkage of the Design rules, A / B plates with pockets, clamp plates, support plate, spacer blocks, ejector plates and pins, return pins, pillars and bushes, sprue bush, locating ring, cooling channels.",
+                     "Simulation & analysis: ⬇ PDF report with maps and ▶ Video of the wall, draft and risk maps.",
+                     "Gates, runners, slides, lifters and vents are listed for the mould designer to add."],
+                     "EX26-0002_mould_release_pack.zip, EX26-0002_simulation.mp4"),
     "dashboard": ("Project view", ["Dashboard: BOM cost vs target per variant, tool CAPEX vs budget, part status, CAPEX plan with suppliers.",
                   "Recalculate RM / tools / part costs with the latest approved rates."], "Dashboard PDF, parts Excel"),
     "activity": ("Who changed what", ["Admin → Activity log: filter by what / who / dates; Export Excel."], "activity_log.xlsx"),
+    "admin_drawings": ("Your logo on every drawing", ["Admin → Drawings: upload your company logo (PNG / JPG), company name, projection, drawn / checked / approved and general notes.",
+                       "General tolerance, fits, finishes and heat-treatment notes are Design rules: Master data → Mould & die database → Design rules."],
+                       "every drawing (PDF and DXF)"),
 }
 
 LOOP = [
@@ -91,16 +106,21 @@ LOOP = [
     ("Concept tool", "Check the dies / mould proposed; change grades, base, operations if needed.", "Dies per stage / mould with BOM and cost.",
      "Tool drawing and cost per stage (PDF / DXF / Excel)"),
     ("Simulation", "Move to Simulation; read the result.", "Sheet metal: forming result; plastic / die casting: wall, draft, sink, cycle, clamp.",
-     "Simulation PDF (plastic / die casting), tool pack"),
-    ("Corrections required", "Put the result in the form → Change status; send the comment to the designer.", "The correction kept in the timeline.", "—"),
-    ("Revised", "Upload the corrected model as a new revision.", "All costs recalculated on the new revision.", "Part drawing of the new revision"),
+     "Simulation report PDF and video (all part types)"),
+    ("Corrections required", "Put the result in the form → Change status; send the comment to the designer, or Correct the 3D model in the software.",
+     "The correction kept in the timeline; the corrected 3D model.", "Corrected STEP"),
+    ("Revised", "Upload the corrected model, or Release the software's correction, as a new revision.", "All costs recalculated on the new revision.", "Part drawing of the new revision"),
     ("Simulation OK", "Simulation again → Put this result → Simulation OK.", "No corrections required.", "—"),
-    ("Tool design frozen", "Move to Tool design frozen.", "Concept frozen for quotation.", "PO pack (ZIP) for RFQ / PO"),
+    ("Tool design frozen", "Move to Tool design frozen; Make the tool design.", "Every die / the mould in 3D with drawings of every part.",
+     "Tool design release pack (3D STEP, PDF, DXF, BOM); PO pack (ZIP) for RFQ / PO"),
 ]
 
 CORRECTIONS = [
     ("Part name, material, process, sourcing, volume, programme life", "Parts → part → details form → Save changes", "History keeps old → new"),
     ("Wrong or changed 3D model", "Part → Upload a new revision (old revisions stay)", "Design loop → Revised"),
+    ("Bend radius too small / hole too small (simulation)", "Forming simulation → Correct the 3D model → Release as new revision", "Outside size kept"),
+    ("A size, fit, tolerance or finish on the tool drawings", "Master data → Mould & die database → Design rules", "Next tool design"),
+    ("Logo, company, signatures on drawings", "Admin → Drawings", "All drawings"),
     ("Part not needed in a project / not needed at all", "Part → Remove from project BOM / Delete part (type the code)", "Backup ZIP made first"),
     ("Project data (budget, SOP, name) / whole project", "Dashboard → Edit project / Delete project", "Delete: type the code, backup first"),
     ("Design-loop status or a forgotten step", "Design loop → Move to → ↩ Back to … with a comment", "Shown as step back"),
@@ -200,7 +220,7 @@ def build_pdf(work: Path, run: dict) -> None:
 
     story = [Spacer(1, 30 * mm), P("DESIGN TO COST · PART COST ESTIMATOR", h3),
              P("Work instruction<br/>with a worked example", h1),
-             P(f"From the 3D model to the tool drawings and the PO pack: the complete design loop, step by step. Version {date.today().isoformat()}.", body),
+             P(f"From the 3D model to the simulation report, the corrected model, the tool design in 3D with every drawing, and the PO pack: the complete design loop, step by step. Version {date.today().isoformat()}.", body),
              Spacer(1, 8 * mm), P("<b>Example:</b> L mounting bracket EX26-0001, 2 mm galvanised steel, 40 mm wide, legs 250 and 80 mm, "
                                   "6 holes. Rev A has a 0.5 mm bend radius (the simulation asks for a correction), Rev B has 2 mm. "
                                   "Also a plastic cover EX26-0002 with its mould.", body),
@@ -208,7 +228,7 @@ def build_pdf(work: Path, run: dict) -> None:
                                   "plastic_cover.step, and every output of this example.", body),
              Spacer(1, 10 * mm), P("Contents", h2)]
     contents = ["1 · Start: install, first login, users", "2 · The worked example, step by step", "3 · The design loop at a glance",
-                "4 · Downloads for RFQ and purchase order", "5 · Corrections: what to change where (every category)",
+                "4 · Downloads for RFQ, purchase order and your tool room", "5 · Corrections: what to change where (every category)",
                 "6 · The example outputs (drawings and cost sheets)", "7 · Updates, backups and help"]
     story += [P(c) for c in contents] + [PageBreak()]
 
@@ -240,7 +260,7 @@ def build_pdf(work: Path, run: dict) -> None:
                      theme, [30 * mm, 55 * mm, 55 * mm, 42 * mm]),
               P("A step back (e.g. a forgotten Concept tool) is allowed with a comment: Move to → ↩ Back to …", small)]
 
-    story += [P("4 · Downloads for RFQ and purchase order", h2),
+    story += [P("4 · Downloads for RFQ, purchase order and your tool room", h2),
               P("Tool cost → <b>⬇ PO pack (ZIP)</b> holds everything the toolmaker needs; send it with the RFQ and attach it to the PO:"),
               _table([["Folder / file", "Content"],
                       ["README.txt", "What is in the pack, and anything that could not be made"],
@@ -251,6 +271,15 @@ def build_pdf(work: Path, run: dict) -> None:
                       ["02_tool / …tool_cost_all.pdf / .xlsx", "All stages: summary and one page / sheet per stage"],
                       ["02_tool / …blank.dxf, strip.dxf, tool_pack.pdf", "Blank, strip layout and stage sketches (sheet metal)"],
                       ["03_cost / …rm_cost.pdf, part_cost.pdf", "Should-cost of material and of the part"]], theme, [70 * mm, 112 * mm]),
+              Spacer(1, 3 * mm),
+              P("For your own tool room: Tool design → <b>⬇ Release pack</b> (one folder per die / mould):"),
+              _table([["Folder / file", "Content"],
+                      ["3D / …_assembly.step", "The tool assembly: every part named with its item number, in place (closed)"],
+                      ["3D / parts / NN_name.step", "Every part on its own (made and standard parts)"],
+                      ["2D / PDF / …_drawing_set.pdf", "Assembly sheet (iso, exploded, section, BOM) + a detail sheet per made part"],
+                      ["2D / DXF / …_NN_name.dxf", "Every drawing at 1:1 with title block and logo, for CAD / CAM"],
+                      ["…_BOM.xlsx", "Item, drawing number, quantity, material, hardness, make / standard part, size, notes"]],
+                     theme, [70 * mm, 112 * mm]),
               P("The drawings are CONCEPT layouts for quotation and PO reference; the 3D model is the master. Replace EXAMPLE rates and "
                 "master-data values before using costs for negotiation.", small)]
 
@@ -267,7 +296,11 @@ def build_pdf(work: Path, run: dict) -> None:
                         ("EX26-0001_stage2_pierce_tool_drawing.pdf", "Stage 2 · piercing die drawing"),
                         ("EX26-0001_stage3_bend_tool_drawing.pdf", "Stage 3 · bending die drawing"),
                         ("EX26-0001_tool_cost_all_stages.pdf", "Tool cost, all stages"),
-                        ("EX26-0002_mould_drawing.pdf", "Mould concept drawing (plastic cover)")):
+                        ("EX26-0002_mould_drawing.pdf", "Mould concept drawing (plastic cover)"),
+                        ("EX26-0001_T01_blanking_die_drawing_set.pdf", "Tool design: blanking die assembly sheet"),
+                        ("EX26-0002_mould_drawing_set.pdf", "Tool design: mould assembly sheet"),
+                        ("EX26-0001_revA_forming_simulation.pdf", "Forming simulation report (Rev A)"),
+                        ("EX26-0002_simulation.pdf", "Moulding simulation report")):
         f = outputs / name
         t = thumbnail(f, work) if f.exists() else None
         if t:
@@ -309,7 +342,7 @@ def copy_example(work: Path) -> None:
         shutil.rmtree(EXAMPLE)
     EXAMPLE.mkdir(parents=True)
     for f in (work / "out" / "outputs").iterdir():
-        if not f.name.startswith("_") and f.suffix in (".pdf", ".dxf", ".zip"):
+        if not f.name.startswith("_") and f.suffix in (".pdf", ".dxf", ".zip", ".step", ".mp4", ".png"):
             shutil.copy(f, EXAMPLE / f.name)
     for f in ("example_bracket_revA.step", "example_bracket_revB.step", "plastic_cover.step"):
         shutil.copy(ROOT / "samples" / f, EXAMPLE / f)

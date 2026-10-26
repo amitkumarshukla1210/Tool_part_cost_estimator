@@ -30,7 +30,7 @@ const PW = "Example password 2026";
     await wait(300);
   };
   const save = async (url, name) => {
-    const r = await p.request.get(B + url);
+    const r = await p.request.get(B + url, { timeout: 300000 });
     if (!r.ok()) throw new Error(`${url}: ${r.status()} ${await r.text()}`);
     fs.writeFileSync(path.join(OUT, "outputs", name), await r.body());
     return name;
@@ -125,6 +125,16 @@ const PW = "Example password 2026";
   await shot("loop_correction", "Simulation: 1 correction required → “Put this result in the Design loop form” fills Corrections required and the comment.");
   await p.click("#loopForm button[type=submit]");
   await wait(5000);
+  await save(`/api/parts/${pid}/forming-simulation.pdf`, "EX26-0001_revA_forming_simulation.pdf");
+  await save(`/api/parts/${pid}/forming-simulation.video`, "EX26-0001_revA_forming_simulation.mp4");
+  await top('.sim-result');
+  await p.click("#fixOpen");
+  await p.waitForSelector("#fixOut img", { timeout: 60000 });
+  await wait(4000);
+  await top("#fixForm");
+  await shot("fix_3d", "Correct the 3D model in the software: new bend radius, before / after with the bend profile, corrected STEP; release as a new revision.");
+  await save(`/api/parts/${pid}/correction.png`, "EX26-0001_revA_correction_preview.png");
+  await save(`/api/parts/${pid}/correction.step`, "EX26-0001_corrected_from_revA.step");
 
   // 6 · Rev B uploaded → revised → simulation OK → frozen
   await top('h3:has-text("Upload a new revision")');
@@ -147,6 +157,19 @@ const PW = "Example password 2026";
   await p.locator('summary:has-text("What changed, who, when")').first().click();
   await wait(500);
   await shot("loop_frozen", "Tool design frozen: the timeline keeps every status change and revision with who, when and why.");
+
+  // 6b · detailed tool design: every die stage in 3D with drawings
+  await top("#tdBox");
+  await p.click("#tdBox summary");
+  await p.click("#tdRun");
+  await p.waitForSelector("#tdOut .card img", { timeout: 180000 });
+  await wait(9000);
+  await top("#tdBox");
+  await shot("tool_design", "Tool design: each die stage in 3D with every part (material, hardness, standard parts), assembly STEP, drawing set and release pack.");
+  await save(`/api/parts/${pid}/tool-design.zip`, "EX26-0001_tool_design_release_pack.zip");
+  await save(`/api/parts/${pid}/tool-design.pdf?die=blank`, "EX26-0001_T01_blanking_die_drawing_set.pdf");
+  await save(`/api/parts/${pid}/tool-design.step?die=blank`, "EX26-0001_T01_blanking_die_assembly.step");
+  await save(`/api/parts/${pid}/forming-simulation.pdf`, "EX26-0001_revB_forming_simulation.pdf");
 
   // 7 · traceability and correcting a value / grade / base
   const tr = await api("GET", `/api/parts/${pid}/tool-cost/trace`);
@@ -221,6 +244,17 @@ const PW = "Example password 2026";
   await shot("mould", "Plastic part: mould tool cost with mould base, steel grades from Grade rules, and the mould concept drawing.");
   await save(`/api/parts/${pl}/tool-drawing.pdf`, "EX26-0002_mould_drawing.pdf");
   await save(`/api/parts/${pl}/drawing.pdf`, "EX26-0002_part_drawing.pdf");
+  await top("#tdBox");
+  await p.click("#tdBox summary");
+  await p.click("#tdRun");
+  await p.waitForSelector("#tdOut .card img", { timeout: 180000 });
+  await wait(9000);
+  await top("#tdBox");
+  await shot("mould_design", "Mould design: core and cavity cut from the part with shrinkage, plates, ejection, cooling, standard parts - 3D and drawings.");
+  await save(`/api/parts/${pl}/tool-design.pdf`, "EX26-0002_mould_drawing_set.pdf");
+  await save(`/api/parts/${pl}/tool-design.zip`, "EX26-0002_mould_release_pack.zip");
+  await save(`/api/parts/${pl}/simulation/report.pdf`, "EX26-0002_simulation.pdf");
+  await save(`/api/parts/${pl}/simulation/video`, "EX26-0002_simulation.mp4");
 
   // 12 · project view and activity
   await p.goto(B + "/dashboard");
@@ -229,6 +263,9 @@ const PW = "Example password 2026";
   await p.goto(B + "/admin?tab=activity");
   await wait(1500);
   await shot("activity", "Admin → Activity log: who changed what and when (Excel export).");
+  await p.goto(B + "/admin?tab=drawings");
+  await wait(1500);
+  await shot("admin_drawings", "Admin → Drawings: your logo, company, projection, checked / approved by and notes on every drawing.");
 
   fs.writeFileSync(path.join(OUT, "shots.json"), JSON.stringify({ shots, errors }, null, 1));
   await browser.close();
