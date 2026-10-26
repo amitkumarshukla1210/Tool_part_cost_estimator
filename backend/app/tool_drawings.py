@@ -70,6 +70,21 @@ def _img(png: bytes, w, h):
     return Image(io.BytesIO(png), w, h)
 
 
+def _dt(c, key: str) -> str:
+    """Tolerance text of an overall dimension (stage 32), '' when the part has none attached."""
+    dims = getattr(c, "dims", None)
+    return dims["overall"][key]["text"] if dims else ""
+
+
+def _dt_size(c, value: float) -> str:
+    """Tolerance of a solid part's view dimension: the overall dimension (L, W, H) closest to the value."""
+    dims = getattr(c, "dims", None)
+    if not dims:
+        return ""
+    key = min(zip("LWH", c.size), key=lambda kv: abs(kv[1] - value))[0]
+    return dims["overall"][key]["text"]
+
+
 def _plate_views(c, theme, W, H):
     """Vector views of a plate: top view with holes and openings, front view below, side view at the right."""
     from reportlab.graphics.shapes import Circle, Drawing, Line, PolyLine, Rect, String
@@ -91,8 +106,8 @@ def _plate_views(c, theme, W, H):
         d.add(String(ox + h["x"] * sc + h["d"] / 2 * sc + 1, oy + h["y"] * sc + 1, f"H{i}", fontSize=5.5, fillColor=theme["brand"]))
     d.add(String(ox - 2, oy - 8, "0,0", fontSize=6, fillColor=theme["brand"], textAnchor="end"))
     d.add(Circle(ox, oy, 1.6, fillColor=theme["brand"], strokeColor=theme["brand"]))
-    _dim(d, ox, oy + Wd * sc + 8, ox + L * sc, oy + Wd * sc + 8, f"{L:.1f}", theme)
-    _dim(d, ox - 10, oy, ox - 10, oy + Wd * sc, f"{Wd:.1f}", theme)
+    _dim(d, ox, oy + Wd * sc + 8, ox + L * sc, oy + Wd * sc + 8, f"{L:.1f} {_dt(c, 'L')}".strip(), theme)
+    _dim(d, ox - 10, oy, ox - 10, oy + Wd * sc, f"{Wd:.1f} {_dt(c, 'W')}".strip(), theme)
     d.add(String(ox, oy + Wd * sc + 20, "TOP VIEW (datum 0,0 = lower-left corner)", fontSize=7, fillColor=theme["grey"]))
     # front view
     fy = gap
@@ -103,7 +118,7 @@ def _plate_views(c, theme, W, H):
         y0 = fy + (T * sc - depth if h.get("top", True) else 0)
         for dx in (-h["d"] / 2 * sc, h["d"] / 2 * sc):
             d.add(Line(x + dx, y0, x + dx, y0 + depth, strokeColor=theme["grey"], strokeWidth=0.3, strokeDashArray=[1.5, 1]))
-    _dim(d, ox + L * sc + 8, fy, ox + L * sc + 8, fy + T * sc, f"{T:g}", theme)
+    _dim(d, ox + L * sc + 8, fy, ox + L * sc + 8, fy + T * sc, f"{T:g} {_dt(c, 'H')}".strip(), theme)
     d.add(String(ox, fy - 9, "FRONT VIEW", fontSize=7, fillColor=theme["grey"]))
     # side view
     sx = ox + L * sc + gap + 10
@@ -132,10 +147,10 @@ def _solid_views(c, theme, W, H):
             d.add(PolyLine([q for x, y in poly for q in (px + x * sc, py + y * sc)], strokeColor=theme["ink"], strokeWidth=0.6))
         d.add(String(px, py - 10, v["title"], fontSize=7, fillColor=theme["grey"]))
     fx, fy = places["FRONT VIEW"]
-    _dim(d, fx, fy - 4, fx + front["w"] * sc, fy - 4, f"{front['w']:.2f}", theme, side=-1)
-    _dim(d, fx - 6, fy, fx - 6, fy + front["h"] * sc, f"{front['h']:.2f}", theme)
+    _dim(d, fx, fy - 4, fx + front["w"] * sc, fy - 4, f"{front['w']:.2f} {_dt_size(c, front['w'])}".strip(), theme, side=-1)
+    _dim(d, fx - 6, fy, fx - 6, fy + front["h"] * sc, f"{front['h']:.2f} {_dt_size(c, front['h'])}".strip(), theme)
     tx, ty = places["TOP VIEW"]
-    _dim(d, tx - 6, ty, tx - 6, ty + top["h"] * sc, f"{top['h']:.2f}", theme)
+    _dim(d, tx - 6, ty, tx - 6, ty + top["h"] * sc, f"{top['h']:.2f} {_dt_size(c, top['h'])}".strip(), theme)
     return d, sc
 
 
@@ -146,6 +161,23 @@ def _scale_text(sc_pts_per_mm: float) -> str:
 
 
 # ---------- PDF ----------
+
+def _meta(part: dict, design: dict, c=None) -> tuple[dict | None, list | None]:
+    """Release (design loop) and revision history of a drawing (stage 31); none for a part not in the register."""
+    if not part.get("id"):
+        return None, None
+    from . import drawing_data
+    return drawing_data.release(part["id"]), drawing_data.history(part["id"], design.get("key"), c.no if c is not None else None)
+
+
+def _gen_tol(c, tol) -> str | None:
+    """The general tolerance text of a detail drawing when its class was changed (else the Design rules text)."""
+    tech = getattr(c, "tech", None)
+    if not tech:
+        return None
+    from . import drawing_data
+    return None if drawing_data.tolerance_class(tol.get("general_tolerance", "")) == tech["tolerance_class"] else f"ISO 2768-{tech['tolerance_class']}"
+
 
 def _bom_rows(design):
     rows = [["Item", "Qty", "Description", "Material / grade", "Hardness", "Make / standard part", "Size (mm)"]]
@@ -189,7 +221,7 @@ def design_pdf(part: dict, design: dict, stage: int, rev: str = "", only: str | 
                   Spacer(1, 2 * mm), _left(_table(_bom_rows(design), theme, [12 * mm, 10 * mm, 80 * mm, 62 * mm, 44 * mm, 128 * mm, 60 * mm])),
                   Spacer(1, 2 * mm),
                   drawing_style.pdf_title_block(width, rows, pt, "as shown", f"1 / {sheets}", drawing_no(part, stage, "00"), rev,
-                                                design.get("notes", []) + _fit_notes(tol))]
+                                                design.get("notes", []) + _fit_notes(tol), *_meta(part, design))]
     for k, c in enumerate(made, start=2):
         if only not in (None, c.no):
             continue
@@ -199,16 +231,21 @@ def design_pdf(part: dict, design: dict, stage: int, rev: str = "", only: str | 
         views, sc = (_plate_views if c.drawing == "plate" else _solid_views)(c, theme, dw, dh)
         side = _detail_side(c, theme, tol)
         L, W, H = c.size
+        tech = getattr(c, "tech", None)
         rows = [("Part (tool for)", f"{part['part_code']} · {design['name']}"), ("Description", c.name), ("Item / qty", f"{c.no} · {c.qty} off"),
                 ("Material", c.material or "-"), ("Hardness", c.hardness or "-"),
-                ("Size", f"{L:.2f} × {W:.2f} × {H:.2f} mm"), ("Make", c.make or "-"), ("Finish", tol.get("finish_general", ""))]
+                ("Size", f"{L:.2f} × {W:.2f} × {H:.2f} mm"), ("Make", c.make or "-"),
+                ("Finish", f"Ra {tech['finish_ra']:g} µm unless stated" if tech else tol.get("finish_general", ""))]
+        if tech:
+            rows += [("Heat treatment", tech["heat_treatment"]), ("Surface treatment", tech["surface_treatment"])]
         story += [drawing_style.pdf_header(st, "DETAIL DRAWING", f"{c.no} · {c.name}"),
                   Table([[views, side]], colWidths=[dw + 4 * mm, 92 * mm], style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))]
         if len(c.holes) > SIDE_HOLES:
             story += [Paragraph("Hole table (datum 0,0 = lower-left corner)", st["k"]),
                       _hole_table(c, theme, tol, [14 * mm, 24 * mm, 24 * mm, 16 * mm, 300 * mm])]
+        rel, hist = _meta(part, design, c)
         story += [drawing_style.pdf_title_block(width, rows, pt, _scale_text(sc), f"{k} / {sheets}", drawing_no(part, stage, c.no), rev,
-                                                c.notes)]
+                                                c.notes, rel, hist, _gen_tol(c, tol))]
     doc.build(story)
     return buf.getvalue()
 
@@ -228,18 +265,35 @@ def _fit_notes(tol):
 SIDE_HOLES = 22      # more holes than this: the hole table goes full width under the views (and runs on to the next page)
 
 
+def _widths7(widths):
+    """The 5 column widths of the hole table spread over 7 columns (Ø tolerance and position added, stage 32)."""
+    total = sum(widths)
+    from reportlab.lib.units import mm
+    if total < 120 * mm:                        # side panel
+        return [7 * mm, 11 * mm, 11 * mm, 7 * mm, 17 * mm, 13 * mm, total - 66 * mm]
+    return [14 * mm, 24 * mm, 24 * mm, 16 * mm, 44 * mm, 24 * mm, total - 146 * mm]
+
+
 def _hole_table(c, theme, tol, widths):
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.platypus import Paragraph, Table, TableStyle
     small = ParagraphStyle("s", fontSize=6.5, leading=8)
-    rows = [["#", "X", "Y", "Ø", "Kind / fit"]]
+    dims = getattr(c, "dims", None)
+    rows = [["#", "X", "Y", "Ø", "Ø tol.", "Pos. ±", "Kind / fit"]] if dims else [["#", "X", "Y", "Ø", "Kind / fit"]]
     for i, h in enumerate(c.holes, start=1):
         kind = h["label"] or h["kind"]
         if h.get("depth"):
             kind += f", depth {h['depth']:g}" + ("" if h.get("top", True) else " from below")
-        if h["kind"] == "fit":
+        if h["kind"] == "fit" and not dims:
             kind += f", position {tol.get('position_tol', '')}"
-        rows.append([f"H{i}", f"{h['x']:.2f}", f"{h['y']:.2f}", f"{h['d']:g}", Paragraph(kind, small)])
+        if dims:
+            t = dims["holes"][f"H{i}"]
+            rows.append([f"H{i}", f"{h['x']:.2f}", f"{h['y']:.2f}", f"{h['d']:g}", Paragraph(t["size"]["text"], small),
+                         Paragraph(t["pos"]["text"].replace(" µm", ""), small), Paragraph(kind, small)])
+        else:
+            rows.append([f"H{i}", f"{h['x']:.2f}", f"{h['y']:.2f}", f"{h['d']:g}", Paragraph(kind, small)])
+    if dims:
+        widths = _widths7(widths)
     t = Table(rows, colWidths=widths, repeatRows=1)
     t.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 6.5), ("GRID", (0, 0), (-1, -1), 0.25, theme["border"]),
                            ("BACKGROUND", (0, 0), (-1, 0), theme["head"]), ("TEXTCOLOR", (0, 0), (-1, 0), theme["head_text"]),
@@ -258,14 +312,49 @@ def _detail_side(c, theme, tol):
         out.append([_hole_table(c, theme, tol, [8 * mm, 13 * mm, 13 * mm, 9 * mm, 47 * mm])])
     elif c.holes:
         out.append([Paragraph(f"<b>{len(c.holes)} holes</b>: hole table under the views.", small)])
-    for o in c.openings:
-        out.append([Paragraph(f"<b>{o['label']}</b>" + (f" · tolerance {o['tol']}" if o.get("tol") else "")
+    dims = getattr(c, "dims", None)
+    for k, o in enumerate(c.openings, start=1):
+        tol_txt = dims["openings"][f"O{k}"]["size"]["text"] if dims else o.get("tol")
+        out.append([Paragraph(f"<b>{o['label']}</b>" + (f" · tolerance {tol_txt}" if tol_txt else "")
                               + " · profile in the DXF (wire cut / CNC)", small)])
+    if dims:
+        out.append([Paragraph(f"Tolerances in <b>{dims['unit']}</b>. Overall: L {dims['overall']['L']['text']} · W {dims['overall']['W']['text']} · "
+                              f"H {dims['overall']['H']['text']}. Fits to ISO 286 (H7 = hole).", small)])
     if not out:
         out = [[Paragraph("Dimensions from the 3D model (STEP) of this part.", small)]]
+    tech = getattr(c, "tech", None)
+    if tech:
+        out.append([_tech_table(tech, theme)])
     t = Table(out, colWidths=[92 * mm])
     t.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("VALIGN", (0, 0), (-1, -1), "TOP")]))
     return t
+
+
+def _tech_table(tech: dict, theme):
+    """Technical data of a made part and the ISO 2768 tables of its class (stage 31)."""
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, Table, TableStyle
+    small = ParagraphStyle("s", fontSize=6.5, leading=8)
+    P = lambda x: Paragraph(str(x), small)
+    rows = [["TECHNICAL DATA", ""], ["Material grade", P(tech["material"])], ["Hardness", P(tech["hardness"])],
+            ["Heat treatment", P(tech["heat_treatment"])], ["Surface treatment", P(tech["surface_treatment"])],
+            ["Surface roughness", P(f"Ra {tech['finish_ra']:g} µm unless stated")],
+            ["General tolerance", P(f"ISO 2768-{tech['tolerance_class']} (tables below)")]]
+    lin, ang = tech["tables"]["linear"], tech["tables"]["angular"]
+    n = max(len(lin), len(ang))
+    tab = [["Linear size (mm)", "±", "Angle, shorter leg (mm)", "±"]] + [
+        [lin[i]["range"] if i < len(lin) else "", lin[i]["value"] if i < len(lin) else "",
+         ang[i]["range"] if i < len(ang) else "", ang[i]["value"] if i < len(ang) else ""] for i in range(n)]
+    t1 = Table(rows, colWidths=[28 * mm, 64 * mm])
+    t2 = Table(tab, colWidths=[26 * mm, 16 * mm, 32 * mm, 18 * mm])
+    for t in (t1, t2):
+        t.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 6.5), ("GRID", (0, 0), (-1, -1), 0.25, theme["border"]),
+                               ("BACKGROUND", (0, 0), (-1, 0), theme["head"]), ("TEXTCOLOR", (0, 0), (-1, 0), theme["head_text"]),
+                               ("TOPPADDING", (0, 0), (-1, -1), 0.8), ("BOTTOMPADDING", (0, 0), (-1, -1), 0.8), ("VALIGN", (0, 0), (-1, -1), "TOP")]))
+    out = Table([[t1], [t2]], colWidths=[92 * mm])
+    out.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+    return out
 
 
 # ---------- DXF ----------
@@ -296,15 +385,20 @@ def detail_dxf(part: dict, design: dict, stage: int, c, rev: str = "") -> bytes:
             msp.add_text(f"H{i}", dxfattribs={"layer": "TEXT", "height": 2.5}).set_placement((h["x"] + h["d"] / 2 + 1, h["y"] + 1))
         fy = -H - 25
         msp.add_lwpolyline([(0, fy), (L, fy), (L, fy + H), (0, fy + H)], close=True, dxfattribs={"layer": "PART"})
-        msp.add_linear_dim(base=(0, W + 12), p1=(0, W), p2=(L, W), dimstyle="EZDXF", dxfattribs={"layer": "DIM"}).render()
-        msp.add_linear_dim(base=(-12, 0), p1=(0, 0), p2=(0, W), angle=90, dimstyle="EZDXF", dxfattribs={"layer": "DIM"}).render()
+        u = lambda txt: txt.replace("µm", "um")
+        msp.add_linear_dim(base=(0, W + 12), p1=(0, W), p2=(L, W), dimstyle="EZDXF", text=f"<> {u(_dt(c, 'L'))}".strip() if _dt(c, "L") else "<>",
+                           dxfattribs={"layer": "DIM"}).render()
+        msp.add_linear_dim(base=(-12, 0), p1=(0, 0), p2=(0, W), angle=90, dimstyle="EZDXF", text=f"<> {u(_dt(c, 'W'))}".strip() if _dt(c, "W") else "<>",
+                           dxfattribs={"layer": "DIM"}).render()
         msp.add_linear_dim(base=(L + 12, fy), p1=(L, fy), p2=(L, fy + H), angle=90, dimstyle="EZDXF",
-                           text=f"{H:g} {tol.get('plate_thk_tol', '')}", dxfattribs={"layer": "DIM"}).render()
+                           text=f"{H:g} {u(_dt(c, 'H')) if _dt(c, 'H') else tol.get('plate_thk_tol', '')}", dxfattribs={"layer": "DIM"}).render()
         # hole table
         tx, ty = L + 40, W
         msp.add_text("HOLE TABLE (datum 0,0 lower-left)", dxfattribs={"layer": "TEXT", "height": 3.5}).set_placement((tx, ty))
+        dims = getattr(c, "dims", None)
         for i, h in enumerate(c.holes, start=1):
-            msp.add_text(f"H{i}  X {h['x']:.2f}  Y {h['y']:.2f}  Ø{h['d']:g}  {h['label'] or h['kind']}"
+            tt = (f"  {dims['holes'][f'H{i}']['size']['text']}  pos {dims['holes'][f'H{i}']['pos']['text']}".replace("µm", "um") if dims else "")
+            msp.add_text(f"H{i}  X {h['x']:.2f}  Y {h['y']:.2f}  Ø{h['d']:g}{tt}  {h['label'] or h['kind']}"
                          + (f" depth {h['depth']:g}" if h.get("depth") else ""),
                          dxfattribs={"layer": "TEXT", "height": 2.5}).set_placement((tx, ty - 6 * i))
         x1, y1 = tx + 160, W + 10
@@ -323,7 +417,9 @@ def detail_dxf(part: dict, design: dict, stage: int, c, rev: str = "") -> bytes:
         x1, y1, y0 = x, max(c.size) + 10, -30
         for o in c.openings:
             msp.add_lwpolyline([(p[0], p[1] - max(c.size) - 60) for p in o["pts"]], close=True, dxfattribs={"layer": "PART"})
-            msp.add_text(f"PROFILE: {o['label']} {o.get('tol', '')}", dxfattribs={"layer": "TEXT", "height": 3}).set_placement(
+            dims = getattr(c, "dims", None)
+            o_tol = dims["openings"][f"O{c.openings.index(o) + 1}"]["size"]["text"].replace("µm", "um") if dims else o.get("tol", "")
+            msp.add_text(f"PROFILE: {o['label']} {o_tol}", dxfattribs={"layer": "TEXT", "height": 3}).set_placement(
                 (0, -max(c.size) - 66))
             y0 = -max(c.size) - 80
     # frame + title block around the drawing
@@ -332,10 +428,22 @@ def detail_dxf(part: dict, design: dict, stage: int, c, rev: str = "") -> bytes:
     from ezdxf.math import Matrix44
     for e in list(msp):
         e.transform(Matrix44.translate(-off[0], -off[1], 0))
+    tech = getattr(c, "tech", None)
+    tech_rows = [("Heat treatment", tech["heat_treatment"]), ("Surface treatment", tech["surface_treatment"]),
+                 ("Roughness", f"Ra {tech['finish_ra']:g} um unless stated")] if tech else []
+    if tech:                                             # ISO 2768 tables of the class, left of the title block
+        tx, ty = 0, 8
+        msp.add_text(f"GENERAL TOLERANCES ISO 2768-{tech['tolerance_class']}", dxfattribs={"layer": "TEXT", "height": 3}).set_placement((tx, ty + 6 * 0 + 40))
+        msp.add_text("Linear (mm): " + "  ".join(f"{r['range']}: {r['value']}" for r in tech["tables"]["linear"]),
+                     dxfattribs={"layer": "TEXT", "height": 2.3}).set_placement((tx, ty + 34))
+        msp.add_text("Angular (shorter leg mm): " + "  ".join(f"{r['range']}: {r['value']}" for r in tech["tables"]["angular"]),
+                     dxfattribs={"layer": "TEXT", "height": 2.3}).set_placement((tx, ty + 29))
+    rel, hist = _meta(part, design, c)
     drawing_style.dxf_frame(doc, msp, frame_w, frame_h, f"{c.no} {c.name}",
                             [("Part", part["part_code"]), ("Tool", design["name"]), ("Material", c.material or "-"),
-                             ("Hardness", c.hardness or "-"), ("Qty", str(c.qty)), ("Size", f"{L:.2f} x {W:.2f} x {H:.2f}")],
-                            design.get("part_type", "sheet_metal"), "1:1", drawing_no(part, stage, c.no), rev, extra_notes=c.notes)
+                             ("Hardness", c.hardness or "-"), ("Qty", str(c.qty)), ("Size", f"{L:.2f} x {W:.2f} x {H:.2f}")] + tech_rows,
+                            design.get("part_type", "sheet_metal"), "1:1", drawing_no(part, stage, c.no), rev, extra_notes=c.notes,
+                            release=rel, history=hist, general_tolerance=_gen_tol(c, tol))
     return _bytes(doc)
 
 
@@ -380,7 +488,7 @@ def assembly_dxf(part: dict, design: dict, stage: int, rev: str = "") -> bytes:
                             [("Part", f"{part['part_code']} {part['name']}"), ("Die set / base", design.get("die_set", "")),
                              ("Shut height", f"{design.get('shut_height', 0):g} mm")],
                             design.get("part_type", "sheet_metal"), "1:1", drawing_no(part, stage, "00"), rev,
-                            extra_notes=design.get("notes", []))
+                            extra_notes=design.get("notes", []), **dict(zip(("release", "history"), _meta(part, design))))
     return _bytes(doc)
 
 
@@ -402,15 +510,17 @@ def bom_xlsx(part: dict, design: dict, stage: int) -> bytes:
                "", "", f"{date.today().isoformat()}"])
     ws.append([])
     ws.append(["Item", "Drawing no.", "Qty", "Description", "Material / grade", "Hardness", "Make / standard part", "L", "W", "H",
-               "Notes"])
+               "Notes", "Heat treatment", "Surface treatment", "Ra (µm)", "General tolerance"])
     for c in ws[3]:
         c.font = Font(bold=True)
     for c in design["components"]:
         if c.kind == "ref":
             continue
         L, W, H = c.size
+        tech = getattr(c, "tech", None) or {}
         ws.append([c.no, drawing_no(part, stage, c.no) if c.kind == "made" else "standard", c.qty, c.name, c.material, c.hardness,
-                   c.std or c.make, round(L, 2), round(W, 2), round(H, 2), "; ".join(c.notes)])
+                   c.std or c.make, round(L, 2), round(W, 2), round(H, 2), "; ".join(c.notes), tech.get("heat_treatment", ""),
+                   tech.get("surface_treatment", ""), tech.get("finish_ra", ""), f"ISO 2768-{tech['tolerance_class']}" if tech else ""])
     for col, w in zip("ABCDEFGHIJK", (6, 22, 6, 40, 28, 22, 50, 9, 9, 9, 80)):
         ws.column_dimensions[col].width = w
     buf = io.BytesIO()

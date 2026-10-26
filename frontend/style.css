@@ -139,3 +139,9 @@ tr.tf-hidden { display: none; }
 .tf-pop .tf-list label em { color: #888; font-style: normal; font-size: .78rem; }
 .tf-pop .tf-note, .tf-pop .tf-hint { margin: 4px 0 0; color: #888; font-size: .8rem; }
 .tf-pop .tf-hint:empty { display: none; }
+
+/* Admin → Users: tool-group check boxes (stage 30) */
+.group-checks { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.group-checks .flag { white-space: nowrap; font-size: 0.85em; display: inline-flex; flex-direction: row; align-items: center; gap: 4px;
+  text-transform: none; letter-spacing: normal; font-weight: 400; }
+.group-checks .flag input { width: auto; margin: 0; }

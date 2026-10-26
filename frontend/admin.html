@@ -63,6 +63,8 @@
             <label>Full name <input name="name" placeholder="e.g. Amit Shukla" /></label>
             <label>Role <select name="role" id="newRole"></select></label>
             <label>First password (10+ characters) <input type="password" name="password" required minlength="10" autocomplete="new-password" /></label>
+            <div class="span2"><span class="note">Tool groups (data this ID sees; none ticked = all; head and admin always see all):</span>
+              <div id="newGroups" class="group-checks"></div></div>
             <p class="note span2" id="roleHelp"></p>
             <div class="span2 dialog-actions"><button class="btn btn-primary" type="submit">Create ID</button></div>
           </form>

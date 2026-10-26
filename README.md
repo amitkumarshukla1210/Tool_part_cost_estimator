@@ -1098,6 +1098,97 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 - **Draft correction:** moulded parts get the draft added to the walls in 3D (default = minimum draft + 0.5°) and are released as a
   new revision; wall and rib changes stay in CAD.
 
+## Head of department and data access by tool group (stage 30)
+
+- **Roles:** viewer < engineer < approver < **head** < admin. *Head* (head of department) sees and changes the data of every tool group and
+  every user, like an admin, but does not manage login IDs (the permissions per role on Admin → Permissions apply as before).
+- **Tool groups:** Admin → Users & roles has check boxes per login ID: *Plastic moulding, Die casting, Foundry, Sheet metal, EPS, Blow moulding*.
+  A viewer, engineer or approver with groups ticked sees only the parts whose process belongs to those groups, and the projects that hold
+  such parts, that they created themselves, or that have no tool-group part yet; opening another group's part or project gives "not your tool
+  group". They can give a part only a process of their own groups. Parts without a tool group (assemblies, bought-out, machined) are seen by all.
+- **Change of responsibility:** example: today *user1* has Sheet metal and EPS, *user2* Die casting and Plastic; in six months the admin ticks
+  Die casting and EPS for user1 and Sheet metal and Plastic for user2. The data stays where it is; each user now sees the other groups.
+- An ID with no group ticked sees everything (as before this stage), so existing IDs keep working until the admin sets their groups.
+  The project dashboard totals still include all parts of an open project. With logins off (`DTC_MODE=local`) there are no limits.
+- Code: `backend/app/scope.py`; `users.groups` (added to an existing database automatically). Tests: `tests/test_scope.py`.
+
+## Technical data, release and revision history on the tool drawings (stage 31)
+
+- **On every detail drawing** of the tool design (PDF drawing set and DXF): a *Technical data* block with material grade and hardness
+  (from the tool BOM, change them there), **heat treatment** (hardened grades: the Design rules note), **surface treatment**,
+  **surface roughness Ra** (Design rules `finish_general`), the **ISO 2768 general tolerance class** with its **linear and angular tables**
+  (new master-data table *Mould & die database → General tolerances*, EXAMPLE values: check against your copy of ISO 2768-1) and your
+  **note points**. The tool BOM Excel gets the same columns.
+- **Review and change:** part panel → Tool design → *Drawing data*: one row per made part of every tool (heat and surface treatment, class,
+  Ra, note points; *Save drawing data*), or *Drawing data sheet (Excel)*: change the coloured columns and upload it again.
+  API: `GET / PUT /api/parts/{id}/drawing-data`, `GET …/drawing-data.xlsx`, `POST …/drawing-data/upload`.
+- **Release date and approved by** come from the **design loop**: the drawings are released when the part reaches the last status
+  (*Tool design frozen*): the date and the user who set it are printed (*Released*, *Approved*). Before that the title block says
+  **NOT RELEASED** with the current status; *Approved* keeps the name from Admin → Drawings. Released data is locked: step the design loop
+  back to change it.
+- **Revision history** under the title block (PDF) and above it (DXF): part revisions, releases and every technical-data change of that
+  drawing (date, change, by). The part drawing, tool concept drawing, blank and strip-layout DXF and the tool pack PDF get the release and
+  the history of the part too.
+- Code: `backend/app/drawing_data.py`, `drawing_style.py` (title block), `tool_drawings.py`; tables `tool_drawing_data`, `tool_drawing_edits`.
+  Tests: `tests/test_drawing_data.py`.
+
+## A tolerance on every dimension of the tool drawings (stage 32)
+
+- Every dimension of a detail drawing (PDF and DXF) carries its tolerance, taken from what the design already assumes
+  (Mould & die database → Design rules of the part type):
+  overall length and width: **ISO 2768** of the drawing's class by size (`397.4 ±0.5`); plate thickness: `plate_thk_tol` (`±0.02`);
+  fitted holes: the hole fit in their label (`Ø10 m6 / H7 dowel` → `H7 +0.015/0`) with **position** `position_tol` (`±0.01`);
+  tapped holes: `thread_class` (`M10 … 6H`); other holes: `hole_clear_tol` (general by the diameter) and position general by the coordinate;
+  openings: their own tolerance (`die_opening_tol`, `+0.01/0`). The hole table gets the columns *Ø tol.* and *Pos. ±*.
+- Fit limits come from the new master-data table **Fit tolerances** (ISO 286: H6, H7, H8, h6, h7, g6, f7, k6, m6 by size range;
+  EXAMPLE values from memory: check them against your copy of the standard). New Design rules rows: `thread_class`, `hole_clear_tol`.
+- **mm or µm** per part (`H7 +15/0 µm`, `±20 µm`): *Drawing data* → *Dimension tolerances* → *Shown in*.
+- **Change any tolerance** on the part panel (*Drawing data* → *Dimension tolerances*: L, W, H, H1, H1@pos, O1 …) or in the Excel sheet
+  *Dimension tolerances*: `general`, `class`, a fit (`H7`, `g6`, `k6` …), `±0.02`, `+0.02/-0.01` or a thread class (`6H`); empty = as drawn.
+  Each change is in the revision history. Code: `backend/app/dim_tolerances.py`. Tests: `tests/test_dim_tolerances.py`.
+
+## The production machine of the tool (stage 33)
+
+- **Asked first:** part panel → Tool design → *Make the tool design* opens *Which machine will this tool run on in production?* the first time
+  (later: *Production machine…*). Moulding (plastic, die casting, EPS, blow): clamp tonnage, tie-bar clear distance H × V, smallest and largest
+  mould height, opening stroke, ejector stroke, locating ring; press (sheet metal): tonnage, bolster L × W, smallest and largest shut height, stroke;
+  foundry: flask L × W × H. Or pick a machine of Master data → Machines (its tonnage and platen / bed are filled in). Empty = not checked.
+- **Checked:** every tool of the design (its force from the tool cost, its base / die set from the tool cost, its shut / mould height from the
+  3D tool design, the part height for the strokes) against the machine: *tool needs / machine has / ok*, with what to do: a **riser / parallel of
+  x mm** when the tool is lower than the machine takes, a bigger machine, fewer cavities, a longer stroke.
+- **Skipped:** the software gives the machine the tool needs (tonnage + margin, tie bars / bolster, height range, strokes; margins in the new
+  Design rules rows `rec_tonnage_margin_pct`, `rec_platen_margin_mm`, `rec_height_margin_mm`, `rec_stroke_factor`, `rec_stroke_extra_mm`, EXAMPLE)
+  and the **nearest machine** of Master data → Machines.
+- The result is one line in the notes of the drawing set and the release pack. The tool cost and its try-out machine (stages 4 and 28) are not
+  changed, and the 3D design is not re-shaped by the machine (the advice says what to add). API: `GET / PUT /api/parts/{id}/machine`,
+  `GET /api/parts/{id}/machine-check`. Code: `backend/app/machine_spec.py`. Tests: `tests/test_machine_spec.py`.
+
+## Process parameters for the best part quality (stage 34)
+
+- **Part panel → Process parameters → Work out** (also *Excel* and *PDF*): the machine settings for the first trial, each with its value,
+  range and why: injection moulding (melt and mould temperature, fill time, injection rate, injection pressure, hold pressure and time,
+  cooling time, back pressure, clamp force, ejection temperature, drying, cycle), die casting (metal and die temperature, slow and fast shot speed,
+  fill time, intensification pressure, dwell, spray, clamp force), sheet metal (press tonnage, blank-holder force, strokes per minute, die
+  clearance, overbend, draw speed), foundry (pouring temperature, poured weight, pouring time, solidification, shake-out), EPS (steam pressure,
+  steaming and cooling time) and blow moulding (preform temperature, pre-blow and blow pressure, mould temperature and cooling).
+- Worked out from the **simulation of the part** (fill, cooling and solidification time, flow ratio, injection pressure, clamp force and the thin /
+  sink-risk / low-draft / undercut maps) or the **sheet-metal forces** (stages, draw ratio, springback), and the **material window**.
+  Thin walls, sink-risk sections, long flow, low draft, undercuts, draw ratio and springback become **quality warnings with the remedy**.
+- New master-data tables (Mould & die database): **Process windows** (temperatures and drying per material) and **Process parameters**
+  (one formula row per setting, with min and max; `risk` rows for the warnings). All EXAMPLE values until you replace them with your shop's.
+  The simulation (its rules and results) is not changed: the setting sheet uses the material window on top of it.
+- API: `GET /api/parts/{id}/process-parameters` (`.xlsx`, `.pdf`). Code: `backend/app/process_params.py`. Tests: `tests/test_process_params.py`.
+
+## Logo and name on every Excel and PDF download (stage 35)
+
+- Every Excel the software hands out gets a picture with the **logo and the company name** (Admin → Drawings: your logo and company; default
+  *Design to Cost*) to the right of the used cells of the first sheet, and the name in the **print header** of every sheet. No cell is moved or
+  written, so the layout and values stay as each exporter made them (on paper the picture is on the page right of the data).
+- PDFs that do not show the name yet get the logo and name in the top margin of every page (drawings and reports that already have the title
+  block / header are left as they are). ZIP packs: the same for the Excel and PDF files inside.
+- Files meant to be uploaded again stay plain: master-data, mould & die, costing setup, rates and register setup downloads, the import template
+  and the price master export. Code: `backend/app/branding.py` (middleware in `main.py`). Tests: `tests/test_branding.py`.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:

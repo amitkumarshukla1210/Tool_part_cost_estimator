@@ -297,8 +297,9 @@ function toolBlock(p) {
       <p class="note">Every ${tr.dies ? "die stage" : "mould"} designed in 3D from the part and the tool cost: plates, punches / core and cavity,
         pillars, bushes, standard parts, screws; an assembly drawing and a detail drawing of every made part with tolerances,
         material, hardness and your logo. A first-cut design by the Design rules (Master data) for your tool designer to check and release.</p>
-      <button type="button" class="btn btn-primary small" id="tdRun">Make the tool design</button> <span class="status" id="tdStatus"></span>
-      <div id="tdOut"></div></details>`;
+      <button type="button" class="btn btn-primary small" id="tdRun">Make the tool design</button>
+      <button type="button" class="btn btn-outline small" id="tdMachine">Production machine…</button> <span class="status" id="tdStatus"></span>
+      <div id="mcBox"></div><div id="tdOut"></div></details>`;
   }
   if (tr?.lines) html += bomEditor(p, tr);
   const typed = p.tool_inputs || {};
@@ -329,7 +330,8 @@ function toolBlock(p) {
       <button type="button" class="btn btn-outline small" id="simRun">Analyse</button>
       <a class="link" href="/api/parts/${p.id}/simulation/report.pdf">PDF report with maps</a> ·
       <a class="link" href="/api/parts/${p.id}/simulation/video" title="Takes about 30 s to make">▶ Video (MP4)</a> <span class="status" id="simStatus"></span>
-      <div id="simOut"></div></details>`;
+      <div id="simOut"></div></details>
+      ${processBox(p)}`;
   }
   if (t.versions) {
     html += `<details class="card add-insert"><summary class="btn btn-outline small">Tool cost versions (${t.versions})</summary>
@@ -627,7 +629,22 @@ $("panelBody").addEventListener("click", async (e) => {
       status($("simStatus"), err.message, "error");
     }
   }
-  if (e.target.id === "tdRun") return toolDesignLoad();
+  if (e.target.id === "ppRun") {
+    status($("ppStatus"), "Working out…");
+    try {
+      const r = await api(`/api/parts/${part.id}/process-parameters`);
+      status($("ppStatus"), "");
+      $("ppOut").innerHTML = `${r.is_example ? '<p class="note"><b>Uses EXAMPLE process windows / rules.</b></p>' : ""}
+        <p class="note">From ${esc(r.source)}.</p>
+        ${r.risks.length ? `<h4>Quality warnings</h4><ul>${r.risks.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "<p>No quality warning.</p>"}
+        <div class="table-wrap"><table class="cost-table"><thead><tr><th>Setting</th><th class="num">Value</th><th>Range</th><th>Unit</th><th>Why</th></tr></thead><tbody>
+        ${r.parameters.map((x) => `<tr><td>${esc(x.label)}</td><td class="num"><b>${fmt(x.value, 2)}</b></td><td>${x.min == null ? "" : `${fmt(x.min, 2)} – ${fmt(x.max, 2)}`}</td>
+          <td>${esc(x.unit)}</td><td class="note">${esc(x.why)}</td></tr>`).join("")}</tbody></table></div><p class="note">${esc(r.note)}</p>`;
+    } catch (err) { status($("ppStatus"), err.message, "error"); }
+    return;
+  }
+  if (e.target.id === "tdRun") return machineFirst();
+  if (e.target.id === "tdMachine") return machineForm(false);
   if (e.target.id === "fixOpen") return fixPreview(true);
   if (e.target.id === "fixRefresh") return fixPreview(false);
   if (e.target.id === "simToLoop") {
@@ -1226,7 +1243,18 @@ function simResultBox(p) {
       ${s.problems.some((x) => ["bend_radius", "hole_diameter"].includes(x.check)) ?
         ` · <button type="button" class="btn btn-primary small" id="fixOpen">Correct the 3D model</button>` : ""}</p>
     <div id="fixBox"></div>
-    <span class="note">Details: <i>Sheet-metal tools</i> below (operations, forces, strip layout, blank DXF).</span></div>`;
+    <span class="note">Details: <i>Sheet-metal tools</i> below (operations, forces, strip layout, blank DXF).</span>
+    ${processBox(p)}</div>`;
+}
+
+// process parameters for the best part quality, from the simulation (stage 34)
+function processBox(p) {
+  return `<details class="card add-insert"><summary class="btn btn-outline small">Process parameters (machine settings for the first trial)</summary>
+    <p class="note">Settings with their range, worked out from the simulation and the material window (Mould &amp; die database → Process windows,
+      Process parameters; EXAMPLE values until you replace them), and the quality warnings with the remedy.</p>
+    <button type="button" class="btn btn-outline small" id="ppRun">Work out</button>
+    <a class="link" href="/api/parts/${p.id}/process-parameters.xlsx">⬇ Excel</a> · <a class="link" href="/api/parts/${p.id}/process-parameters.pdf">⬇ PDF</a>
+    <span class="status" id="ppStatus"></span><div id="ppOut"></div></details>`;
 }
 
 // 3D correction after the simulation: preview, download, release as a new revision (stage 27)
@@ -1269,6 +1297,56 @@ async function fixPreview(first) {
   }
 }
 
+// the production machine of the tool (stage 33): asked before the first tool design, checked, or recommended
+async function machineFirst() {
+  let m = null;
+  try { m = await api(`/api/parts/${part.id}/machine`); } catch { return toolDesignLoad(); }   // no machine family: design straight away
+  if (!m.asked) return machineForm(true, m);
+  return toolDesignLoad();
+}
+
+async function machineForm(thenDesign, m = null) {
+  const box = $("mcBox");
+  try { m = m || await api(`/api/parts/${part.id}/machine`); } catch (err) { status($("tdStatus"), err.message, "error"); return; }
+  const sp = m.spec || {};
+  box.innerHTML = `<form class="card grid2" id="mcForm"><h4 class="span2">Which machine will this tool run on in production?</h4>
+    <p class="note span2">Type what you know (empty = not checked) or take the size from a machine of Master data → Machines. The tool design is checked
+      against it (tool needs / machine has). <b>Skip</b>: the software designs the tool and tells you the machine it needs.</p>
+    <label class="span2">From the machine list <select name="machine_id"><option value="">—</option>${m.catalog.map((x) =>
+      `<option value="${esc(x.machine_id)}" ${sp.machine_id === x.machine_id ? "selected" : ""}>${esc(x.machine_id)} · ${esc(x.name)} · ${fmt(x.tonnage_t, 0)} t${x.length_mm ? ` · ${fmt(x.length_mm, 0)} × ${fmt(x.width_mm, 0)} mm` : ""}</option>`).join("")}</select></label>
+    ${m.fields.map((f) => `<label>${esc(f.label)} <input name="${esc(f.key)}" type="number" step="any" min="0" value="${sp[f.key] ?? ""}" /></label>`).join("")}
+    <div class="span2 dialog-actions"><button type="button" class="btn btn-outline small" id="mcSkip">Skip: recommend the machine</button>
+      <button type="submit" class="btn btn-primary small">Save machine${thenDesign ? " and design" : ""}</button></div><p class="status span2" id="mcStatus"></p></form>`;
+  const done = async (body) => {
+    try {
+      await api(`/api/parts/${part.id}/machine`, { method: "PUT", body: JSON.stringify(body) });
+      box.innerHTML = "";
+      if (thenDesign) toolDesignLoad(); else machineCheck();
+    } catch (err) { status($("mcStatus"), err.message, "error"); }
+  };
+  $("mcSkip").addEventListener("click", () => done({ spec: null, skipped: true }));
+  $("mcForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const spec = Object.fromEntries([...new FormData(e.target)].filter(([, v]) => v !== ""));
+    done({ spec: Object.keys(spec).length ? spec : null, skipped: !Object.keys(spec).length });
+  });
+}
+
+async function machineCheck() {
+  const box = $("mcBox");
+  try {
+    const r = await api(`/api/parts/${part.id}/machine-check`);
+    const lab = Object.fromEntries(r.fields.map((f) => [f.key, f.label]));
+    box.innerHTML = `<div class="card"><h4>Production machine</h4><p>${esc(r.note)}</p>
+      ${r.check.length ? `<div class="table-wrap"><table class="cost-table"><thead><tr><th>Tool</th><th>Check</th><th>Tool needs</th><th>Machine has</th><th></th></tr></thead><tbody>
+        ${r.check.map((c) => `<tr><td>${esc(c.tool)}</td><td>${esc(c.what)}</td><td>${esc(c.needs)}</td><td>${esc(c.has)}</td>
+          <td>${c.ok ? '<span class="badge status">ok</span>' : `<span class="badge missing">no</span> ${esc(c.advice)}`}</td></tr>`).join("")}</tbody></table></div>` : ""}
+      <details ${r.spec ? "" : "open"}><summary>Machine the tool needs (recommended, EXAMPLE margins: Design rules rec_…)</summary><ul>
+        ${Object.entries(r.recommended.values).map(([k, v]) => `<li>${esc(lab[k] || k)}: <b>${fmt(v, 0)}</b></li>`).join("")}</ul>
+        <p class="note">${r.recommended.nearest ? `Nearest in Master data → Machines: <b>${esc(r.recommended.nearest.machine_id)}</b> · ${esc(r.recommended.nearest.name)}` : "No machine of the list takes it."}</p></details></div>`;
+  } catch (err) { box.innerHTML = `<p class="status error">${esc(err.message)}</p>`; }
+}
+
 // detailed tool design: every die stage / the mould in 3D with drawings (stage 27)
 async function toolDesignLoad() {
   const out = $("tdOut");
@@ -1290,10 +1368,76 @@ async function toolDesignLoad() {
           ${t.components.map((c) => `<tr><td>${esc(c.no)}</td><td class="num">${c.qty}</td><td>${esc(c.name)}</td><td>${esc(c.material || "—")}</td>
             <td>${esc(c.hardness || "—")}</td><td>${esc(c.std || "—")}</td><td>${c.size.map((v) => fmt(v, 1)).join(" × ")}</td></tr>`).join("")}
           </tbody></table></div></div>`;
-    }).join("") + (r.tools.length > 1 ? `<p><a class="btn btn-primary" href="/api/parts/${part.id}/tool-design.zip">⬇ Release pack of all ${r.tools.length} tools</a></p>` : "");
+    }).join("") + (r.tools.length > 1 ? `<p><a class="btn btn-primary" href="/api/parts/${part.id}/tool-design.zip">⬇ Release pack of all ${r.tools.length} tools</a></p>` : "")
+      + `<div id="ddBox" class="card"></div>`;
+    drawingDataLoad();
+    machineCheck();
   } catch (err) {
     status($("tdStatus"), err.message, "error");
   }
+}
+
+// technical data, release and revision history of the tool drawings (stage 31)
+async function drawingDataLoad() {
+  const box = $("ddBox");
+  if (!box) return;
+  let d;
+  try { d = await api(`/api/parts/${part.id}/drawing-data`); } catch (err) { box.innerHTML = `<p class="status error">${esc(err.message)}</p>`; return; }
+  const dis = d.editable ? "" : "disabled";
+  const rel = d.release.released ? `<span class="badge status">Released ${esc(d.release.date)} · approved by ${esc(d.release.by)}</span>`
+    : `<span class="badge missing">NOT RELEASED</span> <span class="note">released when the design loop reaches the last status (now: ${esc(d.release.status)})</span>`;
+  box.innerHTML = `<h4>Drawing data (technical data on every detail drawing)</h4><p>${rel}</p>
+    <p class="note">Heat treatment, surface treatment, general tolerance class (ISO 2768 f / m / c / v, tables from Mould &amp; die database → General tolerances),
+      roughness Ra and your note points are printed on the detail drawings (PDF and DXF) and in the BOM. Material and hardness come from the tool BOM.
+      ${d.editable ? "" : "<b>Released: step the design loop back to change the data.</b>"}</p>
+    <p class="downloads"><a class="link" href="/api/parts/${part.id}/drawing-data.xlsx">⬇ Drawing data sheet (Excel)</a>
+      ${d.editable ? ` · <input type="file" id="ddFile" accept=".xlsx" /> <button type="button" class="btn btn-outline small" id="ddUp">Upload changed sheet</button>` : ""}</p>
+    ${d.tools.map((t) => `<p><b>Tool ${t.stage}: ${esc(t.name)}</b></p><div class="table-wrap"><table class="cost-table dd" data-tool="${esc(t.key)}"><thead><tr>
+      <th>Item</th><th>Part</th><th>Material · hardness</th><th>Heat treatment</th><th>Surface treatment</th><th>Class</th><th>Ra (micron)</th><th>Note points (one per line)</th><th>Dimension tolerances</th></tr></thead><tbody>
+      ${t.items.map((i) => `<tr data-item="${esc(i.item)}"><td>${esc(i.item)}</td><td>${esc(i.name)}${i.changed ? ' <span class="badge edited">changed</span>' : ""}</td>
+        <td>${esc(i.effective.material)} · ${esc(i.effective.hardness)}</td>
+        <td><input data-k="heat_treatment" value="${esc(i.effective.heat_treatment)}" ${dis} /></td>
+        <td><input data-k="surface_treatment" value="${esc(i.effective.surface_treatment)}" ${dis} /></td>
+        <td><select data-k="tolerance_class" ${dis}>${["f", "m", "c", "v"].map((c) => `<option ${c === i.effective.tolerance_class ? "selected" : ""}>${c}</option>`).join("")}</select></td>
+        <td><input data-k="finish_ra" value="${esc(i.effective.finish_ra)}" size="4" ${dis} /></td>
+        <td><textarea data-notes rows="2" ${dis}>${esc(i.effective.notes.join("\n"))}</textarea></td>
+        <td><details><summary>${i.dimensions.length} dimensions${i.dimensions.some((x) => x.changed) ? ' <span class="badge edited">changed</span>' : ""}</summary>
+          <label>Shown in <select data-k="tolerance_unit" ${dis}>${["mm", "µm"].map((u) => `<option ${u === i.effective.tolerance_unit ? "selected" : ""}>${u}</option>`).join("")}</select></label>
+          <table class="cost-table"><thead><tr><th>Dim.</th><th>What</th><th>On the drawing</th><th>Change to</th></tr></thead><tbody>
+          ${i.dimensions.map((x) => `<tr><td>${esc(x.key)}</td><td>${esc(x.what)}</td><td>${esc(x.tolerance)}</td>
+            <td><input data-f="${esc(x.key)}" value="${esc((i.effective.dim_overrides || {})[x.key] || "")}" placeholder="as drawn" size="10" ${dis} /></td></tr>`).join("")}
+          </tbody></table><p class="note">general (ISO 2768), class (fit of the hole label), a fit (H7, g6 …), ±0.02, +0.02/-0.01 or a thread class (6H)</p></details></td></tr>`).join("")}</tbody></table></div>`).join("")}
+    ${d.editable ? `<button type="button" class="btn btn-primary small" id="ddSave">Save drawing data</button>` : ""} <span class="status" id="ddStatus"></span>
+    <details><summary>Revision history (${d.history.length})</summary><table class="cost-table"><thead><tr><th>Rev</th><th>Date</th><th>Change</th><th>By</th></tr></thead>
+      <tbody>${d.history.map((h) => `<tr><td>${esc(h.rev)}</td><td>${esc(h.date)}</td><td>${esc(h.text)}</td><td>${esc(h.by)}</td></tr>`).join("")}</tbody></table></details>`;
+  const defaults = {};
+  d.tools.forEach((t) => t.items.forEach((i) => (defaults[`${t.key}|${i.item}`] = i.defaults)));
+  $("ddSave")?.addEventListener("click", async () => {
+    const items = [];
+    box.querySelectorAll("table.dd").forEach((tb) => tb.querySelectorAll("tr[data-item]").forEach((tr) => {
+      const dflt = defaults[`${tb.dataset.tool}|${tr.dataset.item}`] || {}, fields = {};
+      tr.querySelectorAll("[data-k]").forEach((el) => { if (String(el.value).trim() !== String(dflt[el.dataset.k])) fields[el.dataset.k] = el.value.trim(); });
+      const features = {};
+      tr.querySelectorAll("[data-f]").forEach((el) => { if (el.value.trim()) features[el.dataset.f] = el.value.trim(); });
+      if (Object.keys(features).length) fields.features = features;
+      items.push({ tool: tb.dataset.tool, item: tr.dataset.item, fields, notes: tr.querySelector("[data-notes]").value.split("\n").map((x) => x.trim()).filter(Boolean) });
+    }));
+    try {
+      const r = await api(`/api/parts/${part.id}/drawing-data`, { method: "PUT", body: JSON.stringify({ items }) });
+      status($("ddStatus"), r.changed.length ? `${r.changed.length} drawing(s) changed: the PDF / DXF now show the new data.` : "No change.", "ok");
+      if (r.changed.length) drawingDataLoad();
+    } catch (err) { status($("ddStatus"), err.message, "error"); }
+  });
+  $("ddUp")?.addEventListener("click", async () => {
+    const f = $("ddFile").files[0];
+    if (!f) return status($("ddStatus"), "Choose the drawing data sheet (.xlsx).", "error");
+    const fd = new FormData(); fd.append("file", f);
+    try {
+      const r = await api(`/api/parts/${part.id}/drawing-data/upload`, { method: "POST", body: fd });
+      status($("ddStatus"), `${r.changed.length} drawing(s) changed, ${r.unchanged} unchanged.`, "ok");
+      drawingDataLoad();
+    } catch (err) { status($("ddStatus"), err.message, "error"); }
+  });
 }
 
 // design loop: status flow, allowed moves, timeline

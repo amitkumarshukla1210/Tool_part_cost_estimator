@@ -167,8 +167,13 @@ def part_drawing_pdf(part: dict, rev: dict, shape, info: dict) -> bytes:
                d, Spacer(1, 2 * mm),
                drawing_style.pdf_title_block(396 * mm, fields, part.get("part_type", ""), _scale_label(sc), "1 / 1", part["part_code"],
                                              rev.get("rev", ""), ["The 3D model (STEP) is the master for all geometry; dimensions "
-                                                                  "not shown are taken from it."])])
+                                                                  "not shown are taken from it."], *_meta_of(part))])
     return buf.getvalue()
+
+
+def _meta_of(part: dict) -> tuple:
+    from . import drawing_data
+    return drawing_data.meta_of(part)
 
 
 def _scale_label(sc) -> str:
@@ -211,8 +216,11 @@ def _dxf_frame(doc, msp, title, part, rev, rows, part_type=""):
     x0, y0, x1, y1 = (min(xs), min(ys), max(xs), max(ys)) if xs else (0, 0, 400, 250)
     for e in list(msp):
         e.transform(Matrix44.translate(10 - x0, 80 - y0, 0))
+    from . import drawing_data
+    rel, hist = drawing_data.meta_of(part)
     drawing_style.dxf_frame(doc, msp, max(x1 - x0 + 20, 420), y1 - y0 + 90, f"{title} {part['part_code']}",
-                            [("Part", f"{part['part_code']} {part['name']}")] + rows, part_type, "1:1", part["part_code"], rev)
+                            [("Part", f"{part['part_code']} {part['name']}")] + rows, part_type, "1:1", part["part_code"], rev,
+                            release=rel, history=hist)
 
 
 def _dxf_bytes(doc) -> bytes:
@@ -334,7 +342,7 @@ def tool_drawing_pdf(part: dict, tr: dict, die: str | None = None) -> bytes:
                drawing_style.pdf_title_block(396 * mm, fields, lay.get("part_type", ""), "as shown", "1 / 1",
                                              f"{part['part_code']}-C-{lay['stage'].replace(' ', '')}", "",
                                              ["CONCEPT layout for quotation and PO reference; the detailed tool design (3D and "
-                                              "drawings of every part) is in Tool design → release pack."])])
+                                              "drawings of every part) is in Tool design → release pack."], *_meta_of(part))])
     return buf.getvalue()
 
 

@@ -1065,6 +1065,77 @@ def parts_tool_design_file(part_id: int, kind: str, die: Optional[str] = None):
     return Response(data, media_type=media, headers={"Content-Disposition": f'{disp}; filename="{name}"'})
 
 
+# ---------- process parameters for the best part quality (roadmap stage 34) ----------
+
+@app.get("/api/parts/{part_id}/process-parameters")
+def parts_process_parameters(part_id: int):
+    """Machine settings for the first trial with their range, from the simulation and the material window, and quality warnings."""
+    from . import process_params
+    return _design_error(lambda: process_params.compute(part_id))
+
+
+@app.get("/api/parts/{part_id}/process-parameters.{kind}")
+def parts_process_parameters_file(part_id: int, kind: str):
+    from . import process_params
+    if kind not in ("xlsx", "pdf"):
+        raise HTTPException(404, "xlsx or pdf")
+    content, name = _design_error(lambda: (process_params.xlsx if kind == "xlsx" else process_params.pdf)(part_id))
+    media = "application/pdf" if kind == "pdf" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return Response(content, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+# ---------- the production machine of the tool (roadmap stage 33) ----------
+
+@app.get("/api/parts/{part_id}/machine")
+def parts_machine(part_id: int):
+    from . import machine_spec
+    return _design_error(lambda: machine_spec.get(part_id))
+
+
+@app.put("/api/parts/{part_id}/machine")
+def parts_machine_save(part_id: int, data: dict):
+    """data: {spec: {tonnage_t, tie_bar_h_mm, …, machine_id?} | null, skipped: bool}."""
+    from . import machine_spec
+    return _design_error(lambda: machine_spec.save(part_id, data.get("spec"), bool(data.get("skipped"))))
+
+
+@app.get("/api/parts/{part_id}/machine-check")
+def parts_machine_check(part_id: int):
+    """Each tool against the typed machine (tool needs / machine has / ok), or the recommended machine."""
+    from . import machine_spec
+    return _design_error(lambda: machine_spec.evaluate(part_id))
+
+
+# ---------- technical data, release and revision history of the tool drawings (roadmap stage 31) ----------
+
+@app.get("/api/parts/{part_id}/drawing-data")
+def parts_drawing_data(part_id: int):
+    from . import drawing_data
+    return _design_error(lambda: drawing_data.part_data(part_id))
+
+
+@app.put("/api/parts/{part_id}/drawing-data")
+def parts_drawing_data_save(part_id: int, data: dict):
+    """data: {items: [{tool, item, fields: {heat_treatment, surface_treatment, tolerance_class, finish_ra}, notes: [...]}]}."""
+    from . import drawing_data
+    return _design_error(lambda: drawing_data.part_save(part_id, list(data.get("items") or [])))
+
+
+@app.get("/api/parts/{part_id}/drawing-data.xlsx")
+def parts_drawing_data_xlsx(part_id: int):
+    from . import drawing_data
+    content, name = _design_error(lambda: drawing_data.part_xlsx(part_id))
+    return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.post("/api/parts/{part_id}/drawing-data/upload")
+async def parts_drawing_data_upload(part_id: int, file: UploadFile = File(...)):
+    from . import drawing_data
+    content = await file.read()
+    return _design_error(lambda: drawing_data.part_upload(part_id, content))
+
+
 @app.get("/api/parts/{part_id}/sheet-tools")
 def parts_sheet_tools(part_id: int):
     """Sheet-metal tools I: operation sequence, die type, forces, tonnage, press, formability (roadmap stage 9)."""
@@ -1338,7 +1409,7 @@ def help_page():
 # ---------- server mode: logins and roles (roadmap stage 17) ----------
 
 from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
-from . import auth  # noqa: E402
+from . import auth, scope  # noqa: E402
 
 
 def _log_settings_change(request, response) -> None:
@@ -1381,6 +1452,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if why:
             return JSONResponse({"detail": why}, status_code=403)
         token = auth.set_current(user)
+        why = scope.guard(path)             # data access by tool group (stage 30)
+        if why:
+            auth.reset(token)
+            return JSONResponse({"detail": why}, status_code=403)
         try:
             response = await call_next(request)
             _log_settings_change(request, response)
@@ -1461,7 +1536,8 @@ def users_list():
 
 @app.post("/api/users")
 def users_create(data: dict):
-    return auth.create_user(data.get("username", ""), data.get("password", ""), data.get("role", "engineer"), data.get("name", ""))
+    return auth.create_user(data.get("username", ""), data.get("password", ""), data.get("role", "engineer"), data.get("name", ""),
+                            data.get("groups") or [])
 
 
 @app.put("/api/users/{uid}")
@@ -1508,7 +1584,7 @@ def admin_page():
 @app.get("/api/admin/permissions")
 def admin_permissions():
     me = auth.current()
-    return {"roles": list(auth.ROLES), "permissions": auth.permissions(), "me": me,
+    return {"roles": list(auth.ROLES), "groups": [{"key": g, "label": scope.LABELS[g]} for g in scope.GROUPS], "permissions": auth.permissions(), "me": me,
             "mine": {p["action"]: auth.may(p["action"], me) for p in auth.permissions()}}
 
 
@@ -1697,6 +1773,21 @@ def part_suppliers_edit(part_id: int, link_id: int, data: dict):
 def part_suppliers_remove(part_id: int, link_id: int):
     from . import suppliers
     return suppliers.unlink(part_id, link_id)
+
+
+@app.middleware("http")
+async def brand_downloads(request: Request, call_next):
+    """Logo and company name on every Excel and PDF (and ZIP of them) the software hands out (stage 35; branding.py)."""
+    from . import branding
+    response = await call_next(request)
+    kind = branding.MEDIA.get((response.headers.get("content-type") or "").split(";")[0].strip())
+    path = request.url.path
+    if not kind or not path.startswith("/api/") or any(path.endswith(x) for x in branding.SKIP) or response.status_code != 200:
+        return response
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    body = branding.stamp(body, "x." + kind)
+    headers = {k: v for k, v in response.headers.items() if k.lower() != "content-length"}
+    return Response(body, status_code=200, headers=headers, media_type=response.headers.get("content-type"))
 
 
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")

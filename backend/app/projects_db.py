@@ -108,6 +108,7 @@ parts = Table(
     Column("piece_cost_inr", Float),
     # your changes of traced values for this part (traceability panel): {"rm" | "tool" | "piece": {node id: {...}}}
     Column("trace_overrides", JSON),
+    Column("machine", JSON),             # production machine typed before the tool design (stage 33): {spec, skipped}
     Column("created_by", String(100), default=""),
     Column("created_at", DateTime, default=now),
     Column("updated_at", DateTime, default=now, onupdate=now),
@@ -344,6 +345,31 @@ bom_learning = Table(
     Index("ix_bom_learning", "part_type", "element"),
 )
 
+# Technical data of the tool drawings changed by the designer (roadmap stage 31): one row per tool and item of a part.
+tool_drawing_data = Table(
+    "tool_drawing_data", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),
+    Column("tool_key", String(80), nullable=False),
+    Column("item_no", String(20), nullable=False),
+    Column("fields", JSON),
+    Column("notes", JSON),
+    Column("edited_by", String(100), default=""),
+    Column("edited_at", DateTime, default=now),
+    UniqueConstraint("part_id", "tool_key", "item_no", name="uq_tool_drawing_data"),
+)
+
+tool_drawing_edits = Table(
+    "tool_drawing_edits", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),
+    Column("tool_key", String(80), nullable=False),
+    Column("item_no", String(20), nullable=False),
+    Column("summary", String(500), default=""),
+    Column("by", String(100), default=""),
+    Column("at", DateTime, default=now),
+)
+
 # Admin: the lowest role allowed for each action (rows missing = the default in auth.PERMISSIONS).
 role_permissions = Table(
     "role_permissions", meta,
@@ -359,8 +385,9 @@ users = Table(
     Column("username", String(80), nullable=False, unique=True),
     Column("name", String(200), default=""),
     Column("password_hash", String(300), nullable=False),
-    Column("role", String(20), nullable=False),        # viewer, engineer, approver, admin
+    Column("role", String(20), nullable=False),        # viewer, engineer, approver, head, admin
     Column("active", Boolean, default=True),
+    Column("groups", JSON),                            # tool groups the user sees (scope.py); empty = all
     Column("created_at", DateTime, default=now),
     Column("last_login", DateTime),
 )

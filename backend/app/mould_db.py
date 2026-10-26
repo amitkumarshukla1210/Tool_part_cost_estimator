@@ -12,6 +12,9 @@ Holds the data that sizes a mould or die and builds its BOM:
     tool_processes  how each tool process is priced: machine hours (MHR + operators × labour rate), labour hours,
                     or a rate per unit (kg, cm², ...); its machine, labour grade, operators and cost group
     design_rules    detailed 3D tool design: clearances, fits, plate / pillar / screw sizes, tolerances, finish, shrinkage
+    general_tolerances  ISO 2768-1 linear and angular general tolerances by class, printed on the tool drawings (stage 31)
+    process_windows / process_parameters  material temperature windows and the formulas of the process setting sheet (stage 34)
+    fit_tolerances  ISO 286 limits of the fits (H7, g6 …) by size: the tolerance of every fitted dimension (stage 32)
     time_parameters removal rates, set-up hours and shares that the BOM hour / amount rules use
 
 Every row has an is_example flag: seeded placeholder values are 1 until you
@@ -253,10 +256,60 @@ TABLES = {
         col("description", "Description"),
         col("is_example", "Example", "bool"),
     ]},
+    "general_tolerances": {"title": "General tolerances", "unique": ("tol_class", "kind", "from_mm"), "columns": [
+        col("tol_class", "Class (f, m, c, v of ISO 2768-1)", "text", ("f", "m", "c", "v")),
+        col("kind", "linear (± mm by nominal size) or angular (± arc minutes by shorter leg)", "text", ("linear", "angular")),
+        col("from_mm", "From size (mm, over)", "number"),
+        col("to_mm", "To size (mm, up to and including)", "number"),
+        col("value", "± value (mm for linear, arc minutes for angular)", "number"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes", required=False),
+    ]},
+    "process_windows": {"title": "Process windows", "unique": ("material",), "columns": [
+        col("material", "Material (Master data → Materials)"),
+        col("melt_c", "Melt / metal / pour / preform temperature (°C)", "number"),
+        col("melt_min_c", "Lowest (°C)", "number"),
+        col("melt_max_c", "Highest (°C)", "number"),
+        col("mould_c", "Mould / die / water temperature (°C)", "number"),
+        col("mould_min_c", "Lowest (°C)", "number"),
+        col("mould_max_c", "Highest (°C)", "number"),
+        col("eject_c", "Part temperature at ejection (°C)", "number"),
+        col("dry_c", "Drying temperature (°C, 0 = none)", "number"),
+        col("dry_h", "Drying time (h)", "number"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes", required=False),
+    ]},
+    "process_parameters": {"title": "Process parameters", "unique": ("part_type", "name"), "columns": [
+        col("part_type", "Part type", "part_type", PART_TYPES),
+        col("step", "Order", "number"),
+        col("name", "Name"),
+        col("formula", "Value (formula)", "formula"),
+        col("min_formula", "Lowest (formula)", "formula", required=False),
+        col("max_formula", "Highest (formula)", "formula", required=False),
+        col("unit", "Unit", required=False),
+        col("label", "Setting (or the warning text of a risk row)"),
+        col("why", "Why", required=False),
+        col("kind", "Kind (parameter or risk)", "text", ("parameter", "risk")),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes", required=False),
+    ]},
+    "fit_tolerances": {"title": "Fit tolerances", "unique": ("fit", "from_mm"), "columns": [
+        col("fit", "Tolerance class of ISO 286 (H7, H6, g6, h6, k6, m6 …)"),
+        col("from_mm", "From size (mm, over)", "number"),
+        col("to_mm", "To size (mm, up to and including)", "number"),
+        col("upper_um", "Upper deviation (µm, with sign: +15, -7, 0)"),
+        col("lower_um", "Lower deviation (µm, with sign)"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes", required=False),
+    ]},
 }
 
 
 def _check(clean: dict) -> None:
+    from . import dim_tolerances, drawing_data, process_params
+    drawing_data.validate(clean)
+    dim_tolerances.validate(clean)
+    process_params.validate(clean)
     from . import concept
     for i, r in enumerate(clean["concept_rules"], start=2):
         try:
