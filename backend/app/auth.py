@@ -30,7 +30,7 @@ COOKIE = "dtc_session"
 SESSION_HOURS = 12
 MIN_PASSWORD = 10
 PUBLIC_PREFIXES = ("/login", "/setup", "/static", "/theme", "/api/auth/login", "/api/auth/setup", "/api/server/health", "/favicon")
-ADMIN_PREFIXES = ("/api/users", "/api/admin/users")
+ADMIN_PREFIXES = ("/api/users", "/api/admin/users", "/api/admin/bot")
 
 # action -> (default lowest role, label, what it covers). Order = order on the Admin page.
 PERMISSIONS = {
@@ -49,6 +49,8 @@ CALC_PATHS = ("/api/analyze", "/api/gross-weight", "/api/capacity", "/api/mould/
 MASTER_PATHS = ("/api/master-data", "/api/mould-db", "/api/costing-setup", "/api/register-setup", "/api/examples",
                 "/api/tool-materials", "/api/standard-parts", "/api/master-rows")
 RATE_PATHS = ("/api/rates", "/api/settings", "/api/price-master")
+# The AI assistant (bot.py): any logged-in user may ask; it only reads, with that user's own login.
+BOT_PATHS = ("/api/bot/",)
 
 _user: contextvars.ContextVar = contextvars.ContextVar("dtc_user", default=None)
 
@@ -343,7 +345,7 @@ def action_for(method: str, path: str) -> str | None:
         if path.startswith("/api/admin/backups"):
             return "backups"
         return None
-    if path in ("/api/auth/logout", "/api/auth/password") or path.startswith(CALC_PATHS):
+    if path in ("/api/auth/logout", "/api/auth/password") or path.startswith(CALC_PATHS) or path.startswith(BOT_PATHS):
         return None
     if path.startswith("/api/admin/backups"):
         return "backups"

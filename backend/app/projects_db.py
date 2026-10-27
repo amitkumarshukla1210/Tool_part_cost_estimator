@@ -400,6 +400,15 @@ sessions = Table(
     Column("created_at", DateTime, default=now),
 )
 
+# App settings that belong to this installation and never go to GitHub (e.g. the AI assistant's API key, stage 36).
+app_settings = Table(
+    "app_settings", meta,
+    Column("key", String(60), primary_key=True),
+    Column("value", Text, default=""),
+    Column("updated_by", String(100), default=""),
+    Column("updated_at", DateTime, default=now, onupdate=now),
+)
+
 history = Table(
     "history", meta,
     Column("id", Integer, primary_key=True),

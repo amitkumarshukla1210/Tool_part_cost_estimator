@@ -1,9 +1,10 @@
-// Release name (VERSION) in the page footer. Logged-in user in the page header: Admin (users, permissions, activity, backups), the user's name and Log out.
+// Release name (VERSION) in the page footer. Logged-in user in the page header: Admin (users, permissions, activity, backups), the user's name and Log out. The AI assistant panel when it is switched on.
 (async function () {
   try {
     const me = await (await fetch("/api/auth/me")).json();
     const foot = document.querySelector("footer .footnote");
     if (foot && me.version) foot.textContent = `© Design to Cost · Part Cost Estimator ${me.version}`;
+    loadAssistant();
     const ul = document.querySelector("header nav ul");
     if (!ul) return;
     if (!ul.querySelector('a[href="/admin"]')) {
@@ -22,4 +23,15 @@
       location.href = "/login";
     });
   } catch { /* offline: ignore */ }
+
+  // AI assistant (stage 36): the chat panel, when the admin has switched it on and saved a key (Admin → AI assistant).
+  async function loadAssistant() {
+    try {
+      const s = await (await fetch("/api/bot/status")).json();
+      if (!s.enabled || document.querySelector('script[src="/static/bot.js"]')) return;
+      const js = document.createElement("script");
+      js.src = "/static/bot.js";
+      document.body.appendChild(js);
+    } catch { /* offline: no assistant */ }
+  }
 })();
