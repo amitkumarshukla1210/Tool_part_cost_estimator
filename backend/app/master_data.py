@@ -31,7 +31,7 @@ from openpyxl.utils import get_column_letter
 
 DEFAULT_PATH = Path(__file__).resolve().parents[2] / "master_data" / "master_data.xlsx"
 
-PART_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow")
+PART_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow", "machined")
 
 # Sheet name -> columns, and which columns must be numbers.
 SHEETS = {
@@ -46,7 +46,7 @@ NUMERIC = {
 # Columns of older versions that are no longer read (material rates moved to the rate library).
 RETIRED = {"Materials": {"rate_per_kg": "the RM rate", "scrap_rate_per_kg": "the scrap value"}}
 # Parameters whose value is text or a comma list; every other parameter is a number.
-TEXT_PARAMETERS = {"currency", "trial_machine_process", "operator_grade", "press_machine_process"}
+TEXT_PARAMETERS = {"currency", "trial_machine_process", "operator_grade", "press_machine_process", "machine_turned", "machine_milled"}
 LIST_PARAMETERS = {"standard_cavities"}
 
 _cache: dict = {"key": None, "data": None}

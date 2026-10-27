@@ -125,6 +125,24 @@ def insert_moulded_housing():
     return assy
 
 
+def machined_shaft():
+    """Turned shaft along Z: Ø40 x 30 collar, Ø25 x 60 journal, Ø16 x 20 spigot, Ø8 centre bore 15 deep, 2 cross holes Ø6."""
+    body = (cq.Workplane("XY").circle(20).extrude(30)
+            .faces(">Z").workplane().circle(12.5).extrude(60)
+            .faces(">Z").workplane().circle(8).extrude(20)
+            .faces(">Z").workplane().hole(8, 15))
+    cross = cq.Workplane("YZ").workplane(offset=-30).center(0, 15).circle(3).extrude(60)
+    return body.cut(cross)
+
+
+def machined_block():
+    """Milled block 80 x 50 x 30 mm with a 40 x 20 x 10 pocket and 4 drilled holes Ø8."""
+    pts = [(x, y) for x in (-30, 30) for y in (-15, 15)]
+    return (cq.Workplane("XY").box(80, 50, 30)
+            .faces(">Z").workplane().rect(40, 20).cutBlind(-10)
+            .faces(">Z").workplane().pushPoints(pts).hole(8))
+
+
 if __name__ == "__main__":
     demo_assembly().export(str(OUT / "demo_assembly.step"))
     print("wrote", OUT / "demo_assembly.step")
@@ -140,6 +158,8 @@ if __name__ == "__main__":
         ("large_sheet_tray", large_sheet_tray),
         ("large_sheet_channel", large_sheet_channel),
         ("pet_bottle", pet_bottle),
+        ("machined_shaft", machined_shaft),
+        ("machined_block", machined_block),
     ]:
         path = OUT / f"{name}.step"
         cq.exporters.export(fn(), str(path))

@@ -23,16 +23,18 @@ from __future__ import annotations
 from . import formula
 from .table_set import TableSet, col
 
-RM_FAMILIES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow")
+RM_FAMILIES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow", "machined")
 TOOL_SCOPES = ("tool_clamp", "tool")
 PIECE_SCOPES = ("piece", "harness", "pcb")     # costed by piece_cost.py / electro_cost.py; source "piece" = a value the engine works out
-SCOPES = ("mhr", "labour") + tuple(f"rm_{f}" for f in RM_FAMILIES) + TOOL_SCOPES + PIECE_SCOPES
-SOURCES = ("rate", "machine", "parameter", "part", "tool", "piece")
+MACHINING_SCOPE = "machining"                  # machined parts (stage 36): machining time and fixture, machining.py
+SCOPES = ("mhr", "labour") + tuple(f"rm_{f}" for f in RM_FAMILIES) + TOOL_SCOPES + PIECE_SCOPES + (MACHINING_SCOPE,)
+SOURCES = ("rate", "machine", "parameter", "part", "tool", "piece", "machining")
 MACHINE_FIELDS = ("power_kw", "load_factor_pct", "floor_area_m2", "life_years", "residual_pct",
                   "maintenance_pct", "tonnage_t", "length_mm", "width_mm")
 RESULT_OF = ({"mhr": "Machine hour rate", "labour": "Labour rate"} | {f"rm_{f}": "Net RM cost per part" for f in RM_FAMILIES}
              | {"tool_clamp": "Clamp force for the try-out machine", "tool": "Tool cost per tool", "piece": "Part cost per piece",
-                                                                    "harness": "Harness cost", "pcb": "PCB assembly cost"})
+                                                                    "harness": "Harness cost", "pcb": "PCB assembly cost",
+                                                                    "machining": "Fixture cost per set (machined parts)"})
 # Values worked out by the part cost engine (piece_cost.py) that the piece formulas can use (source = piece);
 # the Insert moulding rules (Part register setup) can be used by their key as well.
 PIECE_ITEMS = {
@@ -71,6 +73,25 @@ PART_ITEMS = {
     "blank_length_mm": "Flat blank length (mm): estimated from the 3D model",
     "blank_width_mm": "Flat blank width (mm): estimated from the 3D model",
     "blanks_per_sheet": "Blanks per sheet: best straight-grid nesting of the blank on the usable sheet",
+    "stock_size_mm": "Bar stock: diameter / across flats / thickness (mm) of the standard size picked (Stock sizes)",
+    "stock_width_mm": "Bar stock: width (mm); round, hex and square bar: the same as the size; plate: part + allowance",
+    "stock_length_mm": "Bar stock: cut length per part (mm) = part length + facing allowances + cut-off",
+    "section_factor": "Bar stock: cross-section ÷ (size × width): round π/4, hex √3/2, square / flat / plate 1 (Stock sizes)",
+}
+# Values worked out for a machined part (stage 36) that the machining formulas can use (source = machining).
+MACHINING_ITEMS = {
+    "is_turned": "1 if the part is turned (CNC lathe), 0 if milled (machining centre): from the 3D model or typed",
+    "stock_volume_cm3": "Bar stock volume per part (cm³): the stock of the RM cost",
+    "part_volume_cm3": "Part volume from the 3D model (cm³)",
+    "surface_cm2": "Part surface from the 3D model (cm²): finish machining",
+    "hole_count": "Drilled holes found in the 3D model (bores on the turning axis are turned, not counted)",
+    "hole_depth_mm": "Σ depth of the drilled holes (mm)",
+    "setups": "Set-ups (clampings) per part: typed, else Parameters → setups_turned / setups_milled",
+    "turn_rough_cm3_min": "Rough turning removal rate of the material (Machining data)",
+    "mill_rough_cm3_min": "Rough milling removal rate of the material (Machining data)",
+    "finish_cm2_min": "Finish machining rate of the material (Machining data)",
+    "drill_mm_min": "Drilling feed of the material (Machining data)",
+    "annual_volume": "Annual volume of the part (part, else Σ variants, else Parameters)",
 }
 # Part values you may type over per part (the others are measured or worked out).
 OVERRIDABLE_PART_ITEMS = ("thickness_mm", "blank_length_mm", "blank_width_mm")
@@ -197,8 +218,14 @@ def _check(clean: dict) -> None:
             raise SetupError(f"Formula inputs row {i}: source 'piece' is only for the scopes {', '.join(PIECE_SCOPES)}.")
         if r["source"] == "part" and not r["scope"].startswith("rm_"):
             raise SetupError(f"Formula inputs row {i}: source 'part' is only for the RM scopes (rm_...).")
-        if r["source"] == "parameter" and not (r["scope"].startswith("rm_") or r["scope"] in TOOL_SCOPES + PIECE_SCOPES):
+        if r["source"] == "parameter" and not (r["scope"].startswith("rm_") or r["scope"] in TOOL_SCOPES + PIECE_SCOPES + (MACHINING_SCOPE,)):
             raise SetupError(f"Formula inputs row {i}: source 'parameter' is only for the RM and tool scopes.")
+        if r["source"] == "machining" and r["scope"] != MACHINING_SCOPE:
+            raise SetupError(f"Formula inputs row {i}: source 'machining' is only for the scope {MACHINING_SCOPE}.")
+        if r["source"] == "machining" and r["item"] not in MACHINING_ITEMS:
+            raise SetupError(f"Formula inputs row {i}: machining value must be one of {', '.join(MACHINING_ITEMS)}.")
+        if r["scope"] == MACHINING_SCOPE and r["source"] not in ("machining", "parameter", "rate"):
+            raise SetupError(f"Formula inputs row {i}: scope {MACHINING_SCOPE} takes sources machining, parameter and rate.")
         if r["source"] == "tool" and r["scope"] not in TOOL_SCOPES:
             raise SetupError(f"Formula inputs row {i}: source 'tool' is only for the tool scopes ({', '.join(TOOL_SCOPES)}).")
         if r["source"] == "tool" and r["item"] not in TOOL_ITEMS:
@@ -258,6 +285,8 @@ def _help() -> list:
         ["source = tool", "Tool scopes only: a value of the tool cost engine: " + "; ".join(f"{k} = {v}" for k, v in TOOL_ITEMS.items())],
         ["source = piece", "Scope piece only: a value of the part cost engine: " + "; ".join(f"{k} = {v}" for k, v in PIECE_ITEMS.items())
                            + "; and any key of Part register setup → Insert moulding rules"],
+        ["Scope machining", "Machined parts (stage 36): machining time per part (cycle_s), machines needed, fixture cost per "
+                            "set (the final result) and fixture CAPEX. source = machining: " + "; ".join(f"{k} = {v}" for k, v in MACHINING_ITEMS.items())],
         ["functions", "ceil, floor, round, min, max, abs, sqrt; 'a if condition else b'; and, or, not"],
     ]
 
@@ -266,7 +295,8 @@ SET = TableSet("Countries, machines & formulas", TABLES, error=SetupError, check
 
 
 def schema() -> dict:
-    return SET.schema() | {"machine_fields": list(MACHINE_FIELDS), "part_items": PART_ITEMS, "tool_items": TOOL_ITEMS}
+    return SET.schema() | {"machine_fields": list(MACHINE_FIELDS), "part_items": PART_ITEMS, "tool_items": TOOL_ITEMS,
+                           "machining_items": MACHINING_ITEMS}
 
 
 def tables() -> dict:

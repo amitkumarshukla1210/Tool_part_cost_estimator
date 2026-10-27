@@ -442,3 +442,89 @@ def sheet_features(shape: cq.Shape, thickness: float) -> dict:
             if sum((a - along * b) ** 2 for a, b in zip(off, d1)) ** 0.5 < 1e-3:
                 bends.append({"inner_radius_mm": min(r1, r2), "length_mm": min(e1, e2)})
     return {"holes": [{"perimeter_mm": p, "area_mm2": a} for p, a in holes], "bends": bends}
+
+
+def machining_features(shape: cq.Shape, hole_max_dia_mm: float = 20.0) -> dict:
+    """What a machined part (roadmap stage 36) needs from its 3D model: is it turned, and where are its holes.
+
+    round_share   share of the surface that is turned about one axis: cylinders, cones and tori on that axis plus the
+                  flat faces square to it (end faces, shoulders). A shaft is near 1, a milled block far below.
+    turn_*        that axis, the largest diameter about it and the length along it (from the mesh)
+    sizes_mm      the three box sizes, largest first (milled stock)
+    holes         drilled holes: concave cylinders up to hole_max_dia_mm (one per axis line and diameter, so a hole
+                  split in two faces counts once); for a turned part the bores on the turning axis are turned, not drilled
+    Only the measurement is done here; the route (turned / milled) and every allowance come from master data.
+    """
+    import math
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.BRepGProp import BRepGProp_Face
+    from OCP.BRepTools import BRepTools
+    from OCP.GeomAbs import GeomAbs_Cone, GeomAbs_Cylinder, GeomAbs_Plane, GeomAbs_Torus
+    from OCP.gp import gp_Pnt, gp_Vec
+
+    def vec(d):
+        return (d.X(), d.Y(), d.Z())
+
+    def dot(a, b):
+        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+    def sub(a, b):
+        return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+    def off_axis(p, loc, d):  # vector from the axis line to the point
+        r = sub(p, loc)
+        t = dot(r, d)
+        return (r[0] - t * d[0], r[1] - t * d[1], r[2] - t * d[2])
+
+    def parallel(a, b):
+        return abs(abs(dot(a, b)) - 1) < 1e-4
+
+    faces = shape.Faces()
+    total = sum(f.Area() for f in faces) or 1.0
+    revolved, planes = [], []
+    for f in faces:
+        s = BRepAdaptor_Surface(f.wrapped)
+        kind = s.GetType()
+        if kind in (GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Torus):
+            ax = {GeomAbs_Cylinder: s.Cylinder, GeomAbs_Cone: s.Cone, GeomAbs_Torus: s.Torus}[kind]().Axis()
+            d, loc = vec(ax.Direction()), vec(ax.Location())
+            u0, u1, v0, v1 = BRepTools.UVBounds_s(f.wrapped)
+            p, n = gp_Pnt(), gp_Vec()
+            BRepGProp_Face(f.wrapped).Normal((u0 + u1) / 2, (v0 + v1) / 2, p, n)
+            radial = off_axis(vec(p), loc, d)
+            ends = [dot(sub(v.toTuple(), loc), d) for v in f.Vertices()] or [0.0]
+            revolved.append({"d": d, "loc": loc, "area": f.Area(), "cyl": kind == GeomAbs_Cylinder,
+                             "r": s.Cylinder().Radius() if kind == GeomAbs_Cylinder else None,
+                             "concave": dot(vec(n), radial) < 0, "depth": max(ends) - min(ends), "span": u1 - u0})
+        elif kind == GeomAbs_Plane:
+            planes.append((vec(s.Plane().Axis().Direction()), f.Area()))
+
+    def on_line(x, line):
+        return parallel(x["d"], line["d"]) and math.dist(off_axis(x["loc"], line["loc"], line["d"]), (0, 0, 0)) < 0.01
+
+    best, score = None, 0.0
+    for cand in revolved:
+        sc = sum(x["area"] for x in revolved if on_line(x, cand)) + sum(a for n, a in planes if parallel(n, cand["d"]))
+        if sc > score + 1e-9:
+            best, score = cand, sc
+    out = {"round_share": round(score / total, 4), "sizes_mm": sorted(exact_bbox(shape).values(), reverse=True)}
+    if best:
+        verts, _ = shape.tessellate(MESH_TOLERANCE, MESH_ANGULAR_TOLERANCE)
+        pts = [v.toTuple() for v in verts]
+        along = [dot(sub(p, best["loc"]), best["d"]) for p in pts]
+        radius = max(math.dist(off_axis(p, best["loc"], best["d"]), (0, 0, 0)) for p in pts)
+        out |= {"turn_axis": [round(c, 6) for c in best["d"]], "turn_dia_mm": round(2 * radius, 3),
+                "turn_length_mm": round(max(along) - min(along), 3)}
+    holes = []
+    for x in revolved:
+        if not (x["cyl"] and x["concave"] and 2 * x["r"] <= hole_max_dia_mm + 1e-6):
+            continue
+        g = next((h for h in holes if abs(h["r"] - x["r"]) < 1e-3 and on_line(x, h)), None)
+        if g:
+            g["depth"], g["span"] = max(g["depth"], x["depth"]), g["span"] + x["span"]
+        else:
+            holes.append(dict(x))
+    # a hole goes (nearly) all round; an inner fillet or a slot end is only part of a cylinder
+    out["holes"] = [{"dia_mm": round(2 * h["r"], 3), "depth_mm": round(h["depth"], 3),
+                     "on_turn_axis": bool(best) and on_line(h, best)} for h in holes if h["span"] >= 1.8 * math.pi]
+    return out
