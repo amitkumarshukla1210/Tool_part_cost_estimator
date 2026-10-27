@@ -46,6 +46,7 @@
             <button role="tab" class="btn btn-outline" data-tab="activity" aria-selected="false">Activity log</button>
             <button role="tab" class="btn btn-outline" data-tab="backups" aria-selected="false">Backups &amp; update</button>
             <button role="tab" class="btn btn-outline" data-tab="drawings" aria-selected="false">Drawings (logo)</button>
+            <button role="tab" class="btn btn-outline" data-tab="bot" aria-selected="false">AI assistant</button>
           </div>
           <span class="spacer"></span>
           <span class="note" id="whoami"></span>
@@ -135,6 +136,26 @@
               <button type="button" class="btn btn-outline small" id="logoReset">Use the app logo</button></div></form>
         </div>
         <form id="drawForm" class="card grid2"></form>
+      </div>
+      <div id="tab-bot" class="tab-pane" hidden>
+        <p class="note">The AI assistant answers questions about parts, costs, tools, suppliers and rates in plain language, in a
+          panel on every page (<b>Ask AI</b>). Everyone who is logged in may use it. It sees only what that user may see (role and
+          tool groups) and it can never approve, change or delete anything. Every question is written to the Activity log.
+          Questions and the data the assistant looks up are sent to Anthropic (Claude) to answer them.</p>
+        <form id="botForm" class="card grid2">
+          <label class="span2"><span><input type="checkbox" name="enabled" id="botEnabled" /> Switch the AI assistant on for all users</span></label>
+          <label>Model <select name="model" id="botModel"></select></label>
+          <label>Anthropic API key <input type="password" name="api_key" id="botKey" autocomplete="off" placeholder="sk-ant-…  (leave empty to keep the saved key)" /></label>
+          <p class="note span2" id="botKeyNote"></p>
+          <div class="span2 dialog-actions">
+            <button class="btn btn-outline" type="button" id="botClear">Remove the saved key</button>
+            <button class="btn btn-outline" type="button" id="botTest">Test the key</button>
+            <button class="btn btn-primary" type="submit">Save</button>
+          </div>
+        </form>
+        <p class="note">Get a key on <b>console.anthropic.com</b> → API keys (your company's Anthropic account; usage is billed there).
+          The key is kept in this installation's project database (never in GitHub) and is never shown again, only its last 4
+          characters. Backups contain it, so keep backup files safe.</p>
       </div>
     </div></section>
   </main>

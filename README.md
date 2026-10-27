@@ -1189,6 +1189,25 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 - Files meant to be uploaded again stay plain: master-data, mould & die, costing setup, rates and register setup downloads, the import template
   and the price master export. Code: `backend/app/branding.py` (middleware in `main.py`). Tests: `tests/test_branding.py`.
 
+## AI assistant: Ask AI (stage 36)
+
+- **Ask AI** (bottom right of every page) answers questions in plain language, for example *What is the part cost of 1023 and what
+  drives it?*, *Compare the tool cost of 1023 in India and China*, *Which parts of project X are over their target?*, *Send me the tool
+  drawing and the PO pack of 1023*. It looks the numbers up in your projects, costs, traces and rates, says where they come from (rate and
+  month, EXAMPLE rates, outdated costs) and gives files as **download links** (cost PDF / Excel, drawings PDF / DXF, tool design ZIP / STEP,
+  simulation report and video, PO pack).
+- **Who:** everyone who is logged in. The assistant sees **only what that user may see**: it reads through the app's own GET routes with the
+  user's own login, so role and tool groups (stage 30) apply exactly as on the screens. A part of another tool group is refused the same way.
+- **Read only:** it can never approve, change, recalculate or delete anything; for that it tells you which page and button to use.
+- **Admin → AI assistant** (admin only): switch it on for all users, choose the model (*Claude Opus 5.5*, recommended; *Sonnet 5.5*, faster
+  and about half the cost; *Haiku 5.5*, lowest cost for simple questions), enter the **Anthropic API key** (from console.anthropic.com; usage
+  is billed to that account) and *Test the key*. The key is kept in the project database (`data/`, never in GitHub) and only its last 4
+  characters are shown again. Backups contain it, so keep backup files safe. Without a saved key, `ANTHROPIC_API_KEY` on the server is used.
+- **What leaves the PC:** the question and the data the assistant looks up for it are sent to Anthropic to write the answer. Every question
+  (not the answer) is written to the **Activity log** (what: *bot*).
+- The chat stays in the browser tab; *New chat* clears it. Code: `backend/app/bot.py`, `frontend/bot.js`, `frontend/bot.css`.
+  Tests: `tests/test_bot.py` (a stand-in for Claude, so no key or internet is needed).
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:
@@ -1272,6 +1291,7 @@ backend/app/register_setup.py Master data of the register (processes, statuses, 
 backend/app/cad_import.py     STEP reading: assembly tree (XCAF), quantities, look-alikes, thumbnails
 backend/app/file_store.py     CAD file storage by checksum
 backend/app/pdf_report.py     PDF exports in the Design to Cost style
+backend/app/bot.py            AI assistant (Ask AI): read-only tools over the app's own GET routes, Claude API, settings
 backend/app/main.py           FastAPI web server: all /api endpoints + serves the pages
 master_data/                  master_data.xlsx and costing_db.sqlite (your editable data)
 frontend/index.html           Estimator page (form + results + 3D viewer)
@@ -1286,6 +1306,7 @@ frontend/parts.*              Part register (search, part details, revisions, hi
 frontend/import.*             Import: STEP part / assembly split, Excel bulk upload
 frontend/common.js, register.css  Shared helpers and layout of the register pages
 frontend/trace.js             Traceability panel used by every page
+frontend/bot.js, bot.css      AI assistant chat panel on every page (loaded by auth.js when switched on)
 theme/                        Design to Cost theme: dtc-theme.css, logo.png, THEME.md
 docs/                         The requirement briefs (MASTER_FLOW_PROMPT.txt, ROADMAP_PROMPT.txt)
 ROADMAP.md                    Architecture, automation levels and stage plan

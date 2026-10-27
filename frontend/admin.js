@@ -1,4 +1,4 @@
-// Admin control: login IDs and roles, permissions per role, activity log, backups and installed version.
+// Admin control: login IDs and roles, permissions per role, activity log, backups and installed version, AI assistant.
 const { $, esc, api, status } = window.DTC;
 const ROLE_HELP = {
   viewer: "viewer: reads everything, changes nothing",
@@ -21,7 +21,7 @@ async function init() {
   $("newRole").innerHTML = info.roles.map((r) => `<option ${r === "engineer" ? "selected" : ""}>${r}</option>`).join("");
   $("roleHelp").textContent = ROLE_HELP.engineer;
   $("newGroups").innerHTML = groupBoxes([], "groups");
-  const tabOk = { users: true, perms: true, activity: info.mine.view_activity, backups: info.mine.backups, drawings: true };
+  const tabOk = { users: true, perms: true, activity: info.mine.view_activity, backups: info.mine.backups, drawings: true, bot: isAdmin };
   document.querySelectorAll("#tabs [data-tab]").forEach((b) => (b.hidden = !tabOk[b.dataset.tab]));
   $("permsActions").hidden = !isAdmin;
   const want = new URLSearchParams(location.search).get("tab");
@@ -34,7 +34,7 @@ function show(tab) {
   document.querySelectorAll(".tab-pane").forEach((p) => (p.hidden = p.id !== `tab-${tab}`));
   history.replaceState(null, "", `?tab=${tab}`);
   status($("status"), "");
-  ({ perms: renderPerms, activity: () => loadActivity(false), backups: loadBackups, drawings: loadDrawing })[tab]?.();
+  ({ perms: renderPerms, activity: () => loadActivity(false), backups: loadBackups, drawings: loadDrawing, bot: loadBot })[tab]?.();
 }
 $("tabs").addEventListener("click", (e) => {
   const b = e.target.closest("[data-tab]");
@@ -217,4 +217,49 @@ $("logoForm").addEventListener("submit", async (e) => {
 $("logoReset").addEventListener("click", async () => {
   await api("/api/register-setup/drawing/logo", { method: "DELETE" });
   loadDrawing();
+});
+
+// ---------- AI assistant: on / off, model, API key (stage 36; admin only) ----------
+function showBot(s) {
+  $("botEnabled").checked = s.enabled;
+  $("botModel").innerHTML = s.models.map((m) => `<option value="${esc(m.code)}" ${m.code === s.model ? "selected" : ""}>${esc(m.name)}</option>`).join("");
+  $("botKey").value = "";
+  $("botKeyNote").textContent = s.key_set
+    ? `A key is set (${s.key_hint}, ${s.key_source}${s.updated_by ? `; saved by ${s.updated_by} ${s.updated_at.replace("T", " ")}` : ""}).`
+      + (s.enabled ? " The assistant is on." : " The assistant is off: tick the box and save to switch it on.")
+    : "No key yet: the assistant stays hidden until a key is saved and it is switched on.";
+  $("botClear").hidden = s.key_source !== "saved";
+}
+async function loadBot() {
+  showBot(await api("/api/admin/bot"));
+}
+$("botForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    const s = await api("/api/admin/bot", { method: "PUT", body: JSON.stringify({
+      enabled: $("botEnabled").checked, model: $("botModel").value, api_key: $("botKey").value.trim() }) });
+    showBot(s);
+    status($("status"), `AI assistant settings saved${s.enabled && s.key_set ? ": the Ask AI button is on every page (reload the page)" : ""}.`, "ok");
+  } catch (err) {
+    status($("status"), err.message, "error");
+  }
+});
+$("botTest").addEventListener("click", async () => {
+  if ($("botKey").value.trim()) return status($("status"), "Save the new key first, then test it.", "error");
+  status($("status"), "Testing the key…");
+  try {
+    const r = await api("/api/admin/bot/test", { method: "POST" });
+    status($("status"), `The key works: ${r.name} answers.`, "ok");
+  } catch (err) {
+    status($("status"), err.message, "error");
+  }
+});
+$("botClear").addEventListener("click", async () => {
+  if (!confirm("Remove the saved API key? The assistant stops working until a new key is saved.")) return;
+  try {
+    showBot(await api("/api/admin/bot", { method: "PUT", body: JSON.stringify({ clear_key: true }) }));
+    status($("status"), "The saved key is removed.", "ok");
+  } catch (err) {
+    status($("status"), err.message, "error");
+  }
 });
