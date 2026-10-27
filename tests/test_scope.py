@@ -83,3 +83,22 @@ def test_user_without_groups_sees_everything(server):
     login(server, "old")
     assert {"A1"} <= {x["code"] for x in server.get("/api/projects").json()}
     assert server.get("/api/parts").json()["total"] == 1
+
+
+def test_files_and_variants_of_other_groups_are_refused(server):
+    login(server)
+    pl = server.post("/api/projects", json={"code": "FP", "name": "Plastic files"}).json()
+    assert _part(server, pl["id"], "plastic_cover.step", "ABS", "injection_moulding", "FP-1").status_code == 200
+    part = server.get("/api/parts", params={"q": "FP-1"}).json()["rows"][0]
+    detail = server.get(f"/api/parts/{part['id']}").json()
+    file_id = detail["revisions"][0]["file_id"]
+    vid = next(v["id"] for v in server.post(f"/api/projects/{pl['id']}/variants", json={"code": "V1", "name": "v"}).json()["variants"] if v["code"] == "V1")
+    server.post("/api/auth/logout")
+    _user(server, "sm1", "engineer", ["sheet_metal"])
+    login(server, "sm1")
+    r = server.get(f"/api/files/{file_id}")
+    assert r.status_code == 403 and "tool group" in r.json()["detail"]
+    assert server.get(f"/api/variants/{vid}/bom").status_code == 403
+    server.post("/api/auth/logout")
+    login(server)
+    assert server.get(f"/api/files/{file_id}").status_code == 200

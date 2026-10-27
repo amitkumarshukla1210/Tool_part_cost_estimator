@@ -97,6 +97,8 @@ def check_process(process: str | None) -> None:
 
 PART_PATH = re.compile(r"^/api/parts/(\d+)(/|$)")
 PROJECT_PATH = re.compile(r"^/api/projects/(\d+)(/|$)")
+FILE_PATH = re.compile(r"^/api/files/(\d+)$")
+VARIANT_PATH = re.compile(r"^/api/variants/(\d+)(/|$)")
 
 
 def guard(path: str) -> str | None:
@@ -105,9 +107,21 @@ def guard(path: str) -> str | None:
     if g is None:
         return None
     m, p = PART_PATH.match(path), PROJECT_PATH.match(path)
-    if not m and not p:
+    f, v = FILE_PATH.match(path), VARIANT_PATH.match(path)
+    if not (m or p or f or v):
         return None
     with db.engine().connect() as conn:
+        if f:                       # a 3D file or thumbnail of a part revision: the part's tool group decides
+            r = db.revisions
+            owners = conn.execute(select(r.c.part_id).where((r.c.file_id == int(f.group(1))) | (r.c.thumbnail_file_id == int(f.group(1))))).scalars().all()
+            if owners and not any(part_ok(conn, pid, g) for pid in owners):
+                return f"This file belongs to a part of a tool group that is not yours ({_names(g)})."
+            return None
+        if v:
+            row = conn.execute(select(db.variants.c.project_id).where(db.variants.c.id == int(v.group(1)))).first()
+            if row and not project_ok(conn, row[0], g):
+                return f"This variant's project has no parts of your tool groups ({_names(g)})."
+            return None
         if m and not part_ok(conn, int(m.group(1)), g):
             return f"This part belongs to a tool group that is not yours ({_names(g)}). The admin sets the tool groups on Admin → Users & roles."
         if p and not project_ok(conn, int(p.group(1)), g):

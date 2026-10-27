@@ -3061,7 +3061,7 @@ def dashboard(project_id: int) -> dict:
                   "tool_is_example": bool(tool_example),
                   "tool_share_of_budget_pct": round(100 * tool_capex / budget, 1) if tool_capex and budget else None,
                   "tool_note": "Tool CAPEX = Σ over the project's parts of tool cost per tool × tools over the programme "
-                               "(latest stored tool cost version; moulds and dies of plastic and die-cast parts)."},
+                               "(latest stored tool cost version; moulds, dies and patterns of every tool group: plastic, die casting, foundry, sheet metal, EPS, blow)."},
         "open_corrections": corrections,
         "parts_rm_costed": rm_costed,
         "rm_is_example": any(v.get("rm_is_example") for v in variants),
@@ -3069,7 +3069,7 @@ def dashboard(project_id: int) -> dict:
         "example_warning": EXAMPLE_WARNING,
         "not_costed_note": "RM cost is the raw-material cost only (quantity × net RM cost per part, from the latest stored "
                            "version). Process cost and the full BOM cost come from the part-costing stage (roadmap "
-                           "stage 8). Tool CAPEX covers the moulds and dies costed so far (stage 4).",
+                           "stage 8). Tool CAPEX covers the moulds, dies and patterns costed so far.",
     }
 
 

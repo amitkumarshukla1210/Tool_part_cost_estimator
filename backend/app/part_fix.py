@@ -214,7 +214,11 @@ def add_draft(shape, axis: str, angle_deg: float, neutral: str = "auto"):
         op = BRepOffsetAPI_DraftAngle(shape.wrapped)
         done = skipped = 0
         for f, out in zip(walls, side):
-            op.Add(TopoDS.Face_s(f.wrapped), gp_Dir(*pull), math.radians((sgn if out else -sgn) * angle_deg), plane)
+            try:                      # OpenCascade throws (Standard_ConstructionError) on some faces instead of AddDone() = False
+                op.Add(TopoDS.Face_s(f.wrapped), gp_Dir(*pull), math.radians((sgn if out else -sgn) * angle_deg), plane)
+            except Exception:
+                skipped += 1
+                continue
             if op.AddDone():
                 done += 1
             else:
