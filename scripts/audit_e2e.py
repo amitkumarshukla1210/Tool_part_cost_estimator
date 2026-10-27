@@ -177,11 +177,14 @@ def run_case(a: Audit, name, file, material, process, volume, ptype) -> dict:
     if not m:
         return {"case": name, "ok": False}
     code = f"{name.upper().replace('_', '-')[:14]}-1"
+    # an assembly in the file (e.g. the insert-moulded housing): cost the moulded body the import suggests for this process
+    key = next((k for k, v in m["defs"].items() if not v["is_assembly"] and (v.get("suggestion") or {}).get("process") == process), m["root"])
     r = a.call(name, "post", f"/api/import/{m['token']}/commit",
-               json={"project_id": proj["id"], "items": {m["root"]: {"material": material, "process": process, "part_code": code}}})
+               json={"project_id": proj["id"], "items": {key: {"material": material, "process": process, "part_code": code}}})
     if not r:
         return {"case": name, "ok": False}
-    pid = r["part_ids"][0]
+    found = [x for x in c.get("/api/parts", params={"q": code, "limit": 50}).json()["rows"] if x["part_code"] == code]
+    pid = found[0]["id"] if found else r["part_ids"][0]      # the import also registers the assemblies above the part
     if volume:
         a.call(name, "put", f"/api/parts/{pid}", json={"annual_volume": volume})
     tool = ptype in TOOL_TYPES
@@ -191,10 +194,11 @@ def run_case(a: Audit, name, file, material, process, volume, ptype) -> dict:
     out = {"case": name, "part_id": pid, "ok": True}
     d = a.call(name, "get", P)
     a.call(name, "get", f"{P}/trace")
-    rm = a.call(name, "post", f"{P}/rm-cost", json={})
-    a.call(name, "get", f"{P}/rm-cost/trace")
-    a.call(name, "get", f"{P}/rm-cost/export.xlsx", file_kind="xlsx")
-    a.call(name, "get", f"{P}/rm-cost/export.pdf", file_kind="pdf")
+    rx = "ok" if ptype else "any"              # machined / bought-out: RM comes in a later stage (main says so)
+    a.call(name, "post", f"{P}/rm-cost", json={}, expect=rx)
+    a.call(name, "get", f"{P}/rm-cost/trace", expect=rx)
+    a.call(name, "get", f"{P}/rm-cost/export.xlsx", expect=rx, file_kind="xlsx")
+    a.call(name, "get", f"{P}/rm-cost/export.pdf", expect=rx, file_kind="pdf")
     a.call(name, "get", f"{P}/concept", expect="ok" if mould else "any")
     a.call(name, "get", f"{P}/design-loop")
     tc = a.call(name, "post", f"{P}/tool-cost", json={}, expect="ok" if tool else "any")
@@ -341,6 +345,39 @@ def global_checks(a: Audit) -> None:
         a.call("global", "post", up, files={"file": ("x.xlsx", content)})
 
 
+def robustness(a: Audit) -> None:
+    """Wrong input must give a clear message (4xx), never a server error."""
+    c = a.c
+    a.call("robustness", "post", "/api/import/step", expect="any", files={"file": ("junk.step", b"this is not a step file")})
+    a.call("robustness", "post", "/api/import/step", expect="any", files={"file": ("empty.step", b"")})
+    a.call("robustness", "post", "/api/import/excel", expect="any", files={"file": ("junk.xlsx", b"not excel")})
+    proj = c.post("/api/projects", json={"code": "ROB", "name": "Robustness"}).json()
+    a.call("robustness", "post", "/api/projects", expect="any", json={"code": "ROB", "name": "duplicate code"})
+    a.call("robustness", "post", "/api/projects", expect="any", json={"code": "", "name": ""})
+    with open(SAMPLES / "plastic_cover.step", "rb") as fh:
+        m = c.post("/api/import/step", files={"file": ("p.step", fh)}).json()
+    pid = c.post(f"/api/import/{m['token']}/commit", json={"project_id": proj["id"], "items": {m["root"]: {"material": "ABS", "process": "injection_moulding",
+                                                                                                         "part_code": "ROB-1"}}}).json()["part_ids"][0]
+    for bad in ({"annual_volume": -5}, {"annual_volume": "abc"}, {"process": "no_such_process"}, {"country": "ZZ"}):
+        a.call("robustness", "put", f"/api/parts/{pid}", expect="na", json=bad)
+    # a material without density (free text is allowed): every cost must explain it, none may crash
+    a.call("robustness", "put", f"/api/parts/{pid}", json={"material": "NO SUCH MATERIAL"})
+    for u in ("rm-cost", "tool-cost", "piece-cost"):
+        a.call("robustness", "post", f"/api/parts/{pid}/{u}", json={}, expect="any")
+    a.call("robustness", "put", f"/api/parts/{pid}", json={"material": "ABS", "annual_volume": 1000000000})     # huge volume: must still cost
+    for u in ("rm-cost", "tool-cost", "piece-cost"):
+        a.call("robustness", "post", f"/api/parts/{pid}/{u}", json={})
+    big = c.get(f"/api/parts/{pid}").json()
+    _positive(a, "robustness", "part cost at 1e9 / year", big.get("piece_cost_inr"))
+    for u in ("", "/rm-cost", "/tool-cost", "/simulation", "/tool-design", "/drawing-data", "/machine-check", "/process-parameters", "/drawing.pdf"):
+        a.call("robustness", "get", f"/api/parts/999999{u}", expect="any")
+    a.call("robustness", "delete", f"/api/parts/{pid}", expect="any")
+    for u in ("", "/tool-cost", "/drawing-data"):
+        a.call("robustness", "get", f"/api/parts/{pid}{u}", expect="any")
+    a.call("robustness", "get", "/api/projects/999999/dashboard", expect="any")
+    a.call("robustness", "get", "/api/files/999999", expect="any")
+
+
 def report(a: Audit, results: list[dict], out: Path, seconds: float) -> None:
     lines = ["# End-to-end audit report", "", f"Run on the current code, {time.strftime('%Y-%m-%d %H:%M')}, {len(a.rows)} calls in {seconds / 60:.1f} min.", ""]
     lines += ["| Case | Part type | Tools | RM INR | Tool CAPEX INR | Part cost INR | Findings |", "|---|---|---|---|---|---|---|"]
@@ -365,6 +402,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default=str(ROOT / "docs" / "audit_e2e_report.md"))
     ap.add_argument("--only", default="")
     ap.add_argument("--json", default="")
+    ap.add_argument("--robust", action="store_true", help="only the robustness checks")
     args = ap.parse_args(argv)
     tmp = Path(tempfile.mkdtemp(prefix="dtc_audit_"))
     _env(tmp)
@@ -373,7 +411,7 @@ def main(argv=None) -> int:
     a = Audit(TestClient(app))
     t0 = time.time()
     results = []
-    for case in CASES:
+    for case in ([] if args.robust else CASES):
         if args.only and args.only not in case[0]:
             continue
         print(f"== {case[0]}", flush=True)
@@ -385,9 +423,13 @@ def main(argv=None) -> int:
         for x in a.findings:
             if x["case"] == case[0]:
                 print(f"   FINDING {x['url']}: {x['what']} {x['detail'][:200]}", flush=True)
-    if not args.only:
+    if args.robust:
+        robustness(a)
+    elif not args.only:
         print("== global", flush=True)
         global_checks(a)
+        print("== robustness", flush=True)
+        robustness(a)
         print("== logins", flush=True)
         logins(a)
     report(a, results, Path(args.out), time.time() - t0)

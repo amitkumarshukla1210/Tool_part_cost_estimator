@@ -32,6 +32,10 @@ SEED_WINDOWS = [
     ("Aluminium LM6 / A356", 720, 690, 750, 20, 10, 40, 0, 0, 0), ("Bronze", 1150, 1100, 1200, 20, 10, 40, 0, 0, 0),
     ("EPS bead grade S (20 kg/m3)", 115, 108, 125, 40, 30, 50, 0, 0, 0), ("EPS bead grade F, flame retardant (25 kg/m3)", 115, 108, 125, 40, 30, 50, 0, 0, 0),
     ("PET bottle grade (IV 0.80)", 105, 95, 115, 12, 8, 15, 60, 160, 4), ("rPET food grade", 105, 95, 115, 12, 8, 15, 60, 160, 4),
+    # materials added to Master data → Materials later (stage 29); typical values, EXAMPLE
+    ("PP copolymer (impact)", 230, 200, 260, 40, 20, 60, 90, 0, 0), ("PP talc filled 20 %", 230, 210, 260, 45, 30, 60, 100, 0, 0),
+    ("ABS flame retardant V0", 220, 200, 240, 55, 40, 70, 85, 80, 3), ("PA66 GF30 heat stabilised", 290, 275, 305, 85, 70, 100, 150, 80, 4),
+    ("Aluminium AlSi10Mg (EN AC-43400)", 680, 660, 700, 220, 180, 260, 400, 0, 0),
 ]
 # part type, name, formula, min, max, unit, label, why, kind
 P = "parameter"
