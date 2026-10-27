@@ -27,7 +27,7 @@ from . import costing_db, formula
 from .table_set import TableSet, col
 
 DEFAULT_PATH = costing_db.DEFAULT_PATH
-PART_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow")
+PART_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow", "machined")
 CATEGORIES = ("made", "bought_out", "process")
 # What a process rate is charged per (the unit of the rate in the library is "<currency>/<basis>").
 BASES = ("kg", "cm²", "mm", "m²", "unit")
@@ -36,6 +36,8 @@ PRICING = ("machine_hour", "labour_hour", "unit")
 # Concept rules (roadmap stage 5): one proposal per topic, the first rule that applies.
 TOPICS = ("gate", "runner", "cooling", "ejection", "insert")
 COST_GROUPS = ("cutting", "machining", "polishing", "treatment", "assembly", "design", "trial")
+# Bar stock shapes of machined parts (roadmap stage 37).
+STOCK_SHAPES = ("round", "hex", "square", "flat", "plate")
 # Machine of the try-out process: the smallest moulding / die-casting machine whose tonnage takes the clamp force.
 BY_TONNAGE = "by tonnage"
 
@@ -302,6 +304,24 @@ TABLES = {
         col("is_example", "Example", "bool"),
         col("notes", "Notes", required=False),
     ]},
+    # machined parts (roadmap stage 37)
+    "stock_sizes": {"title": "Stock sizes", "unique": ("shape", "size_mm", "width_mm"), "columns": [
+        col("shape", "Shape (round, hex, square, flat bar; plate = cut to the part's width)", "text", STOCK_SHAPES),
+        col("size_mm", "Size (mm): diameter, across flats, side or thickness", "number"),
+        col("width_mm", "Width (mm): flat bar width; 0 for round, hex, square and plate", "number"),
+        col("section_factor", "Section factor: cross-section ÷ (size × width); round 0.7854, hex 0.866, others 1", "number"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes", required=False),
+    ]},
+    "machining_data": {"title": "Machining data", "unique": ("material",), "columns": [
+        col("material", "Material (Master data → Materials, machined)"),
+        col("turn_rough_cm3_min", "Rough turning removal (cm³/min)", "number"),
+        col("mill_rough_cm3_min", "Rough milling removal (cm³/min)", "number"),
+        col("finish_cm2_min", "Finish machining (cm² of surface / min)", "number"),
+        col("drill_mm_min", "Drilling feed (mm / min)", "number"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes", required=False),
+    ]},
 }
 
 
@@ -310,6 +330,14 @@ def _check(clean: dict) -> None:
     drawing_data.validate(clean)
     dim_tolerances.validate(clean)
     process_params.validate(clean)
+    for i, r in enumerate(clean.get("stock_sizes", []), start=2):
+        if r["size_mm"] <= 0 or r["width_mm"] < 0 or not 0 < r["section_factor"] <= 1:
+            raise MouldDbError(f"Stock sizes row {i}: size must be more than 0, width 0 or more and the section factor between 0 and 1.")
+        if r["shape"] == "flat" and r["width_mm"] < r["size_mm"]:
+            raise MouldDbError(f"Stock sizes row {i}: a flat bar's width must be at least its thickness.")
+    for i, r in enumerate(clean.get("machining_data", []), start=2):
+        if min(r["turn_rough_cm3_min"], r["mill_rough_cm3_min"], r["finish_cm2_min"], r["drill_mm_min"]) <= 0:
+            raise MouldDbError(f"Machining data row {i} ({r['material']}): every rate must be more than 0.")
     from . import concept
     for i, r in enumerate(clean["concept_rules"], start=2):
         try:
@@ -464,6 +492,10 @@ def sizing_rules(part_type: str) -> dict:
 def design_rules(part_type: str) -> dict:
     """Detailed tool design rules (roadmap stage 27): clearances, fits, plate and standard-part sizes, tolerances."""
     return {r["parameter"]: r for r in tables()["design_rules"] if r["part_type"] == part_type}
+
+
+def machining_data(material: str) -> dict | None:
+    return next((r for r in tables()["machining_data"] if r["material"] == material), None)
 
 
 def time_parameters(part_type: str) -> dict:

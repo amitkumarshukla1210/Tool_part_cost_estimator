@@ -717,7 +717,7 @@ def search(q="", project_id=None, process="", status="", sourcing="", rev="", fi
     if tool_max is not None:
         conds.append(db.parts.c.tool_cost_inr <= tool_max)
     if tool_missing is True:  # a part whose process has a tool cost (moulding, die casting) but none stored yet
-        tool_procs = [c for c, p in register_setup.processes().items() if p["part_type"] in tool_cost.PART_TYPES]
+        tool_procs = [c for c, p in register_setup.processes().items() if p["part_type"] in TOOLED]
         made = [c for c, x in register_setup.sourcing().items() if x["is_costed"]]
         conds.append(and_(db.parts.c.tool_cost_inr.is_(None), db.parts.c.is_assembly.is_(False),
                           db.parts.c.process.in_(tool_procs), db.parts.c.sourcing.in_(made)))
@@ -1149,13 +1149,23 @@ def _rm_compute(part_id: int, country: str | None = None) -> dict:
             "note": f"Developed blank from the 3D model: {how}"}}
         part["blank_width_mm"] = {"value": blank["width"], "unit": "mm", "source": cad | {
             "note": f"Developed blank from the 3D model: {how}"}}
+    stock = None
+    if family == "machined":   # bar stock (stage 37): the standard size that holds the part
+        from . import machining
+        try:
+            items, stock = machining.rm_part_items(rev, d["tool_inputs"] or {})
+        except machining.MachiningError as exc:
+            raise RMNotApplicable(str(exc)) from None
+        part |= items
     country = (country or d["country"] or register_setup.settings()["default_country"]).upper()
     as_of = d["costing_month"] or rates.current_month()
     t.overrides = (d.get("trace_overrides") or {}).get("rm") or {}
     r = rm_cost.run(family, country=country, as_of=as_of, material=d["material"], part=part, given=overrides,
                     given_source={"type": "user", "note": f"Typed in the part register for {d['part_code']}"}, trace=t)
     r["blank"] = blank if family == "sheet_metal" else None
+    r["stock"] = stock
     r["key"] = {"blank": [blank["length"], blank["width"]] if family == "sheet_metal" else None,
+                **({"stock": [stock["shape"], stock["size_mm"], stock["width_mm"], stock["length_mm"]]} if stock else {}),
                 "overrides": t.overrides, "revision_id": rev["id"], "material": d["material"], "family": family, "country": country,
                 "as_of": as_of, "inputs": overrides, "net_weight_g": round(t.value("weight"), 6),
                 "rates": sorted(x["id"] for x in r["rates_used"]), "formulas": _formula_hash(family)}
@@ -1399,8 +1409,11 @@ TOOL_COLUMNS = ("id", "part_id", "version", "revision_id", "rev", "part_type", "
                 "reason", "created_by", "created_at")
 TOOL_INPUTS = {"cavities": "Cavities per tool", "hot_runner": "Hot runner", "slides_per_cavity": "Slides per cavity",
                "lifters_per_cavity": "Lifters per cavity", "inserts_per_cavity": "Small inserts per cavity",
-               "warranty": "Warranty / spares included"}
+               "warranty": "Warranty / spares included",
+               "route": "Machined: turned or milled", "stock_shape": "Machined: bar stock shape", "setups": "Machined: set-ups per part"}
 TOOL_FLAGS = ("hot_runner", "warranty")
+TOOL_CHOICES = {"route": ("turned", "milled"), "stock_shape": ("round", "hex", "square", "flat", "plate")}
+TOOLED = tool_cost.PART_TYPES + ("sheet_metal", "machined")   # part types with a tool / fixture cost
 
 
 def _sheet_inputs(v, where):
@@ -1732,6 +1745,11 @@ def _tool_inputs(v, where):
         if k in TOOL_FLAGS:
             out[k] = val is True or str(val).strip().lower() in ("1", "true", "yes", "on")
             continue
+        if k in TOOL_CHOICES:
+            if str(val) not in TOOL_CHOICES[k]:
+                raise RegisterError(f"{where}: {TOOL_INPUTS[k].lower()} must be one of {', '.join(TOOL_CHOICES[k])}.")
+            out[k] = str(val)
+            continue
         n = _num(val, f"{where}: {TOOL_INPUTS[k].lower()}", int, required=True)
         if n < (1 if k == "cavities" else 0) or n > 256:
             raise RegisterError(f"{where}: {TOOL_INPUTS[k].lower()} must be between {1 if k == 'cavities' else 0} and 256.")
@@ -1776,7 +1794,7 @@ def tool_eligibility(p: dict) -> str:
     proc = register_setup.processes().get(p["process"])
     if not proc:
         return "Set the process first."
-    if proc["part_type"] not in tool_cost.PART_TYPES + ("sheet_metal",):
+    if proc["part_type"] not in TOOLED:
         return tool_cost.LATER.get(proc["part_type"], f"Tool cost for {proc['name']} parts comes in a later stage.")
     return ""
 
@@ -1821,6 +1839,8 @@ def _tool_compute(part_id: int, country: str | None = None) -> dict:
     if why:
         raise ToolNotApplicable(why)
     part_type = register_setup.processes()[d["process"]]["part_type"]
+    if part_type == "machined":
+        return _machining_compute(part_id, d, country)
     try:
         t, _, _, d, rev = _geometry_trace(part_id)
     except RegisterError:
@@ -1888,6 +1908,30 @@ def _tool_compute(part_id: int, country: str | None = None) -> dict:
     r["process"] = d["process"]
     r["stage_c"] = {k: cap[k] for k in ("cavities_needed", "cavities_per_tool", "tools_for_capacity", "tools_for_life",
                                         "tool_sets_over_programme", "limited_by")} | {"note": stage_c}
+    return r
+
+
+def _machining_compute(part_id: int, d: dict, country: str | None) -> dict:
+    """Machined parts (stage 37): machining time, machine and fixture, stored like a tool cost version."""
+    from . import machining
+    try:
+        r = machining.run(part_id, country)
+    except machining.MachiningError as exc:
+        raise ToolNotApplicable(str(exc)) from None
+    rev = d["revisions"][0]
+    setup = costing_setup.tables()
+    r["key"] = {"revision_id": rev["id"], "part_type": "machined", "material": d["material"], "country": r["country"],
+                "as_of": r["as_of"], "inputs": d["tool_inputs"] or {}, "stock": r["stock"]["row"], "length": r["stock"]["length_mm"],
+                "route": r["route"], "machines": r["tools_count"], "cycle_s": round(r["named"]["cycle_s"], 6),
+                "rates": sorted(x["id"] for x in r["rates_used"]),
+                "overrides": (d.get("trace_overrides") or {}).get("tool") or {},
+                "master": hashlib.sha1(json.dumps({"f": [x for k in ("cost_formulas", "formula_inputs") for x in setup[k]
+                                                         if x["scope"] in ("machining", "rm_machined")],
+                                                   "p": machining.params(), "m": mould_db.machining_data(d["material"])},
+                                                  sort_keys=True, default=str).encode()).hexdigest()[:12]}
+    r["revision"] = {"id": rev["id"], "rev": rev["rev"]}
+    r["process"] = d["process"]
+    r["stage_c"] = {"note": f"{r['tools_count']} machine{'s' if r['tools_count'] != 1 else ''} (and fixture sets) for the annual volume"}
     return r
 
 
@@ -2327,6 +2371,8 @@ def set_tool_inputs(part_id: int, tool_inputs: dict | None, tool_country: str | 
     if tool_country is not None:
         data["tool_country"] = tool_country
     update_part(part_id, data, refresh=False)
+    if (register_setup.processes().get(part_detail(part_id, with_rm=False)["process"]) or {}).get("part_type") == "machined":
+        refresh_rm([part_id], reason)   # route and stock shape decide the bar stock of the RM cost
     try:
         res = compute_tool(part_id, reason)
     except RegisterError as exc:
@@ -2353,12 +2399,54 @@ def tool_trace(part_id: int, version: int | None = None) -> dict:
 
 def export_tool_excel(part_id: int, version: int | None = None, die: str | None = None) -> bytes:
     d = part_detail(part_id, with_rm=False)
-    return tool_cost_excel(tool_trace(part_id, version), d, die)
+    tr = tool_trace(part_id, version)
+    if tr.get("part_type") == "machined":
+        return machining_excel(tr, d)
+    return tool_cost_excel(tr, d, die)
 
 
 def export_tool_pdf(part_id: int, version: int | None = None, die: str | None = None) -> bytes:
-    from .pdf_report import tool_cost_pdf
-    return tool_cost_pdf(tool_trace(part_id, version), part_detail(part_id, with_rm=False), die)
+    from .pdf_report import piece_cost_pdf, tool_cost_pdf
+    tr, d = tool_trace(part_id, version), part_detail(part_id, with_rm=False)
+    if tr.get("part_type") == "machined":
+        sheet = _machining_sheet(tr)
+        return piece_cost_pdf(sheet, d, *_trace_rows(sheet), kicker="MACHINING & FIXTURE SHEET", result_label="Fixture cost per set")
+    return tool_cost_pdf(tr, d, die)
+
+
+def _machining_sheet(tr: dict) -> dict:
+    """A machining & fixture trace in the shape of the part-cost sheet (stage 37)."""
+    return tr | {"machine": tr["trial"]["machine"]["machine_id"], "is_example": bool((tr.get("example") or {}).get("any"))}
+
+
+def machining_excel(tr: dict, d: dict) -> bytes:
+    """Machining & fixture sheet: Summary, Steps, Inputs (with sources), Rates used. Full backup data."""
+    sheet = _machining_sheet(tr)
+    steps, inputs, rts = _trace_rows(sheet)
+    st, n = tr["stock"], tr["nodes"]
+    wb = Workbook()
+    wb.properties.title = f"Design to Cost — Machining & fixture {d['part_code']}"
+    summary = [["Part", f"{d['part_code']} · {d['name']}"], ["Revision", tr["revision"]["rev"]], ["Material", tr["material"]],
+               ["Route", f"{tr['route']}: {tr['route_why']}"], ["Machine", sheet["machine"]], ["Bar stock", st["label"]],
+               ["Machining time per part (s)", n["calc:cycle_s"]["value"]], ["Machines needed", tr["tools_count"]],
+               [f"Fixture cost per set ({tr['currency']})", tr["value"]], ["Fixture cost per set (INR)", tr["value_inr"]],
+               ["Fixture CAPEX (INR)", tr["capex_inr"]], ["Country", tr["country"]], ["Costing month", tr["as_of"]],
+               ["Version", tr.get("version") or "live, not stored"],
+               ["Example values", EXAMPLE_WARNING if sheet["is_example"] else "no"]]
+    for i, (name, head, rows) in enumerate((("Summary", ["Item", "Value"], summary), ("Steps", ["Step", "Formula", "Value", "Unit"], steps),
+                                            ("Inputs", ["Input", "Value", "Unit", "Source"], inputs),
+                                            ("Rates used", ["Rate #", "Category", "Item", "Country", "Month", "Value", "Unit", "Status", "Example"], rts))):
+        ws = wb.active if i == 0 else wb.create_sheet()
+        ws.title = name
+        ws.append(head)
+        for c in ws[1]:
+            c.font = Font(bold=True, color="FFFFFF")
+            c.fill = HEADER_FILL
+        for r in rows:
+            ws.append(r)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 
 def tool_cost_excel(tr: dict, part: dict | None = None, die: str | None = None) -> bytes:
@@ -2955,7 +3043,7 @@ def dashboard(project_id: int) -> dict:
     corrections = sum(by_status.get(s["code"], 0) for s in statuses if s.get("is_open_correction"))
     costed_tools = [r for r in tool_rows if r["tool_capex_inr"] is not None]
     tools_missing = sum(1 for r in tool_rows if r["tool_capex_inr"] is None
-                        and procs.get(r["process"], {}).get("part_type") in tool_cost.PART_TYPES
+                        and procs.get(r["process"], {}).get("part_type") in TOOLED
                         and srcs.get(r["sourcing"], {}).get("is_costed"))
     tool_capex = sum(r["tool_capex_inr"] for r in costed_tools) if costed_tools else None
     budget = project["capex_budget_inr"]
