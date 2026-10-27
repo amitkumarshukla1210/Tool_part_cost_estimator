@@ -127,3 +127,19 @@ def guard(path: str) -> str | None:
         if p and not project_ok(conn, int(p.group(1)), g):
             return f"This project has no parts of your tool groups ({_names(g)})."
     return None
+
+
+# ---------- project totals per tool group (stage 37) ----------
+
+def project_view(conn, project_id: int) -> dict:
+    """What the project dashboard / leader view of the logged-in user covers: {limited, visible (part ids or None = all),
+    hidden (count), note}."""
+    g = groups()
+    if g is None:
+        return {"limited": False, "visible": None, "hidden": 0, "note": ""}
+    all_ids = set(conn.execute(select(db.parts.c.id).where(db.parts.c.project_id == project_id)).scalars())
+    vis = set(conn.execute(select(db.parts.c.id).where(and_(db.parts.c.project_id == project_id, part_condition(g)))).scalars())
+    hidden = len(all_ids - vis)
+    note = (f"Your tool groups only ({_names(g)}): {hidden} part(s) of other tool groups are not counted in these figures."
+            if hidden else f"Your tool groups: {_names(g)}.")
+    return {"limited": True, "visible": vis, "hidden": hidden, "note": note}

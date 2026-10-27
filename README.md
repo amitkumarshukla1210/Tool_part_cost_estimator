@@ -1208,6 +1208,15 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 - The chat stays in the browser tab; *New chat* clears it. Code: `backend/app/bot.py`, `frontend/bot.js`, `frontend/bot.css`.
   Tests: `tests/test_bot.py` (a stand-in for Claude, so no key or internet is needed).
 
+## Project totals per tool group (stage 37)
+
+- For a user limited to tool groups (Admin → Users & roles, stage 30), the **project dashboard** and the **project leader view** count only the
+  parts of their groups: part counts, files missing, RM, tool & mould CAPEX, BOM cost vs target of every variant (lines of other groups left out),
+  machines needed and their CAPEX, and the CAPEX plan (tool lines of their parts, machine lines of the machines their parts need, and the other lines).
+  A note says *"Your tool groups only (…): N part(s) of other tool groups are not counted"*; the Excel and PDF exports carry the same note.
+- *Recalculate part costs* on the dashboard recalculates only their parts. Head of department and admin always see the whole project.
+- Code: `scope.project_view`, `register.dashboard`, `leader.py`. Tests: `tests/test_scope.py`.
+
 ## End-to-end audit (run before every release)
 
 `python scripts/audit_e2e.py` drives the whole tool through its API like a user, on temporary copies of the master data (your data is not touched):
