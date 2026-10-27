@@ -9,7 +9,8 @@ Project: **Design to Cost — Part Cost Estimator**, repository `amitkumarshukla
 I am Amit, Head of Operations / costing at an OEM (supply chain, production, strategic sourcing, projects; RM, part and tool cost,
 BOM cost and CAPEX, EBITDA, digital transformation). Answer simply, **INR first**.
 
-**Read `README.md` and `ROADMAP.md` first.** Stages 1–35 are built; the next stage is the first free number in `ROADMAP.md`.
+**State (27 Oct 2026):** stages 1–36 are built and merged (last PR 45, `main` at `4383327`); the next stage is **37** (first free number in `ROADMAP.md`).
+To save tokens, do not read the whole README (1350 lines): read the stage table in `ROADMAP.md` and only the README section of the topic I ask about.
 Stack: Python / FastAPI (`backend/app/`), plain HTML / JS (`frontend/`), SQLite (`data/projects.sqlite` = my data, `master_data/costing_db.sqlite`
 + `master_data/master_data.xlsx` = master data), CadQuery for 3D, reportlab (PDF), ezdxf (DXF), openpyxl (Excel). Local: Windows kit `windows/`
 (`DTC_Start.bat`, `DTC_Update.bat` with master-data merge, `DTC_Backup.bat`, `DTC_Restore.bat`, `DTC_Rollback.bat`) at http://127.0.0.1:8000/.
@@ -26,6 +27,10 @@ What the later stages added (details in README):
 - 33: production machine asked before the tool design, checked, or recommended (`machine_spec.py`).
 - 34: process parameters for the first trial from the simulation and the material window (`process_params.py`).
 - 35: logo and name on every Excel and PDF download (`branding.py`).
+- 36: AI assistant *Ask AI* on every page, read only, sees only what the user may see; Admin → AI assistant (on/off, model, API key)
+  (`bot.py`, `frontend/bot.js`, `tests/test_bot.py`).
+- Audit (PR 45): `python scripts/audit_e2e.py` drives the whole tool (14 cases, 829 calls), 0 findings; report `docs/audit_e2e_report.md`.
+  Run it before every release. Many costs still use EXAMPLE rates (Master data → checklist) until I replace them.
 
 **Rules (always):**
 - No hard-coded rates or rules: every value comes from master data or a formula in master data and is traceable on screen.
@@ -41,6 +46,7 @@ What the later stages added (details in README):
 (Playwright, Chromium at `/opt/pw-browsers/chromium`, or `run`) and look at the PDFs / drawings (`pdftoppm`) → README section + ROADMAP row →
 push, open ONE PR, do not merge unless I say.
 
-Start by reading README.md, ROADMAP.md and `git log --oneline -15`, tell me in a few lines what you see, and wait for my request.
+Start with `git log --oneline -5` and the ROADMAP stage table only, confirm in 3 lines what is new since this memory, and wait for my request.
+When a stage is merged, update this memory (stage list, State line) in `.claude/skills/design-to-cost-dev/SKILL.md` and `docs/HANDOFF_PROMPT.md`.
 
 ---
