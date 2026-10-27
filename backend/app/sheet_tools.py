@@ -126,7 +126,8 @@ def press_for(force_t: float) -> dict:
 def run(feat: dict, material: str, typed: dict, default_mode: str = "") -> dict:
     mats = {r["material"]: r for r in mould_db.tables()["sheet_materials"]}
     if material not in mats:
-        raise ValueError(f"Mould & die database → Sheet materials has no row for '{material or '(no material)'}'. Set the part's material.")
+        raise ValueError(f"Mould & die database → Sheet materials has no row for '{material or '(no material)'}'. "
+                         "Add the material there (shear, tensile, yield strength, E, bend and hole factors, LDR) or choose another sheet material.")
     m = mats[material]
     env = sample_env() | {k: 0.0 for k in FEATURES} | feat | {k: m[k] for k in MATERIAL_VARS}
     steps = []

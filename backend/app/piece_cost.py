@@ -86,6 +86,9 @@ def run(part_id: int, country: str | None = None) -> dict:
     volume = volume or params.get("annual_volume")
     years = d["programme_life_years"] or params.get("programme_years")
     gt = register._geometry_trace(part_id)[0]
+    if "total_weight" not in gt.nodes and "weight" not in gt.nodes:
+        raise PieceError(f"'{d['material'] or '(no material)'}' has no density in Master data → Materials: set the part's material "
+                         "(with a density there) to cost the part.")
     weight_g = gt.value("total_weight") if "total_weight" in gt.nodes else gt.value("weight")
     ins_cost, notes = 0.0, []
     for i in d["inserts"]:

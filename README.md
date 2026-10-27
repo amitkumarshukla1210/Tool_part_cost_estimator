@@ -1208,6 +1208,15 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 - The chat stays in the browser tab; *New chat* clears it. Code: `backend/app/bot.py`, `frontend/bot.js`, `frontend/bot.css`.
   Tests: `tests/test_bot.py` (a stand-in for Claude, so no key or internet is needed).
 
+## End-to-end audit (run before every release)
+
+`python scripts/audit_e2e.py` drives the whole tool through its API like a user, on temporary copies of the master data (your data is not touched):
+upload → register → RM cost → tool cost → simulation → tool design and drawings → drawing data → machine → process parameters → part cost →
+country comparison → PO pack → project dashboard and leader view, for every tool group at low and high volume, large parts, insert moulding and a
+machined part; then the exports, master-data round trips, wrong input (robustness) and logins with roles and tool groups. Every file is opened
+(PDF, Excel, DXF, STEP, ZIP), every cost must be positive, no NaN, nothing slower than 60 s. Report: `docs/audit_e2e_report.md`.
+`--only plastic` runs the cases whose name contains the word; `--robust` only the wrong-input checks.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:
