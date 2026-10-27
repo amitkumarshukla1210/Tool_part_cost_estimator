@@ -445,7 +445,7 @@ def sheet_features(shape: cq.Shape, thickness: float) -> dict:
 
 
 def machining_features(shape: cq.Shape, hole_max_dia_mm: float = 20.0) -> dict:
-    """What a machined part (roadmap stage 36) needs from its 3D model: is it turned, and where are its holes.
+    """What a machined part (roadmap stage 37) needs from its 3D model: is it turned, and where are its holes.
 
     round_share   share of the surface that is turned about one axis: cylinders, cones and tori on that axis plus the
                   flat faces square to it (end faces, shoulders). A shaft is near 1, a milled block far below.

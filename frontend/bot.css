@@ -1,0 +1,53 @@
+/* AI assistant chat panel (roadmap stage 36), on every page. Colours from the Design to Cost theme. */
+#dtcBot { position: fixed; right: 20px; bottom: 20px; z-index: 900; font-size: 14px; }
+.bot-fab { background: var(--brand); color: #fff; border: 0; border-radius: 999px; padding: 12px 20px; font-weight: 600;
+  cursor: pointer; box-shadow: 0 8px 22px rgba(18, 58, 107, 0.35); }
+.bot-fab:hover { background: var(--brand-dark); }
+.bot-fab:focus-visible, .bot-x:focus-visible, .bot-link:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.bot-panel { width: 420px; height: min(640px, calc(100vh - 40px)); display: flex; flex-direction: column; background: var(--white);
+  border: 1px solid var(--grey-border); border-radius: 14px; box-shadow: 0 18px 48px rgba(14, 26, 44, 0.28); overflow: hidden; }
+.bot-panel[hidden] { display: none; }
+.bot-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 12px 14px;
+  background: var(--table-head-dark); color: var(--table-head-dark-text); }
+.bot-head b { display: block; font-size: 15px; }
+.bot-sub { font-size: 12px; opacity: 0.8; }
+.bot-actions { display: flex; align-items: center; gap: 6px; }
+.bot-link { background: none; border: 1px solid rgba(238, 244, 251, 0.4); color: inherit; border-radius: 6px; padding: 4px 10px;
+  cursor: pointer; font-size: 12px; }
+.bot-x { background: none; border: 0; color: inherit; font-size: 22px; line-height: 1; cursor: pointer; padding: 0 4px; }
+.bot-msgs { flex: 1; overflow-y: auto; padding: 14px; background: var(--grey-light); display: flex; flex-direction: column; gap: 10px; }
+.bot-msg { max-width: 92%; padding: 9px 12px; border-radius: 12px; line-height: 1.45; color: var(--text); overflow-wrap: anywhere; }
+.bot-msg.me { align-self: flex-end; background: var(--brand); color: #fff; border-bottom-right-radius: 4px; }
+.bot-msg.ai { align-self: flex-start; background: var(--white); border: 1px solid var(--grey-border); border-bottom-left-radius: 4px; }
+.bot-msg.err { border-color: var(--danger); color: var(--danger); }
+.bot-msg p { margin: 0 0 6px; }
+.bot-msg p:last-child { margin-bottom: 0; }
+.bot-msg .bot-h { font-weight: 700; color: var(--ink); margin-top: 4px; }
+.bot-msg ul, .bot-msg ol { margin: 4px 0 6px 18px; padding: 0; }
+.bot-msg a { color: var(--brand); font-weight: 600; }
+.bot-msg code { background: var(--blue-soft); padding: 0 4px; border-radius: 4px; font-size: 12.5px; }
+.bot-table { overflow-x: auto; margin: 6px 0; }
+.bot-table table { border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.bot-table th { background: var(--table-head-dark); color: var(--table-head-dark-text); text-align: left; padding: 4px 8px; white-space: nowrap; }
+.bot-table td { padding: 4px 8px; border-bottom: 1px solid var(--grey-border); white-space: nowrap; }
+.bot-table tbody tr:nth-child(even) td { background: var(--table-row-alt); }
+.bot-tools { margin-top: 6px; font-size: 11.5px; color: var(--grey); }
+.bot-hello { color: var(--ink-soft); }
+.bot-hello ul { margin: 6px 0 0 18px; padding: 0; }
+.bot-hello li { margin-bottom: 4px; }
+.bot-msg.wait { color: var(--grey); display: flex; align-items: center; gap: 4px; }
+.bot-msg.wait .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); animation: botDot 1.2s infinite ease-in-out; }
+.bot-msg.wait .dot:nth-child(2) { animation-delay: 0.2s; }
+.bot-msg.wait .dot:nth-child(3) { animation-delay: 0.4s; margin-right: 6px; }
+@keyframes botDot { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .bot-msg.wait .dot { animation: none; opacity: 0.7; } }
+.bot-form { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--grey-border); background: var(--white); }
+.bot-form textarea { flex: 1; resize: none; border: 1px solid var(--grey-border); border-radius: 8px; padding: 8px 10px; font: inherit; }
+.bot-form textarea:focus { outline: 2px solid var(--brand); border-color: var(--brand); }
+.bot-form .btn { align-self: stretch; }
+.bot-foot { margin: 0; padding: 0 12px 10px; font-size: 11.5px; color: var(--grey); background: var(--white); }
+@media (max-width: 520px) {
+  #dtcBot { right: 12px; bottom: 12px; left: 12px; display: flex; justify-content: flex-end; }
+  .bot-panel { width: 100%; height: calc(100vh - 24px); }
+}
+@media print { #dtcBot { display: none; } }

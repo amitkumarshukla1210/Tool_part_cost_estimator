@@ -1150,7 +1150,7 @@ def _rm_compute(part_id: int, country: str | None = None) -> dict:
         part["blank_width_mm"] = {"value": blank["width"], "unit": "mm", "source": cad | {
             "note": f"Developed blank from the 3D model: {how}"}}
     stock = None
-    if family == "machined":   # bar stock (stage 36): the standard size that holds the part
+    if family == "machined":   # bar stock (stage 37): the standard size that holds the part
         from . import machining
         try:
             items, stock = machining.rm_part_items(rev, d["tool_inputs"] or {})
@@ -1912,7 +1912,7 @@ def _tool_compute(part_id: int, country: str | None = None) -> dict:
 
 
 def _machining_compute(part_id: int, d: dict, country: str | None) -> dict:
-    """Machined parts (stage 36): machining time, machine and fixture, stored like a tool cost version."""
+    """Machined parts (stage 37): machining time, machine and fixture, stored like a tool cost version."""
     from . import machining
     try:
         r = machining.run(part_id, country)
@@ -2415,7 +2415,7 @@ def export_tool_pdf(part_id: int, version: int | None = None, die: str | None = 
 
 
 def _machining_sheet(tr: dict) -> dict:
-    """A machining & fixture trace in the shape of the part-cost sheet (stage 36)."""
+    """A machining & fixture trace in the shape of the part-cost sheet (stage 37)."""
     return tr | {"machine": tr["trial"]["machine"]["machine_id"], "is_example": bool((tr.get("example") or {}).get("any"))}
 
 

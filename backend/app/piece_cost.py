@@ -105,7 +105,7 @@ def run(part_id: int, country: str | None = None) -> dict:
     rules = register_setup.insert_rules()
     capex_inr = tool["tool_capex_inr"] or tool["tool_cost_inr"]
     fx_cur = 1.0 if cur == "INR" else rates.lookup("forex", cur, "", as_of)["value"]
-    if tool_tr.get("cycle_node") and "cycle_s" not in typed:   # machined (stage 36): the traced machining time
+    if tool_tr.get("cycle_node") and "cycle_s" not in typed:   # machined (stage 37): the traced machining time
         cycle = graft(t, tool_tr, "mc:") and "mc:" + tool_tr["cycle_node"]
     else:
         cycle = (typed.get("cycle_s", params.get("cycle_time_s")), "s",

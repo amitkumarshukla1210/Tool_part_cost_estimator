@@ -165,7 +165,7 @@ with China's rates, for example. Results are shown in that country's currency an
 - The **tool cost sheet** (Excel: Summary, Cost build-up, BOM & processes, Steps, Inputs, Rates used, Example values; and PDF) is on
   the part and on the Estimate page.
 
-Sheet-metal dies are costed die by die (stages 9, 10 and 23), foundry patterns since stage 27 and machining fixtures since stage 36.
+Sheet-metal dies are costed die by die (stages 9, 10 and 23), foundry patterns since stage 27 and machining fixtures since stage 37.
 
 **Example warning.** Every tool cost shown carries the red **"Uses example rates – not for negotiation"** warning while any
 rate **or** master-data row it uses (machine, BOM element, tool process, time parameter, mould base, sizing rule) is still an
@@ -383,7 +383,7 @@ rates exist* with the old and new value of each rate, and you click **Recalculat
 **Recalculate RM** for a whole project). The same notice appears when you change a formula in master data.
 
 **Who gets an RM cost.** Not assemblies, and not bought-out / existing / not-required parts (those show their bought-out price). Machined
-parts get the RM of their bar stock (stage 36). A part without a material, a density, a 3D file or an approved rate shows
+parts get the RM of their bar stock (stage 37). A part without a material, a density, a 3D file or an approved rate shows
 exactly what is missing; the weights are still shown, and nothing wrong is stored.
 
 **Where it appears.**
@@ -1189,7 +1189,26 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 - Files meant to be uploaded again stay plain: master-data, mould & die, costing setup, rates and register setup downloads, the import template
   and the price master export. Code: `backend/app/branding.py` (middleware in `main.py`). Tests: `tests/test_branding.py`.
 
-## Machined parts: bar stock, machining time, machine and fixture (stage 36)
+## AI assistant: Ask AI (stage 37)
+
+- **Ask AI** (bottom right of every page) answers questions in plain language, for example *What is the part cost of 1023 and what
+  drives it?*, *Compare the tool cost of 1023 in India and China*, *Which parts of project X are over their target?*, *Send me the tool
+  drawing and the PO pack of 1023*. It looks the numbers up in your projects, costs, traces and rates, says where they come from (rate and
+  month, EXAMPLE rates, outdated costs) and gives files as **download links** (cost PDF / Excel, drawings PDF / DXF, tool design ZIP / STEP,
+  simulation report and video, PO pack).
+- **Who:** everyone who is logged in. The assistant sees **only what that user may see**: it reads through the app's own GET routes with the
+  user's own login, so role and tool groups (stage 30) apply exactly as on the screens. A part of another tool group is refused the same way.
+- **Read only:** it can never approve, change, recalculate or delete anything; for that it tells you which page and button to use.
+- **Admin → AI assistant** (admin only): switch it on for all users, choose the model (*Claude Opus 5.5*, recommended; *Sonnet 5.5*, faster
+  and about half the cost; *Haiku 5.5*, lowest cost for simple questions), enter the **Anthropic API key** (from console.anthropic.com; usage
+  is billed to that account) and *Test the key*. The key is kept in the project database (`data/`, never in GitHub) and only its last 4
+  characters are shown again. Backups contain it, so keep backup files safe. Without a saved key, `ANTHROPIC_API_KEY` on the server is used.
+- **What leaves the PC:** the question and the data the assistant looks up for it are sent to Anthropic to write the answer. Every question
+  (not the answer) is written to the **Activity log** (what: *bot*).
+- The chat stays in the browser tab; *New chat* clears it. Code: `backend/app/bot.py`, `frontend/bot.js`, `frontend/bot.css`.
+  Tests: `tests/test_bot.py` (a stand-in for Claude, so no key or internet is needed).
+
+## Machined parts: bar stock, machining time, machine and fixture (stage 37)
 
 Parts with the process **Machined** (shafts, pins, bushes, blocks, brackets cut from bar or plate) are now costed end to end, like the
 moulded and pressed parts: RM → machining & fixture → part cost → country comparison → project leader view → Excel / PDF.
@@ -1281,7 +1300,7 @@ The tests use sample parts whose volume, weight, box and projected area can be c
 ```
 backend/app/geometry.py       STEP reading and all geometry calculations (CadQuery)
 backend/app/gross_weight.py   Estimate page Stage B: request model around the RM engine
-backend/app/machining.py      Machined parts (stage 36): bar stock search, machining time, machine, fixture
+backend/app/machining.py      Machined parts (stage 37): bar stock search, machining time, machine, fixture
 backend/app/rm_cost.py        RM engine: gross weight, yield, RM cost, scrap credit from master-data formulas, fully traced
 backend/app/capacity.py       Stage C: cavities, tools, tool life, machine hours
 backend/app/master_data.py    Reads, checks and saves master_data.xlsx
@@ -1304,6 +1323,7 @@ backend/app/register_setup.py Master data of the register (processes, statuses, 
 backend/app/cad_import.py     STEP reading: assembly tree (XCAF), quantities, look-alikes, thumbnails
 backend/app/file_store.py     CAD file storage by checksum
 backend/app/pdf_report.py     PDF exports in the Design to Cost style
+backend/app/bot.py            AI assistant (Ask AI): read-only tools over the app's own GET routes, Claude API, settings
 backend/app/main.py           FastAPI web server: all /api endpoints + serves the pages
 master_data/                  master_data.xlsx and costing_db.sqlite (your editable data)
 frontend/index.html           Estimator page (form + results + 3D viewer)
@@ -1318,6 +1338,7 @@ frontend/parts.*              Part register (search, part details, revisions, hi
 frontend/import.*             Import: STEP part / assembly split, Excel bulk upload
 frontend/common.js, register.css  Shared helpers and layout of the register pages
 frontend/trace.js             Traceability panel used by every page
+frontend/bot.js, bot.css      AI assistant chat panel on every page (loaded by auth.js when switched on)
 theme/                        Design to Cost theme: dtc-theme.css, logo.png, THEME.md
 docs/                         The requirement briefs (MASTER_FLOW_PROMPT.txt, ROADMAP_PROMPT.txt)
 ROADMAP.md                    Architecture, automation levels and stage plan

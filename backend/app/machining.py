@@ -1,4 +1,4 @@
-"""Machined parts (roadmap stage 36): bar stock, machining time, machine and fixture, fully traced.
+"""Machined parts (roadmap stage 37): bar stock, machining time, machine and fixture, fully traced.
 
     route       turned (CNC lathe) or milled (machining centre): from the 3D model (share of the surface turned about one
                 axis ≥ Parameters → turned_min_round_share), or typed on the part
@@ -26,7 +26,7 @@ from .trace import Trace
 EXAMPLE = "EXAMPLE - typical value: replace with your supplier's data or shop experience"
 ROUTES = ("turned", "milled")
 FIXTURE_RATE = "Machining fixture (per set-up)"
-SEED_SOURCE = "EXAMPLE seed (stage 36)"
+SEED_SOURCE = "EXAMPLE seed (stage 37)"
 
 
 class MachiningError(ValueError):

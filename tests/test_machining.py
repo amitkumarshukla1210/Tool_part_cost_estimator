@@ -1,4 +1,4 @@
-"""Machined parts (roadmap stage 36): bar stock, machining time, machine, fixture and part cost, end to end."""
+"""Machined parts (roadmap stage 37): bar stock, machining time, machine, fixture and part cost, end to end."""
 
 from backend.app import machining, master_data, mould_db, register_setup
 from tests.test_rm_cost import add_part, client, detail, project

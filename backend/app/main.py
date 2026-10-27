@@ -1644,6 +1644,56 @@ def admin_about():
     return admin.about()
 
 
+# ---------- AI assistant (roadmap stage 36) ----------
+
+from . import bot  # noqa: E402
+
+
+@app.exception_handler(bot.BotError)
+def bot_error_handler(_, exc: bot.BotError):
+    return JSONResponse({"detail": str(exc)}, status_code=exc.status)
+
+
+@app.get("/api/admin/bot")
+def admin_bot_settings():
+    auth.require("admin")
+    return bot.settings()
+
+
+@app.put("/api/admin/bot")
+def admin_bot_save(data: dict):
+    auth.require("admin")
+    return bot.save_settings(data)
+
+
+@app.post("/api/admin/bot/test")
+async def admin_bot_test():
+    auth.require("admin")
+    return await bot.check_key()
+
+
+@app.get("/api/bot/status")
+def bot_status():
+    return bot.status()
+
+
+class BotTurn(BaseModel):
+    role: str
+    text: str = ""
+
+
+class BotQuestion(BaseModel):
+    question: str
+    history: list[BotTurn] = []
+    page: str = ""
+
+
+@app.post("/api/bot/chat")
+async def bot_chat(inp: BotQuestion, request: Request):
+    return await bot.chat(app, inp.question, [t.model_dump() for t in inp.history], inp.page[:300],
+                          request.cookies.get(auth.COOKIE, ""))
+
+
 # ---------- suppliers (roadmap stage 22) ----------
 
 @app.get("/suppliers")

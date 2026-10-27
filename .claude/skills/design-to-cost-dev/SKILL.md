@@ -1,13 +1,13 @@
 ---
 name: design-to-cost-dev
-description: Use for any work on the Design to Cost / Part Cost Estimator repository (part, RM and tool cost, tool design and drawings, master data, rates, releases). Holds the project memory (stages 1-36) and the working rules (master data only added, main wins, one PR).
+description: Use for any work on the Design to Cost / Part Cost Estimator repository (part, RM and tool cost, tool design and drawings, master data, rates, releases). Holds the project memory (stages 1-37) and the working rules (master data only added, main wins, one PR).
 ---
 
 Project: **Design to Cost — Part Cost Estimator**, repository `amitkumarshukla1210/Tool_part_cost_estimator`.
 I am Amit, Head of Operations / costing at an OEM (supply chain, production, strategic sourcing, projects; RM, part and tool cost,
 BOM cost and CAPEX, EBITDA, digital transformation). Answer simply, **INR first**.
 
-**Read `README.md` and `ROADMAP.md` first.** Stages 1–36 are built; the next stage is the first free number in `ROADMAP.md`.
+**Read `README.md` and `ROADMAP.md` first.** Stages 1–37 are built; the next stage is the first free number in `ROADMAP.md`.
 Stack: Python / FastAPI (`backend/app/`), plain HTML / JS (`frontend/`), SQLite (`data/projects.sqlite` = my data, `master_data/costing_db.sqlite`
 + `master_data/master_data.xlsx` = master data), CadQuery for 3D, reportlab (PDF), ezdxf (DXF), openpyxl (Excel). Local: Windows kit `windows/`
 (`DTC_Start.bat`, `DTC_Update.bat` with master-data merge, `DTC_Backup.bat`, `DTC_Restore.bat`, `DTC_Rollback.bat`) at http://127.0.0.1:8000/.
@@ -24,7 +24,8 @@ What the later stages added (details in README):
 - 33: production machine asked before the tool design, checked, or recommended (`machine_spec.py`).
 - 34: process parameters for the first trial from the simulation and the material window (`process_params.py`).
 - 35: logo and name on every Excel and PDF download (`branding.py`).
-- 36: machined parts end to end: turned / milled from the 3D model, bar stock from Stock sizes, machining time and fixture (scope `machining`), part cost on the lathe / VMC (`machining.py`).
+- 36: AI assistant (Ask AI) on every page, read only, through the user's own login; Admin → AI assistant (`bot.py`).
+- 37: machined parts end to end: turned / milled from the 3D model, bar stock from Stock sizes, machining time and fixture (scope `machining`), part cost on the lathe / VMC (`machining.py`).
 
 **Rules (always):**
 - No hard-coded rates or rules: every value comes from master data or a formula in master data and is traceable on screen.

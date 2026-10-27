@@ -36,7 +36,7 @@ PRICING = ("machine_hour", "labour_hour", "unit")
 # Concept rules (roadmap stage 5): one proposal per topic, the first rule that applies.
 TOPICS = ("gate", "runner", "cooling", "ejection", "insert")
 COST_GROUPS = ("cutting", "machining", "polishing", "treatment", "assembly", "design", "trial")
-# Bar stock shapes of machined parts (roadmap stage 36).
+# Bar stock shapes of machined parts (roadmap stage 37).
 STOCK_SHAPES = ("round", "hex", "square", "flat", "plate")
 # Machine of the try-out process: the smallest moulding / die-casting machine whose tonnage takes the clamp force.
 BY_TONNAGE = "by tonnage"
@@ -304,7 +304,7 @@ TABLES = {
         col("is_example", "Example", "bool"),
         col("notes", "Notes", required=False),
     ]},
-    # machined parts (roadmap stage 36)
+    # machined parts (roadmap stage 37)
     "stock_sizes": {"title": "Stock sizes", "unique": ("shape", "size_mm", "width_mm"), "columns": [
         col("shape", "Shape (round, hex, square, flat bar; plate = cut to the part's width)", "text", STOCK_SHAPES),
         col("size_mm", "Size (mm): diameter, across flats, side or thickness", "number"),

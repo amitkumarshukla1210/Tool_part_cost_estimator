@@ -244,7 +244,7 @@ function rmBlock(p) {
 }
 
 // ---------- tool cost (stage 4) ----------
-// ---------- machined parts: machining & fixture (stage 36) ----------
+// ---------- machined parts: machining & fixture (stage 37) ----------
 function machiningBlock(p) {
   const t = p.tool, v = t.latest, tr = p.toolTrace;
   const stored = v && tr?.stored;

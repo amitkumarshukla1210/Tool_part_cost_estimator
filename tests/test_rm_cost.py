@@ -190,7 +190,7 @@ def test_bought_out_parts_have_no_rm_and_machined_parts_cost_their_bar_stock():
     client.put(f"/api/parts/{pid}", json={"sourcing": "bought_out"})
     assert "bought-out price" in detail(pid)["rm"]["problem"]
     assert client.post(f"/api/parts/{pid}/rm-cost", json={}).status_code == 400
-    client.put(f"/api/parts/{pid}", json={"sourcing": "make", "process": "machined"})   # stage 36: RM of the bar stock
+    client.put(f"/api/parts/{pid}", json={"sourcing": "make", "process": "machined"})   # stage 37: RM of the bar stock
     rm = detail(pid)["rm"]
     assert rm["applicable"] and not rm["problem"]
     assert "calc:stock_volume_cm3" in client.get(f"/api/parts/{pid}/rm-cost/trace").json()["nodes"]
