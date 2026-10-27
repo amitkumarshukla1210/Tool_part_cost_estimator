@@ -109,7 +109,7 @@ def activity(entity: str = "", user: str = "", q: str = "", date_from: str = "",
         rows = [r for r in rows if ql in f"{r['name']} {r['action']} {r['summary']} {r['user']}".lower()]
     rows.sort(key=lambda r: (r["at"], r["id"] if isinstance(r["id"], int) else 0), reverse=True)
     return {"total": len(rows), "rows": rows[offset:offset + limit],
-            "entities": sorted({"project", "part", "variant", "supplier", "user", "permissions", "master_data", "rate"} |
+            "entities": sorted({"project", "part", "variant", "supplier", "user", "permissions", "master_data", "rate", "bot"} |
                                {r["entity"] for r in rows})}
 
 
