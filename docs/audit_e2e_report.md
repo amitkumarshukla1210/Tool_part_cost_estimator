@@ -1,6 +1,6 @@
 # End-to-end audit report
 
-Run on the current code, 2026-10-27 04:07, 825 calls in 17.8 min.
+Run on the current code, 2026-10-27 04:33, 829 calls in 17.9 min.
 
 | Case | Part type | Tools | RM INR | Tool CAPEX INR | Part cost INR | Findings |
 |---|---|---|---|---|---|---|
@@ -19,17 +19,18 @@ Run on the current code, 2026-10-27 04:07, 825 calls in 17.8 min.
 | blow | blow | 1 | 4.05 | 2,345,193.53 | 7.29 | none |
 | machined | - | - | - | - | - | none |
 
-## Findings (2)
+## Findings (0)
 
-- **global** `/api/price-master/export.xlsx`: HTTP 422 where it should work - [{'type': 'missing', 'loc': ['query', 'group'], 'msg': 'Field required', 'input': None}, {'type': 'missing', 'loc': ['query', 'country'], 'msg': 'Field required', 'input': None}]
-- **global** `/api/price-master/grid`: HTTP 422 where it should work - [{'type': 'missing', 'loc': ['query', 'group'], 'msg': 'Field required', 'input': None}, {'type': 'missing', 'loc': ['query', 'country'], 'msg': 'Field required', 'input': None}]
+None.
 
 ## Slowest calls
 
 - 23 s plastic_high `/api/parts/2/tool-design.zip`
-- 22 s sheet_channel_large `/api/parts/15/tool-design.zip`
-- 21 s sheet_multistage `/api/parts/12/tool-design.zip`
-- 20 s sheet_drawn_large `/api/parts/14/tool-design.zip`
+- 22 s sheet_multistage `/api/parts/12/tool-design.zip`
+- 21 s sheet_channel_large `/api/parts/15/tool-design.zip`
+- 19 s sheet_drawn_large `/api/parts/14/tool-design.zip`
 - 18 s plastic_high `/api/parts/2/tool-design.pdf`
-- 17 s plastic_large `/api/parts/3/tool-design.zip`
-- 15 s plastic_large `/api/parts/3/tool-design.pdf`
+- 18 s plastic_large `/api/parts/3/tool-design.zip`
+- 14 s plastic_large `/api/parts/3/tool-design.pdf`
+- 10 s plastic_high `/api/parts/2/tool-design.png`
+- 10 s plastic_large `/api/parts/3/tool-design.png`
