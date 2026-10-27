@@ -333,9 +333,12 @@ def global_checks(a: Audit) -> None:
     for url, kind in (("/api/parts/export.xlsx", "xlsx"), ("/api/examples/export.xlsx", "xlsx"), ("/api/admin/activity.xlsx", "xlsx"),
                       ("/api/suppliers/export.xlsx", "xlsx"), ("/api/master-data/download", "xlsx"), ("/api/mould-db/download", "xlsx"),
                       ("/api/costing-setup/download", "xlsx"), ("/api/rates/download", "xlsx"), ("/api/register-setup/download", "xlsx"),
-                      ("/api/price-master/export.xlsx", "xlsx"), ("/api/import/template.xlsx", "xlsx")):
+                      ("/api/import/template.xlsx", "xlsx")):
         a.call("global", "get", url, file_kind=kind)
-    for url in ("/api/examples", "/api/rates/grid", "/api/price-master/grid", "/api/mhr", "/api/admin/about", "/api/admin/backups",
+    for g in [x["key"] if isinstance(x, dict) else x for x in (a.c.get("/api/price-master/meta").json().get("groups") or [])]:
+        a.call("global", "get", "/api/price-master/grid", params={"group": g, "country": "IN"})
+        a.call("global", "get", "/api/price-master/export.xlsx", params={"group": g, "country": "IN"}, file_kind="xlsx")
+    for url in ("/api/examples", "/api/rates/grid", "/api/mhr", "/api/admin/about", "/api/admin/backups",
                 "/api/register-meta", "/api/tool-bom/choices", "/api/mould-db", "/api/master-data"):
         a.call("global", "get", url)
     b = a.call("global", "post", "/api/admin/backups", json={})
