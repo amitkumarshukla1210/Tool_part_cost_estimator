@@ -29,6 +29,7 @@ import json
 import os
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -489,6 +490,25 @@ def smoke_test(app: Path) -> None:
                        + (r.stderr or r.stdout).strip()[-1500:])
 
 
+def clear_staging() -> None:
+    """Remove a previous update's staging tree, including read-only ZIP files on Windows."""
+    def onexc(func, path, exc):
+        if not isinstance(exc, PermissionError):
+            raise exc
+        try:
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
+        except OSError as retry:
+            raise KitError(f"Cannot clear the update staging folder {STAGING}. Close Explorer windows or other programs "
+                           "using that folder, then remove it and run DTC_Update.bat again.") from retry
+
+    try:
+        shutil.rmtree(STAGING, onexc=onexc)
+    except OSError as exc:
+        raise KitError(f"Cannot clear the update staging folder {STAGING}: {exc}. Close Explorer windows or other "
+                       "programs using that folder, then remove it and run DTC_Update.bat again.") from exc
+
+
 # ---------- commands ----------
 
 def cmd_backup(_args) -> None:
@@ -508,7 +528,7 @@ def cmd_update(args) -> None:
     src, info = choose_zip(args[0] if args else None)
 
     if STAGING.exists():
-        shutil.rmtree(STAGING)
+        clear_staging()
     with zipfile.ZipFile(src) as z:
         root = zip_root(z)
         say(f"Unpacking {src.name} ...")

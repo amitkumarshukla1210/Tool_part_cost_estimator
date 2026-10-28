@@ -131,6 +131,31 @@ def test_refuses_bad_zip_and_running_app(kit, tmp_path, monkeypatch):
         kit.cmd_update([])
 
 
+def test_staging_cleanup_retries_permission_error(kit, tmp_path, monkeypatch):
+    kit.STAGING.mkdir()
+    calls = []
+
+    def fake_rmtree(path, onexc):
+        onexc(lambda target: calls.append((path, target)), path, PermissionError("access denied"))
+
+    monkeypatch.setattr(kit.shutil, "rmtree", fake_rmtree)
+    kit.clear_staging()
+
+    assert calls == [(kit.STAGING, kit.STAGING)]
+
+
+def test_staging_cleanup_explains_locked_folder(kit, monkeypatch):
+    def fake_rmtree(path, onexc):
+        def locked(_target):
+            raise PermissionError("folder is in use")
+
+        onexc(locked, path, PermissionError("access denied"))
+
+    monkeypatch.setattr(kit.shutil, "rmtree", fake_rmtree)
+    with pytest.raises(kit.KitError, match="Close Explorer windows or other programs"):
+        kit.clear_staging()
+
+
 def test_a_broken_new_version_changes_nothing(kit, tmp_path):
     kit.cmd_update([str(release_zip(tmp_path, "v1"))])
     before = (kit.DATA / "master_data" / "costing_db.sqlite").read_bytes()
