@@ -5,8 +5,8 @@
                       and developers; the Windows kit always starts with logins.
     roles             viewer < engineer < approver < head < admin  (head = head of department: sees all data, stage 30)
     tool groups       each login ID has tool groups (scope.py): it sees the parts and projects of those groups
-    permissions       the lowest role for each action (PERMISSIONS); the admin changes them on Admin → Permissions
-                      (table role_permissions). Managing users and permissions is always admin only.
+    permissions       the lowest role for each action (PERMISSIONS), with per-user allow / deny overrides; admins
+                      manage both on Admin → Users, roles & permissions.
     who               the logged-in user is the author of every history record and the approver of every rate approval
 
 Passwords: scrypt with a random salt (standard library). Sessions: a random token in an HttpOnly cookie; only its SHA-256 is stored.
@@ -30,7 +30,7 @@ COOKIE = "dtc_session"
 SESSION_HOURS = 12
 MIN_PASSWORD = 10
 PUBLIC_PREFIXES = ("/login", "/setup", "/static", "/theme", "/api/auth/login", "/api/auth/setup", "/api/server/health", "/favicon")
-ADMIN_PREFIXES = ("/api/users", "/api/admin/users", "/api/admin/bot")
+ADMIN_PREFIXES = ("/api/users", "/api/admin/users", "/api/admin/bot", "/api/admin/permissions")
 
 # action -> (default lowest role, label, what it covers). Order = order on the Admin page.
 PERMISSIONS = {
@@ -43,6 +43,7 @@ PERMISSIONS = {
     "delete_project": ("admin", "Delete projects", "Delete a project with its parts and costs (a backup is made first)"),
     "view_activity": ("approver", "See the activity log", "Admin → Activity log: who changed what, when"),
     "backups": ("admin", "Backups", "Admin → Backups: list, make and download backups"),
+    "update_app": ("admin", "Update the app", "Admin → Backups & update: start a Windows-kit update"),
 }
 # Pure calculations that change nothing: anyone logged in may run them.
 CALC_PATHS = ("/api/analyze", "/api/gross-weight", "/api/capacity", "/api/mould/estimate", "/api/tool-cost", "/api/suggest-process")
@@ -110,14 +111,99 @@ def min_role(action: str) -> str:
     return next(p["min_role"] for p in permissions() if p["action"] == action)
 
 
+def user_overrides(uid: int) -> list[dict]:
+    with db.engine().connect() as conn:
+        rows = conn.execute(select(db.user_permission_overrides).where(
+            db.user_permission_overrides.c.user_id == uid
+        ).order_by(db.user_permission_overrides.c.action)).mappings()
+    return [{"action": r["action"], "effect": r["effect"], "updated_by": r["updated_by"] or "",
+             "updated_at": r["updated_at"].isoformat(timespec="seconds") if r["updated_at"] else ""}
+            for r in rows]
+
+
+def save_user_overrides(uid: int, rows: list[dict], by: dict | None) -> list[dict]:
+    """Replace a user's explicit allow/deny choices; omitted actions inherit their role default."""
+    if not isinstance(rows, list):
+        raise AuthError("Overrides must be a list.", 400)
+    seen = set()
+    overrides = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise AuthError("Each permission override must be an object.", 400)
+        action, effect = row.get("action"), row.get("effect")
+        if not isinstance(action, str) or action not in PERMISSIONS:
+            raise AuthError(f"Unknown permission '{action}'.", 400)
+        if action in seen:
+            raise AuthError(f"Permission '{action}' is listed more than once.", 400)
+        if effect not in ("inherit", "allow", "deny"):
+            raise AuthError("Permission effect must be inherit, allow, or deny.", 400)
+        seen.add(action)
+        if effect != "inherit":
+            overrides.append({"action": action, "effect": effect})
+
+    who = (by or {}).get("username") or "local user"
+    with db.engine().begin() as conn:
+        target = conn.execute(select(db.users.c.username).where(db.users.c.id == uid)).first()
+        if not target:
+            raise AuthError(f"User {uid} does not exist.", 404)
+        old = {r["action"]: r["effect"] for r in conn.execute(
+            select(db.user_permission_overrides).where(db.user_permission_overrides.c.user_id == uid)
+        ).mappings()}
+        new = {r["action"]: r["effect"] for r in overrides}
+        changes = {action: {"old": old.get(action, "inherit"), "new": new.get(action, "inherit")}
+                   for action in set(old) | set(new) if old.get(action) != new.get(action)}
+        if changes:
+            conn.execute(db.user_permission_overrides.delete().where(db.user_permission_overrides.c.user_id == uid))
+            if overrides:
+                conn.execute(db.user_permission_overrides.insert(), [
+                    {"user_id": uid, **row, "updated_by": who} for row in overrides
+                ])
+            log(conn, "permissions", uid, "user_overrides_updated", {"username": target.username, **changes})
+    return user_overrides(uid)
+
+
 def may(action: str, user: dict | None = None) -> bool:
-    return not server_mode() or has_role(min_role(action), user)
+    if not server_mode():
+        return True
+    u = user or current()
+    if not u:
+        return False
+    with db.engine().connect() as conn:
+        override = conn.execute(select(db.user_permission_overrides.c.effect).where(
+            (db.user_permission_overrides.c.user_id == u["id"]) &
+            (db.user_permission_overrides.c.action == action)
+        )).scalar_one_or_none()
+    if override is not None:
+        return override == "allow"
+    return has_role(min_role(action), u)
+
+
+def effective_permissions(user: dict | None) -> dict[str, bool]:
+    if not server_mode():
+        return {action: True for action in PERMISSIONS}
+    if not user:
+        return {action: False for action in PERMISSIONS}
+    defaults = permissions()
+    with db.engine().connect() as conn:
+        overrides = {r["action"]: r["effect"] for r in conn.execute(
+            select(db.user_permission_overrides.c.action, db.user_permission_overrides.c.effect)
+            .where(db.user_permission_overrides.c.user_id == user["id"])
+        ).mappings()}
+    return {p["action"]: overrides[p["action"]] == "allow" if p["action"] in overrides
+            else has_role(p["min_role"], user) for p in defaults}
+
+
+def _permission_denial(action: str, user: dict | None) -> str:
+    u = user or current()
+    role = u["role"] if u else "no role"
+    username = u["username"] if u else "unknown user"
+    return (f"'{PERMISSIONS[action][1]}' is not allowed for user ID '{username}' "
+            f"(role '{role}', role default '{min_role(action)}'; Admin → Users, roles & permissions).")
 
 
 def require_perm(action: str) -> None:
     if not may(action):
-        label = PERMISSIONS[action][1]
-        raise AuthError(f"'{label}' needs the role '{min_role(action)}' or higher (Admin → Permissions).", 403)
+        raise AuthError(_permission_denial(action, current()), 403)
 
 
 def save_permissions(rows: list[dict], by: dict | None) -> list[dict]:
@@ -339,6 +425,8 @@ def needs_login(path: str) -> bool:
 
 def action_for(method: str, path: str) -> str | None:
     """The permission a request needs (None = any logged-in user)."""
+    if path.startswith(("/api/users", "/api/admin/users", "/api/admin/bot", "/api/admin/permissions")):
+        return None
     if method in ("GET", "HEAD", "OPTIONS"):
         if path.startswith("/api/admin/activity"):
             return "view_activity"
@@ -347,6 +435,8 @@ def action_for(method: str, path: str) -> str | None:
         return None
     if path in ("/api/auth/logout", "/api/auth/password") or path.startswith(CALC_PATHS) or path.startswith(BOT_PATHS):
         return None
+    if path == "/api/admin/update":
+        return "update_app"
     if path.startswith("/api/admin/backups"):
         return "backups"
     if method == "DELETE" and path.startswith("/api/projects/"):
@@ -368,9 +458,9 @@ def action_for(method: str, path: str) -> str | None:
 
 def allowed(user: dict, method: str, path: str) -> str | None:
     """None if allowed, else the reason."""
-    if (path.startswith(ADMIN_PREFIXES) or path.startswith("/api/admin/permissions") and method != "GET") and not has_role("admin", user):
+    if path.startswith(ADMIN_PREFIXES) and not has_role("admin", user):
         return "Managing users and permissions needs the role 'admin'."
     action = action_for(method, path)
-    if action and not has_role(min_role(action), user):
-        return f"'{PERMISSIONS[action][1]}' needs the role '{min_role(action)}' or higher; you are '{user['role']}' (Admin → Permissions)."
+    if action and not may(action, user):
+        return _permission_denial(action, user)
     return None

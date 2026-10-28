@@ -275,7 +275,7 @@ it with `backup.py --restore` or `DTC_Restore.bat`), and in server mode only an 
   - Type the part code to confirm.
   - A backup ZIP `dtc-before-delete-<code>-<time>.zip` is made first.
   - It is refused while the part is moulded into another part.
-  - Who may do it: *Admin → Permissions → Delete parts* (approver by default).
+  - Who may do it: *Admin → Users, roles & permissions → Delete parts* (approver by default).
 
 **Every table has column filters:** the ▾ in a column header opens a search box and the column's values as tick boxes
 (multi-select, with Select all, Clear all and Reset). Filters on several columns combine; *Clear all filters* above the
@@ -741,14 +741,16 @@ Otherwise an element keeps its default grade (2738 for plastic inserts, D2 for c
 - **Forgotten password** (also the admin's): at the PC that runs the app, double-click **`DTC_ResetPassword.bat`**
   (or `python -m backend.app.server_tools reset-password NAME`). The user is made active again and logged out everywhere.
 
-**Admin** (menu, top right) has four tabs:
+**Admin** (menu, top right) shows tabs according to the signed-in user's permissions. **Users, roles & permissions** is visible only to admins; **My password** remains available to every signed-in user.
 
 | Tab | What it does |
 |---|---|
-| **Users & roles** | Admin creates login IDs (user ID, full name, role, first password), changes name and role, blocks / unblocks a user and sets a new password. The last active admin cannot be removed or demoted. Everyone can change their own password here. |
-| **Permissions** | The lowest role for each action, editable by the admin: change project data (engineer), edit master data (engineer), edit rates (engineer), approve rates (approver), manage suppliers (engineer), delete projects (admin), see the activity log (approver), backups (admin). Managing users and permissions is always admin only. *Back to defaults* restores the column. Roles go viewer < engineer < approver < admin; pure calculations (Estimate page) are open to every logged-in user. |
+| **Users, roles & permissions** | Admin creates login IDs (user ID, full name, role, first password), changes name and role, blocks / unblocks a user and sets a new password. The last active admin cannot be removed or demoted. The same tab sets role defaults and per-user **Inherit / Allow / Deny** overrides; overrides are audited. |
+| **My password** | Every user changes their own password after confirming the old one. Admins can set a new password for another user, but existing passwords are never displayed. |
 | **Activity log** | Who changed what and when, newest first: projects, variants, parts (incl. status, revisions, costs, suppliers), suppliers, users, permissions, master-data and rate saves, rate approvals and backups. Filters (what, who, from, to, search), *Show more*, **Export Excel**. |
-| **Backups & update** | Installed version and data folder, **Backup now**, every backup ZIP with *Download*, and the reports of the last updates (what the master-data merge did). |
+| **Backups & update** | Installed version and data folder, **Backup now**, every backup ZIP with *Download*, update reports, and—when the user has **Update the app** permission—an authenticated update action that stops and restarts the Windows kit after making a backup. |
+
+Role defaults include project data and master-data changes (engineer), rate approval (approver), and backups / app updates (admin). A per-user Allow can grant an engineer extra authority; Deny removes an action even if the user's role normally allows it. **Managing login IDs and permissions stays admin-only.** On the Windows kit, the authenticated update button is permission-checked; `DTC_Update.bat` remains a local host-maintenance tool and is controlled by Windows access to the installation.
 
 **Suppliers** (menu) is the supplier master:
 
@@ -778,8 +780,7 @@ export DTC_COOKIE_SECURE=1                                        # when served 
 uvicorn backend.app.main:app --host 0.0.0.0 --port 8000           # put an HTTPS reverse proxy (nginx, Caddy, IIS) in front
 ```
 
-- **Logins and roles**: everybody logs in; the admin adds users on **Admin → Users & roles** (user name, role, password of 10+ characters, active) and sets
-  **Admin → Permissions**. **viewer** reads; **engineer** changes projects, parts, costs and master data; **approver** also approves rates; **admin** also manages users. The last admin cannot be removed. Passwords are stored as scrypt hashes, sessions expire after 12 hours,
+- **Logins and roles**: everybody, including admins, logs in; the admin adds users and manages role defaults and per-user overrides on **Admin → Users, roles & permissions** (user ID, role, active, groups). **viewer** reads; **engineer** changes projects, parts, costs and master data; **approver** also approves rates; **admin** also manages users. The last admin cannot be removed. Admins can reset a password but cannot view one; passwords are stored as scrypt hashes, sessions expire after 12 hours,
   changing a password or deactivating a user ends their sessions.
 - **Who did what**: every history record shows the logged-in user, and an approved rate shows the approver who clicked, never a typed name.
 - **Move from the local PC**: `python -m backend.app.server_tools migrate-projects --from sqlite:///data/projects.sqlite --to postgresql+psycopg://...` copies all project data into an empty
@@ -1104,8 +1105,8 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 ## Head of department and data access by tool group (stage 30)
 
 - **Roles:** viewer < engineer < approver < **head** < admin. *Head* (head of department) sees and changes the data of every tool group and
-  every user, like an admin, but does not manage login IDs (the permissions per role on Admin → Permissions apply as before).
-- **Tool groups:** Admin → Users & roles has check boxes per login ID: *Plastic moulding, Die casting, Foundry, Sheet metal, EPS, Blow moulding*.
+  every user, like an admin, but does not manage login IDs (role defaults and per-user overrides are managed by admins).
+- **Tool groups:** Admin → Users, roles & permissions has check boxes per login ID: *Plastic moulding, Die casting, Foundry, Sheet metal, EPS, Blow moulding*.
   A viewer, engineer or approver with groups ticked sees only the parts whose process belongs to those groups, and the projects that hold
   such parts, that they created themselves, or that have no tool-group part yet; opening another group's part or project gives "not your tool
   group". They can give a part only a process of their own groups. Parts without a tool group (assemblies, bought-out, machined) are seen by all.

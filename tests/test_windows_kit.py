@@ -84,6 +84,15 @@ def test_first_update_moves_data_out_installs_and_merges(kit, tmp_path):
     assert v["zip"] == z.name and Path(v["previous_app"]).exists()
     env = kit.app_env()
     assert env["DATABASE_URL"].endswith("DTC_Data/data/projects.sqlite") and env["DTC_STORAGE_FOLDER"] == str(kit.DATA / "storage")
+    assert env["DTC_KIT_MANAGER"] == str(base / "dtc_manager.py") and env["DTC_PORT"] == "8000"
+
+
+def test_update_wait_runs_noninteractive_download_after_server_stops(kit, monkeypatch):
+    calls = []
+    monkeypatch.setattr(kit, "cmd_update", lambda args: calls.append(args))
+    monkeypatch.setattr(kit, "running", lambda p=None: False)
+    kit.cmd_update_wait([])
+    assert calls == [["download", "--start", "--no-browser"]]
 
 
 def test_next_update_backup_restore_and_rollback(kit, tmp_path):

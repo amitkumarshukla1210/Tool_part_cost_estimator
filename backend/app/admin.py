@@ -1,6 +1,6 @@
-"""Admin page (roadmap stage 22): activity log, backups, version and update reports.
+"""Admin page: activity log, backups, version and update reports.
 
-Users & roles and Permissions live in auth.py; this module reads what happened and what is installed.
+User and permission management live in auth.py; this module reads what happened and what is installed.
 
     activity    every history record (projects, parts, suppliers, users, permissions, master data saves) plus the
                 rate approvals of the rate library, newest first, with filters and an Excel export
@@ -14,6 +14,8 @@ import io
 import json
 import os
 import subprocess
+import sys
+import threading
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +29,8 @@ from . import projects_db as db
 from .table_set import HEADER_FILL
 
 ROOT = Path(__file__).resolve().parents[2]
+_update_lock = threading.Lock()
+_update_process = None
 
 
 class AdminError(ValueError):
@@ -149,6 +153,47 @@ def make_backup(label: str = "dtc-admin") -> dict:
         from . import auth
         auth.log(conn, "backup", 0, "created", {"file": p.name})
     return {"name": p.name, "size_mb": round(p.stat().st_size / 1e6, 2)}
+
+
+def start_windows_update() -> dict:
+    """Start the Windows kit updater after the authenticated request is accepted."""
+    global _update_process
+    manager_value = os.environ.get("DTC_KIT_MANAGER", "")
+    if os.name != "nt" or not manager_value:
+        raise AdminError("App-launched updates are available only when this app is running from the Windows kit.")
+    manager = Path(manager_value).resolve()
+    expected = (ROOT.parent / "dtc_manager.py").resolve()
+    if manager != expected or not manager.is_file():
+        raise AdminError("The Windows kit updater was not found beside the app.")
+
+    with _update_lock:
+        if _update_process is not None and _update_process.poll() is None:
+            raise AdminError("An app update is already running.")
+        data_value = os.environ.get("DTC_DATA_FOLDER", "").strip()
+        if not data_value:
+            raise AdminError("The Windows kit data folder is unavailable.")
+        data = Path(data_value).resolve()
+        if not data.is_dir():
+            raise AdminError("The Windows kit data folder is unavailable.")
+        logs = data / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        log_path = logs / f"update-request-{datetime.now():%Y%m%d-%H%M%S-%f}.txt"
+        try:
+            with log_path.open("w", encoding="utf-8") as output:
+                _update_process = subprocess.Popen(
+                    [sys.executable, str(manager), "update-wait"],
+                    cwd=manager.parent,
+                    stdin=subprocess.DEVNULL,
+                    stdout=output,
+                    stderr=subprocess.STDOUT,
+                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                )
+        except OSError as exc:
+            raise AdminError(f"Could not start the Windows kit updater: {exc}") from exc
+        with db.engine().begin() as conn:
+            from . import auth
+            auth.log(conn, "software", 0, "update_requested", {"log": log_path.name})
+        return {"status": "accepted", "message": "Update started. The app will stop, update, and restart automatically."}
 
 
 def backup_file(name: str) -> Path:
