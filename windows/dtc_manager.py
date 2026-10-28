@@ -139,6 +139,8 @@ def app_env() -> dict:
         "DTC_STORAGE_FOLDER": str(storage_dir()),
         "DTC_BACKUP_FOLDER": str(BACKUPS),
         "DTC_DATA_FOLDER": str(DATA),               # Admin page: version.json and the update reports in logs\
+        "DTC_KIT_MANAGER": str(BASE / "dtc_manager.py"),
+        "DTC_PORT": str(port()),
         "DTC_MODE": "server",                       # logins always on (the first start asks for the first admin)
         "PYTHONUTF8": "1",
         "PYTHONIOENCODING": "utf-8",
@@ -500,12 +502,15 @@ def cmd_update(args) -> None:
     need_stopped()
     BACKUPS.mkdir(exist_ok=True)
     cfg()
+    start_after = "--start" in args
+    no_browser = "--no-browser" in args
+    zip_arg = next((arg for arg in args if arg not in ("--start", "--no-browser")), None)
     old_app = ensure_data()
     v = read_version()
     if not old_app and v.get("migrated_from") and not v.get("installed") and is_app(Path(v["migrated_from"])):
         old_app = Path(v["migrated_from"])                         # data moved out earlier, the update did not finish then
     before = backup("dtc-before-update") if (DATA / "master_data").exists() else None
-    src, info = choose_zip(args[0] if args else None)
+    src, info = choose_zip(zip_arg)
 
     if STAGING.exists():
         shutil.rmtree(STAGING)
@@ -571,18 +576,37 @@ def cmd_update(args) -> None:
     say(f"UPDATE DONE. Report: {log}")
     if before:
         say(f"Your data before the update is in {before}. Something wrong? DTC_Rollback.bat puts the old version and that data back.")
-    if yes("Start the app now?"):
+    if start_after:
+        cmd_start(["--no-browser"] if no_browser else [])
+    elif yes("Start the app now?"):
         cmd_start([])
 
 
-def cmd_start(_args) -> None:
+def cmd_update_wait(_args) -> None:
+    deadline = time.monotonic() + 120
+    while running():
+        if time.monotonic() >= deadline:
+            raise KitError("The app did not stop after the update request. Start DTC_Update.bat after closing it.")
+        time.sleep(0.5)
+    try:
+        cmd_update(["download", "--start", "--no-browser"])
+    except KitError:
+        if is_app(app_dir()) and not running():
+            say("The update did not complete; restarting the installed app.")
+            cmd_start(["--no-browser"])
+        raise
+
+
+def cmd_start(args) -> None:
+    no_browser = "--no-browser" in args
     app = app_dir()
     if not is_app(app) or not venv_python().exists() or not (DATA / "master_data").exists():
         raise KitError("The app is not installed in this folder yet: run DTC_Update.bat first.")
     url = f"http://127.0.0.1:{port()}"
     if running():
         say(f"The app is already running: opening {url}")
-        webbrowser.open(url)
+        if not no_browser:
+            webbrowser.open(url)
         return
     days = float(cfg().get("auto_backup_days") or 0)
     last = backup_list()
@@ -599,12 +623,13 @@ def cmd_start(_args) -> None:
                 webbrowser.open(url)
                 return
             time.sleep(1)
-    threading.Thread(target=open_when_ready, daemon=True).start()
+    if not no_browser:
+        threading.Thread(target=open_when_ready, daemon=True).start()
     v = read_version()
     say(f"Design to Cost {v.get('commit', '')} {v.get('installed', '')[:10]} | data: {DATA}")
     say(f"Running on {url}  -  keep this window open; close it (or press Ctrl+C) to stop the app.")
     try:
-        subprocess.run([str(venv_python()), "-m", "uvicorn", "backend.app.main:app", "--host", "127.0.0.1", "--port", str(port())],
+        subprocess.run([str(venv_python()), "-m", "backend.app.server_runner"],
                        cwd=app, env=app_env())
     except KeyboardInterrupt:
         pass
@@ -681,7 +706,8 @@ def cmd_reset_password(args) -> None:
         raise KitError("The password was not changed.")
 
 
-COMMANDS = {"reset-password": cmd_reset_password, "start": cmd_start, "update": cmd_update, "backup": cmd_backup, "restore": cmd_restore, "rollback": cmd_rollback, "status": cmd_status}
+COMMANDS = {"reset-password": cmd_reset_password, "start": cmd_start, "update": cmd_update, "update-wait": cmd_update_wait,
+            "backup": cmd_backup, "restore": cmd_restore, "rollback": cmd_rollback, "status": cmd_status}
 
 
 def main(argv=None) -> int:

@@ -32,7 +32,9 @@ def make(c, username, role):
 def test_local_mode_needs_no_login():
     c = TestClient(app)
     assert c.get("/api/projects").status_code == 200
-    assert c.get("/api/auth/me").json() == {"mode": "local", "user": None, "version": "V0"}
+    me = c.get("/api/auth/me").json()
+    assert me["mode"] == "local" and me["user"] is None and me["version"] == "V0"
+    assert all(me["permissions"].values())
 
 
 def test_server_mode_blocks_everything_until_login(server):
@@ -45,6 +47,7 @@ def test_server_mode_blocks_everything_until_login(server):
     assert login(server).status_code == 200
     me = server.get("/api/auth/me").json()
     assert me["mode"] == "server" and me["user"]["username"] == "admin" and me["user"]["role"] == "admin"
+    assert me["permissions"]["update_app"] is True
     assert server.get("/api/projects").status_code == 200
     server.post("/api/auth/logout")
     assert server.get("/api/projects").status_code == 401

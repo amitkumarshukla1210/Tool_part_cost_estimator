@@ -1,32 +1,36 @@
-// Admin control: login IDs and roles, permissions per role, activity log, backups and installed version, AI assistant.
+// Admin control: login IDs, role defaults, per-user permissions, activity, backups and updates.
 const { $, esc, api, status } = window.DTC;
 const ROLE_HELP = {
   viewer: "viewer: reads everything, changes nothing",
   engineer: "engineer: + projects, parts, costs, imports, master data, rate drafts, suppliers (default permissions)",
   approver: "approver: + approves rates, sees the activity log",
   head: "head (head of department): sees and changes the data of every tool group and every user; no user management",
-  admin: "admin: + creates IDs, sets permissions, deletes projects, backups",
+  admin: "admin: + creates IDs, sets permissions, deletes projects, backups and app updates",
 };
 let info = null;          // {roles, permissions, me, mine}
+let users = [];
 let activityRows = [];
 let activityTotal = 0;
 
 async function init() {
-  info = await api("/api/admin/permissions");
-  const me = info.me;
+  const session = await api("/api/auth/me");
+  const me = session.user;
+  info = { me, mine: session.permissions || {} };
   const isAdmin = !me || me.role === "admin";            // no user = logins off (tests / developers)
+  if (isAdmin) info = await api("/api/admin/permissions");
   $("whoami").textContent = me ? `Logged in as ${me.name || me.username} (${me.role})` : "Logins are off (DTC_MODE=local)";
-  $("usersAdmin").hidden = !isAdmin;
-  $("usersNoAdmin").hidden = isAdmin;
-  $("newRole").innerHTML = info.roles.map((r) => `<option ${r === "engineer" ? "selected" : ""}>${r}</option>`).join("");
-  $("roleHelp").textContent = ROLE_HELP.engineer;
-  $("newGroups").innerHTML = groupBoxes([], "groups");
-  const tabOk = { users: true, perms: true, activity: info.mine.view_activity, backups: info.mine.backups, drawings: true, bot: isAdmin };
+  if (isAdmin) {
+    $("newRole").innerHTML = info.roles.map((r) => `<option ${r === "engineer" ? "selected" : ""}>${r}</option>`).join("");
+    $("roleHelp").textContent = ROLE_HELP.engineer;
+    $("newGroups").innerHTML = groupBoxes([], "groups");
+  }
+  const tabOk = { users: isAdmin, account: true, activity: info.mine.view_activity,
+    backups: info.mine.backups || info.mine.update_app, drawings: true, bot: isAdmin };
   document.querySelectorAll("#tabs [data-tab]").forEach((b) => (b.hidden = !tabOk[b.dataset.tab]));
-  $("permsActions").hidden = !isAdmin;
+  $("updateArea").hidden = !info.mine.update_app;
+  $("updateManual").hidden = !info.mine.update_app;
   const want = new URLSearchParams(location.search).get("tab");
-  show(want && tabOk[want] ? want : "users");
-  if (isAdmin) loadUsers();
+  show(want && tabOk[want] ? want : isAdmin ? "users" : "account");
 }
 
 function show(tab) {
@@ -34,7 +38,7 @@ function show(tab) {
   document.querySelectorAll(".tab-pane").forEach((p) => (p.hidden = p.id !== `tab-${tab}`));
   history.replaceState(null, "", `?tab=${tab}`);
   status($("status"), "");
-  ({ perms: renderPerms, activity: () => loadActivity(false), backups: loadBackups, drawings: loadDrawing, bot: loadBot })[tab]?.();
+  ({ users: loadUsers, activity: () => loadActivity(false), backups: loadBackups, drawings: loadDrawing, bot: loadBot })[tab]?.();
 }
 $("tabs").addEventListener("click", (e) => {
   const b = e.target.closest("[data-tab]");
@@ -47,7 +51,7 @@ function groupBoxes(have, name = "") {
 }
 
 async function loadUsers() {
-  const users = await api("/api/users");
+  users = await api("/api/users");
   $("users").innerHTML = `<thead><tr><th>User ID</th><th>Full name</th><th>Role</th><th>Tool groups (none = all)</th><th>Active</th><th>Last login</th>
     <th>New password</th><th></th></tr></thead><tbody>${users.map((u) => `<tr data-id="${u.id}">
     <td><b>${esc(u.username)}</b></td><td><input data-f="name" value="${esc(u.name)}" /></td>
@@ -57,6 +61,11 @@ async function loadUsers() {
     <td>${esc((u.last_login || "—").replace("T", " "))}</td>
     <td><input type="password" data-f="password" placeholder="leave empty" autocomplete="new-password" minlength="10" /></td>
     <td><button class="btn btn-outline small" data-save type="button">Save</button></td></tr>`).join("")}</tbody>`;
+  const current = $("overrideUser").value;
+  $("overrideUser").innerHTML = users.map((u) => `<option value="${u.id}">${esc(u.username)} (${esc(u.role)})</option>`).join("");
+  if (users.some((u) => String(u.id) === current)) $("overrideUser").value = current;
+  renderPerms();
+  await loadUserOverrides();
 }
 $("newRole").addEventListener("change", (e) => ($("roleHelp").textContent = ROLE_HELP[e.target.value] || ""));
 $("users").addEventListener("click", async (e) => {
@@ -68,7 +77,7 @@ $("users").addEventListener("click", async (e) => {
   try {
     await api(`/api/users/${tr.dataset.id}`, { method: "PUT", body: JSON.stringify(data) });
     status($("status"), "Saved.", "ok");
-    loadUsers();
+    await loadUsers();
   } catch (err) {
     status($("status"), err.message, "error");
   }
@@ -81,8 +90,8 @@ $("newUser").addEventListener("submit", async (e) => {
     const u = await api("/api/users", { method: "POST", body: JSON.stringify(body) });
     e.target.reset();
     $("roleHelp").textContent = ROLE_HELP.engineer;
-    status($("status"), `ID '${u.username}' created with the role ${u.role}. Give the user the ID and first password; they can change it on Admin.`, "ok");
-    loadUsers();
+    status($("status"), `ID '${u.username}' created with the role ${u.role}. Give the user the ID and first password; they can change it on My password.`, "ok");
+    await loadUsers();
   } catch (err) {
     status($("status"), err.message, "error");
   }
@@ -100,14 +109,55 @@ $("pwForm").addEventListener("submit", async (e) => {
 
 // ---------- permissions ----------
 function renderPerms(rows = info.permissions) {
-  const editable = !$("permsActions").hidden;
   $("perms").innerHTML = `<thead><tr><th>Action</th><th>What it covers</th><th>Lowest role</th><th>Default</th><th>Changed by</th></tr></thead><tbody>${
     rows.map((p) => `<tr><td><b>${esc(p.label)}</b></td><td>${esc(p.covers)}</td>
-    <td>${editable ? `<select data-action="${esc(p.action)}">${info.roles.map((r) => `<option ${r === p.min_role ? "selected" : ""}>${r}</option>`).join("")}</select>` : esc(p.min_role)}</td>
+    <td><select data-action="${esc(p.action)}">${info.roles.map((r) => `<option ${r === p.min_role ? "selected" : ""}>${r}</option>`).join("")}</select></td>
     <td>${esc(p.default)}${p.min_role !== p.default ? ' <span class="badge missing">changed</span>' : ""}</td>
     <td>${esc(p.updated_by ? `${p.updated_by} · ${p.updated_at.replace("T", " ")}` : "—")}</td></tr>`).join("")}
     <tr><td><b>Manage users &amp; permissions</b></td><td>Create login IDs, roles, block users, reset passwords, this table</td><td>admin</td><td>admin (fixed)</td><td>—</td></tr></tbody>`;
 }
+async function loadUserOverrides() {
+  const uid = $("overrideUser").value;
+  if (!uid) {
+    $("userPerms").innerHTML = '<tbody><tr><td class="empty">Create a user ID first.</td></tr></tbody>';
+    return;
+  }
+  try {
+    const data = await api(`/api/admin/users/${uid}/permissions`);
+    const overrides = new Map(data.overrides.map((r) => [r.action, r.effect]));
+    $("userPerms").innerHTML = `<thead><tr><th>Action</th><th>Role default</th><th>This user ID</th><th>Effective</th></tr></thead><tbody>${
+      info.permissions.map((p) => `<tr><td><b>${esc(p.label)}</b><br /><span class="note">${esc(p.covers)}</span></td>
+      <td>${esc(p.min_role)}+</td><td><select data-user-action="${esc(p.action)}">
+      <option value="inherit" ${!overrides.has(p.action) ? "selected" : ""}>Inherit role</option>
+      <option value="allow" ${overrides.get(p.action) === "allow" ? "selected" : ""}>Allow</option>
+      <option value="deny" ${overrides.get(p.action) === "deny" ? "selected" : ""}>Deny</option></select></td>
+      <td>${data.effective[p.action] ? "Allowed" : "Denied"}</td></tr>`).join("")}
+      <tr><td><b>Manage users &amp; permissions</b></td><td>admin only</td><td>admin only</td><td>Admin role</td></tr></tbody>`;
+  } catch (err) {
+    status($("status"), err.message, "error");
+  }
+}
+$("overrideUser").addEventListener("change", loadUserOverrides);
+$("overrideSave").addEventListener("click", async () => {
+  const overrides = [...document.querySelectorAll("#userPerms select[data-user-action]")]
+    .map((s) => ({ action: s.dataset.userAction, effect: s.value }));
+  try {
+    await api(`/api/admin/users/${$("overrideUser").value}/permissions`, { method: "PUT", body: JSON.stringify({ overrides }) });
+    await loadUserOverrides();
+    status($("status"), "User-specific permissions saved.", "ok");
+  } catch (err) {
+    status($("status"), err.message, "error");
+  }
+});
+$("overrideReset").addEventListener("click", async () => {
+  try {
+    await api(`/api/admin/users/${$("overrideUser").value}/permissions`, { method: "PUT", body: JSON.stringify({ overrides: [] }) });
+    await loadUserOverrides();
+    status($("status"), "This user now inherits all role defaults.", "ok");
+  } catch (err) {
+    status($("status"), err.message, "error");
+  }
+});
 $("permsDefault").addEventListener("click", () => renderPerms(info.permissions.map((p) => ({ ...p, min_role: p.default }))));
 $("permsSave").addEventListener("click", async () => {
   const permissions = [...document.querySelectorAll("#perms select[data-action]")].map((s) => ({ action: s.dataset.action, min_role: s.value }));
@@ -115,7 +165,8 @@ $("permsSave").addEventListener("click", async () => {
     await api("/api/admin/permissions", { method: "PUT", body: JSON.stringify({ permissions }) });
     info = await api("/api/admin/permissions");
     renderPerms();
-    status($("status"), "Permissions saved. They apply from the next click of every user.", "ok");
+    await loadUserOverrides();
+    status($("status"), "Role defaults saved.", "ok");
   } catch (err) {
     status($("status"), err.message, "error");
   }
@@ -152,20 +203,27 @@ $("actMore").addEventListener("click", () => loadActivity(true));
 // ---------- backups & version ----------
 async function loadBackups() {
   try {
-    const [b, a] = await Promise.all([api("/api/admin/backups"), api("/api/admin/about")]);
+    const [a, b] = await Promise.all([
+      api("/api/admin/about"),
+      info.mine.backups ? api("/api/admin/backups") : Promise.resolve(null),
+    ]);
     const v = a.version || {};
     $("about").innerHTML = `<table class="cost-table"><tbody>
       <tr><td>Version</td><td><b>${esc(a.release || "—")}</b> · ${esc(v.commit || v.zip || "—")}</td></tr>
       <tr><td>Installed</td><td>${esc((v.installed || "—").replace("T", " "))}</td></tr>
-      <tr><td>Data folder</td><td>${esc(a.data_folder || b.locations.data)}</td></tr>
+      <tr><td>Data folder</td><td>${esc(a.data_folder || (b && b.locations.data) || "—")}</td></tr>
       <tr><td>Database</td><td>${esc(a.database)}</td></tr>
       <tr><td>Logins</td><td>${a.logins ? "on" : "off"}</td></tr></tbody></table>`;
-    $("backupWhere").textContent = `Backups are kept in ${b.folder}. Each one holds master data, projects and CAD files. ` +
-      "Copy them to OneDrive or a pen drive too (backup_copy_to in dtc_settings.ini).";
-    $("backups").innerHTML = `<thead><tr><th>Backup</th><th>Made</th><th class="num">Size (MB)</th><th></th></tr></thead><tbody>${
-      b.backups.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.created.replace("T", " "))}</td><td class="num">${x.size_mb}</td>
-      <td><a class="btn btn-outline small" href="/api/admin/backups/${encodeURIComponent(x.name)}">Download</a></td></tr>`).join("")
-      || '<tr><td colspan="4" class="empty">No backup yet.</td></tr>'}</tbody>`;
+    $("backupArea").hidden = !info.mine.backups;
+    $("backups").closest(".table-wrap").hidden = !info.mine.backups;
+    if (b) {
+      $("backupWhere").textContent = `Backups are kept in ${b.folder}. Each one holds master data, projects and CAD files. ` +
+        "Copy them to OneDrive or a pen drive too (backup_copy_to in dtc_settings.ini).";
+      $("backups").innerHTML = `<thead><tr><th>Backup</th><th>Made</th><th class="num">Size (MB)</th><th></th></tr></thead><tbody>${
+        b.backups.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.created.replace("T", " "))}</td><td class="num">${x.size_mb}</td>
+        <td><a class="btn btn-outline small" href="/api/admin/backups/${encodeURIComponent(x.name)}">Download</a></td></tr>`).join("")
+        || '<tr><td colspan="4" class="empty">No backup yet.</td></tr>'}</tbody>`;
+    }
     $("reports").innerHTML = a.update_reports.length
       ? a.update_reports.map((r) => `<details class="card"><summary>${esc(r.name)}</summary><pre class="report">${esc(r.text)}</pre></details>`).join("")
       : '<p class="note">No update report yet (they are written by DTC_Update.bat).</p>';
@@ -180,6 +238,18 @@ $("backupNow").addEventListener("click", async () => {
     status($("status"), `Backup ${r.name} made (${r.size_mb} MB).`, "ok");
     loadBackups();
   } catch (err) {
+    status($("status"), err.message, "error");
+  }
+});
+$("updateNow").addEventListener("click", async () => {
+  if (!confirm("The app will stop, update, and restart. Continue?")) return;
+  $("updateNow").disabled = true;
+  status($("status"), "Starting the update…");
+  try {
+    const result = await api("/api/admin/update", { method: "POST" });
+    status($("status"), result.message, "ok");
+  } catch (err) {
+    $("updateNow").disabled = false;
     status($("status"), err.message, "error");
   }
 });
