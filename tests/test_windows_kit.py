@@ -131,29 +131,14 @@ def test_refuses_bad_zip_and_running_app(kit, tmp_path, monkeypatch):
         kit.cmd_update([])
 
 
-def test_staging_cleanup_retries_permission_error(kit, tmp_path, monkeypatch):
+def test_update_ignores_leftover_legacy_staging_folder(kit, tmp_path):
     kit.STAGING.mkdir()
-    calls = []
+    (kit.STAGING / "locked.tmp").write_text("in use")
 
-    def fake_rmtree(path, onexc):
-        onexc(lambda target: calls.append((path, target)), path, PermissionError("access denied"))
+    kit.cmd_update([str(release_zip(tmp_path, "fresh"))])
 
-    monkeypatch.setattr(kit.shutil, "rmtree", fake_rmtree)
-    kit.clear_staging()
-
-    assert calls == [(kit.STAGING, kit.STAGING)]
-
-
-def test_staging_cleanup_explains_locked_folder(kit, monkeypatch):
-    def fake_rmtree(path, onexc):
-        def locked(_target):
-            raise PermissionError("folder is in use")
-
-        onexc(locked, path, PermissionError("access denied"))
-
-    monkeypatch.setattr(kit.shutil, "rmtree", fake_rmtree)
-    with pytest.raises(kit.KitError, match="Close Explorer windows or other programs"):
-        kit.clear_staging()
+    assert (kit.STAGING / "locked.tmp").read_text() == "in use"
+    assert kit.is_app(kit.BASE / "Tool_part_cost_estimator")
 
 
 def test_a_broken_new_version_changes_nothing(kit, tmp_path):
@@ -162,5 +147,5 @@ def test_a_broken_new_version_changes_nothing(kit, tmp_path):
     broken = release_zip(tmp_path, "broken", lambda src: (src / "backend" / "app" / "main.py").write_text("raise SystemExit('boom')\nimport nothing_here"))
     with pytest.raises(kit.KitError, match="does not start"):
         kit.cmd_update([str(broken)])
-    assert not (kit.BASE / "_dtc_new").exists() and kit.is_app(kit.BASE / "Tool_part_cost_estimator")
+    assert not list(kit.BASE.glob("_dtc_new_*")) and kit.is_app(kit.BASE / "Tool_part_cost_estimator")
     assert (kit.DATA / "master_data" / "costing_db.sqlite").read_bytes() == before

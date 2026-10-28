@@ -29,9 +29,9 @@ import json
 import os
 import shutil
 import socket
-import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.request
@@ -490,25 +490,6 @@ def smoke_test(app: Path) -> None:
                        + (r.stderr or r.stdout).strip()[-1500:])
 
 
-def clear_staging() -> None:
-    """Remove a previous update's staging tree, including read-only ZIP files on Windows."""
-    def onexc(func, path, exc):
-        if not isinstance(exc, PermissionError):
-            raise exc
-        try:
-            os.chmod(path, stat.S_IWRITE)
-            func(path)
-        except OSError as retry:
-            raise KitError(f"Cannot clear the update staging folder {STAGING}. Close Explorer windows or other programs "
-                           "using that folder, then remove it and run DTC_Update.bat again.") from retry
-
-    try:
-        shutil.rmtree(STAGING, onexc=onexc)
-    except OSError as exc:
-        raise KitError(f"Cannot clear the update staging folder {STAGING}: {exc}. Close Explorer windows or other "
-                       "programs using that folder, then remove it and run DTC_Update.bat again.") from exc
-
-
 # ---------- commands ----------
 
 def cmd_backup(_args) -> None:
@@ -527,20 +508,19 @@ def cmd_update(args) -> None:
     before = backup("dtc-before-update") if (DATA / "master_data").exists() else None
     src, info = choose_zip(args[0] if args else None)
 
-    if STAGING.exists():
-        clear_staging()
+    staging = Path(tempfile.mkdtemp(prefix=f"{STAGING.name}_", dir=BASE))
     with zipfile.ZipFile(src) as z:
         root = zip_root(z)
         say(f"Unpacking {src.name} ...")
-        z.extractall(STAGING)
-    new_app = STAGING / root.rstrip("/") if root else STAGING
+        z.extractall(staging)
+    new_app = staging / root.rstrip("/") if root else staging
 
     try:
         ensure_venv()
         pip_install(new_app)
         smoke_test(new_app)
     except KitError:
-        shutil.rmtree(STAGING, ignore_errors=True)
+        shutil.rmtree(staging, ignore_errors=True)
         raise
 
     # the swap: old app folder(s) to DTC_Old, the new one in place
@@ -554,7 +534,7 @@ def cmd_update(args) -> None:
             if d.parent != BASE and not any(d.parent.iterdir()):
                 d.parent.rmdir()                                   # the empty outer folder of a double-unzipped ZIP
     move(new_app, current)
-    shutil.rmtree(STAGING, ignore_errors=True)
+    shutil.rmtree(staging, ignore_errors=True)
 
     # master data: yours + the new version's new rows
     log_dir = DATA / "logs"
