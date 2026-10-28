@@ -31,6 +31,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.request
@@ -512,20 +513,19 @@ def cmd_update(args) -> None:
     before = backup("dtc-before-update") if (DATA / "master_data").exists() else None
     src, info = choose_zip(zip_arg)
 
-    if STAGING.exists():
-        shutil.rmtree(STAGING)
+    staging = Path(tempfile.mkdtemp(prefix=f"{STAGING.name}_", dir=BASE))
     with zipfile.ZipFile(src) as z:
         root = zip_root(z)
         say(f"Unpacking {src.name} ...")
-        z.extractall(STAGING)
-    new_app = STAGING / root.rstrip("/") if root else STAGING
+        z.extractall(staging)
+    new_app = staging / root.rstrip("/") if root else staging
 
     try:
         ensure_venv()
         pip_install(new_app)
         smoke_test(new_app)
     except KitError:
-        shutil.rmtree(STAGING, ignore_errors=True)
+        shutil.rmtree(staging, ignore_errors=True)
         raise
 
     # the swap: old app folder(s) to DTC_Old, the new one in place
@@ -539,7 +539,7 @@ def cmd_update(args) -> None:
             if d.parent != BASE and not any(d.parent.iterdir()):
                 d.parent.rmdir()                                   # the empty outer folder of a double-unzipped ZIP
     move(new_app, current)
-    shutil.rmtree(STAGING, ignore_errors=True)
+    shutil.rmtree(staging, ignore_errors=True)
 
     # master data: yours + the new version's new rows
     log_dir = DATA / "logs"
