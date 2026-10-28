@@ -470,6 +470,9 @@ On a part's panel (plastic or die casting), open **Simulation & analysis** and p
 
 Every formula is a row of **Mould & die database → Simulation rules**, evaluated in order (each may use the ones above
 it, Parameters and Insert moulding rules; `log` and `exp` are allowed). All rows are EXAMPLE values. This is an analytical estimate, not Moldflow.
+Large STEP files are tessellated once per server process and reused by the concept, simulation and process-parameter
+cards. An unchanged simulation is also reused for its report, video and process settings; a new revision or changed
+master-data input triggers a fresh calculation. The first run on a detailed model can still take a minute.
 
 ## Design loop (roadmap stage 7)
 

@@ -1,5 +1,6 @@
 import io
-import stat
+import subprocess
+from pathlib import Path
 
 import ezdxf
 import pytest
@@ -103,12 +104,18 @@ def test_dwg_without_converter_and_with_a_fake_one(monkeypatch, tmp_path):
     monkeypatch.setattr(external, "dwg_converter", lambda: None)
     with pytest.raises(bom_extract.ExtractError, match="needs a converter"):
         bom_extract.extract(b"AC1032", "drawing.dwg")
-    (tmp_path / "bom.dxf").write_bytes(dxf_bytes())
-    script = tmp_path / "dwg2dxf"
-    script.write_text('#!/bin/sh\ncp "%s" "$2"\n' % (tmp_path / "bom.dxf"))
-    script.chmod(script.stat().st_mode | stat.S_IEXEC)
-    monkeypatch.setattr(external, "dwg_converter", lambda: (str(script), "libredwg"))
+    expected = dxf_bytes()
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        Path(cmd[2]).write_bytes(expected)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(external, "dwg_converter", lambda: ("fake-dwg2dxf", "libredwg"))
+    monkeypatch.setattr(external.subprocess, "run", fake_run)
     e = bom_extract.extract(b"AC1032", "drawing.dwg")
+    assert calls and calls[0][0] == "fake-dwg2dxf"
     assert e["format"].startswith("DWG") and len(e["lines"]) == 3
 
 
