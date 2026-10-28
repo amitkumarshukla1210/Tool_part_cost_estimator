@@ -35,6 +35,46 @@ def _rules(part_type: str) -> dict:
     return {k: rules[k]["value"] for k in PARAMS} | {"is_example": any(rules[k]["is_example"] for k in PARAMS)}
 
 
+def _projected_grid(tri: np.ndarray, u: int, v: int) -> dict:
+    projected = tri[:, :, [u, v]]
+    bounds_min = projected.min(axis=1)
+    bounds_max = projected.max(axis=1)
+    lo, hi = bounds_min.min(axis=0), bounds_max.max(axis=0)
+    span = hi - lo
+    if not np.any(span > 0):
+        return {"lo": lo, "span": span, "cell": 1.0, "nx": 1, "ny": 1, "buckets": {}, "oversized": []}
+    cell = float(max(span) / min(512, max(32, int(np.sqrt(len(tri) / 8)))))
+    nx, ny = max(1, int(np.ceil(span[0] / cell))), max(1, int(np.ceil(span[1] / cell)))
+    cell_min = np.minimum((nx - 1, ny - 1), np.maximum(0, np.floor((bounds_min - lo) / cell).astype(int)))
+    cell_max = np.minimum((nx - 1, ny - 1), np.floor((bounds_max - lo) / cell).astype(int))
+    widths = cell_max - cell_min + 1
+    counts = widths.prod(axis=1)
+    oversized = np.flatnonzero(counts > 256)
+    counts[oversized] = 0
+    tri_ids = np.repeat(np.arange(len(tri), dtype=np.int32), counts)
+    offsets = np.arange(len(tri_ids)) - np.repeat(np.cumsum(counts) - counts, counts)
+    x_width = np.repeat(widths[:, 0], counts)
+    x = np.repeat(cell_min[:, 0], counts) + offsets % x_width
+    y = np.repeat(cell_min[:, 1], counts) + offsets // x_width
+    keys = x * ny + y
+    order = np.argsort(keys)
+    sorted_keys = keys[order]
+    starts = np.r_[0, np.flatnonzero(np.diff(sorted_keys)) + 1] if len(order) else []
+    buckets = {int(sorted_keys[start]): tri_ids[order[start:end]]
+               for start, end in zip(starts, np.r_[starts[1:], len(order)])}
+    return {"lo": lo, "span": span, "cell": cell, "nx": nx, "ny": ny, "buckets": buckets, "oversized": oversized}
+
+
+def _projected_candidates(grid: dict, point: np.ndarray) -> list[int]:
+    lo, span, cell, nx, ny = grid["lo"], grid["span"], grid["cell"], grid["nx"], grid["ny"]
+    if np.any(point < lo) or np.any(point > lo + span):
+        return grid["oversized"]
+    x, y = np.floor((point - lo) / cell).astype(int)
+    x, y = min(nx - 1, x), min(ny - 1, y)
+    bucket = np.asarray(grid["buckets"].get(x * ny + y, []), dtype=np.int32)
+    return np.concatenate((bucket, np.asarray(grid["oversized"], dtype=np.int32)))
+
+
 def _shadowed(tri: np.ndarray, axis: int, cos_min: float, offset: float, max_faces: int):
     """Per triangle: True when a ray from the face along its own side of the opening direction hits the part."""
     a, b, c = tri[:, 0], tri[:, 1], tri[:, 2]
@@ -46,24 +86,28 @@ def _shadowed(tri: np.ndarray, axis: int, cos_min: float, offset: float, max_fac
     step = max(1, int(np.ceil(len(cand) / max_faces)))
     cand = cand[::step]
     u, v = [i for i in range(3) if i != axis]
-    # 2D barycentric set-up of every triangle in the plane normal to the axis
     p0, p1, p2 = tri[:, 0], tri[:, 1], tri[:, 2]
-    d = (p1[:, v] - p2[:, v]) * (p0[:, u] - p2[:, u]) + (p2[:, u] - p1[:, u]) * (p0[:, v] - p2[:, v])
-    ok = np.abs(d) > 1e-12
-    d = np.where(ok, d, 1.0)
+    grid = _projected_grid(tri, u, v)
     hit = np.zeros(len(tri), bool)
-    for s in range(0, len(cand), 128):
-        idx = cand[s:s + 128]
-        cen = tri[idx].mean(axis=1)
+    for idx in cand:
+        cen = tri[idx].mean(axis=0)
         sign = np.sign(n[idx, axis])
-        du, dv = cen[:, u, None] - p2[None, :, u], cen[:, v, None] - p2[None, :, v]
-        l1 = ((p1[None, :, v] - p2[None, :, v]) * du + (p2[None, :, u] - p1[None, :, u]) * dv) / d[None]
-        l2 = ((p2[None, :, v] - p0[None, :, v]) * du + (p0[None, :, u] - p2[None, :, u]) * dv) / d[None]
+        overlaps = _projected_candidates(grid, cen[[u, v]])
+        if not len(overlaps):
+            continue
+        q0, q1, q2 = p0[overlaps], p1[overlaps], p2[overlaps]
+        d = ((q1[:, v] - q2[:, v]) * (q0[:, u] - q2[:, u])
+             + (q2[:, u] - q1[:, u]) * (q0[:, v] - q2[:, v]))
+        ok = np.abs(d) > 1e-12
+        d = np.where(ok, d, 1.0)
+        du, dv = cen[u] - q2[:, u], cen[v] - q2[:, v]
+        l1 = ((q1[:, v] - q2[:, v]) * du + (q2[:, u] - q1[:, u]) * dv) / d
+        l2 = ((q2[:, v] - q0[:, v]) * du + (q0[:, u] - q2[:, u]) * dv) / d
         l3 = 1 - l1 - l2
-        inside = (l1 > 1e-9) & (l2 > 1e-9) & (l3 > 1e-9) & ok[None]
-        depth = l1 * p0[None, :, axis] + l2 * p1[None, :, axis] + l3 * p2[None, :, axis]
-        start = (cen[:, axis] + sign * offset)[:, None]
-        hit[idx] = (inside & (sign[:, None] * (depth - start) > 0)).any(axis=1)
+        inside = (l1 > 1e-9) & (l2 > 1e-9) & (l3 > 1e-9) & ok
+        depth = l1 * q0[:, axis] + l2 * q1[:, axis] + l3 * q2[:, axis]
+        start = cen[axis] + sign * offset
+        hit[idx] = bool(np.any(inside & (sign * (depth - start) > 0)))
     return hit, area, n, step
 
 

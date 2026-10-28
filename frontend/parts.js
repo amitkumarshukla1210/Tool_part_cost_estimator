@@ -652,7 +652,9 @@ $("panelBody").addEventListener("click", async (e) => {
     window.TracePanel.open(tr, tr.root);
   }
   if (e.target.id === "conceptRun") {
-    status($("conceptStatus"), "Analysing the 3D model…");
+    const button = $("conceptRun");
+    button.disabled = true;
+    status($("conceptStatus"), "Analysing the 3D model (a detailed model may take a minute on first run)…");
     try {
       const c = await api(`/api/parts/${part.id}/concept`);
       status($("conceptStatus"), "");
@@ -665,6 +667,8 @@ $("panelBody").addEventListener("click", async (e) => {
         <button type="button" class="btn btn-primary small" id="conceptApply" data-slides="${c.slides}" data-lifters="${c.lifters}">Use ${c.slides} slide(s) and ${c.lifters} lifter(s) in the tool cost</button>`;
     } catch (err) {
       status($("conceptStatus"), err.message, "error");
+    } finally {
+      button.disabled = false;
     }
   }
   if (e.target.id === "loopSimRun") {
@@ -676,7 +680,9 @@ $("panelBody").addEventListener("click", async (e) => {
     return;
   }
   if (e.target.id === "simRun") {
-    status($("simStatus"), "Analysing the 3D model…");
+    const button = $("simRun");
+    button.disabled = true;
+    status($("simStatus"), "Analysing the 3D model (a detailed model may take a minute on first run)…");
     try {
       const r = await api(`/api/parts/${part.id}/simulation`);
       status($("simStatus"), "");
@@ -695,10 +701,14 @@ $("panelBody").addEventListener("click", async (e) => {
         ${r.steps.map((x) => `<tr><td>${esc(x.label || x.name)}</td><td><code>${esc(x.formula)}</code></td><td class="num">${fmt(x.value, 2)} ${esc(x.unit)}</td></tr>`).join("")}</tbody></table></div>`;
     } catch (err) {
       status($("simStatus"), err.message, "error");
+    } finally {
+      button.disabled = false;
     }
   }
   if (e.target.id === "ppRun") {
-    status($("ppStatus"), "Working out…");
+    const button = $("ppRun");
+    button.disabled = true;
+    status($("ppStatus"), "Working out from the simulation and material window…");
     try {
       const r = await api(`/api/parts/${part.id}/process-parameters`);
       status($("ppStatus"), "");
@@ -709,6 +719,7 @@ $("panelBody").addEventListener("click", async (e) => {
         ${r.parameters.map((x) => `<tr><td>${esc(x.label)}</td><td class="num"><b>${fmt(x.value, 2)}</b></td><td>${x.min == null ? "" : `${fmt(x.min, 2)} – ${fmt(x.max, 2)}`}</td>
           <td>${esc(x.unit)}</td><td class="note">${esc(x.why)}</td></tr>`).join("")}</tbody></table></div><p class="note">${esc(r.note)}</p>`;
     } catch (err) { status($("ppStatus"), err.message, "error"); }
+    finally { button.disabled = false; }
     return;
   }
   if (e.target.id === "tdRun") return machineFirst();

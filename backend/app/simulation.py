@@ -47,26 +47,115 @@ def _rules(part_type: str) -> list[dict]:
     return rows
 
 
+def _triangle_grid(tri: np.ndarray, resolution: int = 96) -> dict:
+    bounds_min, bounds_max = tri.min(axis=1), tri.max(axis=1)
+    lo, hi = bounds_min.min(axis=0), bounds_max.max(axis=0)
+    span = hi - lo
+    cell = float(max(span) / resolution)
+    dims = np.maximum(1, np.ceil(span / cell).astype(int))
+    cell_min = np.minimum(dims - 1, np.maximum(0, np.floor((bounds_min - lo) / cell).astype(int)))
+    cell_max = np.minimum(dims - 1, np.floor((bounds_max - lo) / cell).astype(int))
+    widths = cell_max - cell_min + 1
+    counts = widths.prod(axis=1)
+    oversized = np.flatnonzero(counts > 512)
+    counts[oversized] = 0
+    tri_ids = np.repeat(np.arange(len(tri), dtype=np.int32), counts)
+    offsets = np.arange(len(tri_ids)) - np.repeat(np.cumsum(counts) - counts, counts)
+    x_width = np.repeat(widths[:, 0], counts)
+    y_width = np.repeat(widths[:, 1], counts)
+    x = np.repeat(cell_min[:, 0], counts) + offsets % x_width
+    y = np.repeat(cell_min[:, 1], counts) + (offsets // x_width) % y_width
+    z = np.repeat(cell_min[:, 2], counts) + offsets // (x_width * y_width)
+    ny, nz = int(dims[1]), int(dims[2])
+    keys = (x * ny + y) * nz + z
+    order = np.argsort(keys)
+    sorted_keys = keys[order]
+    starts = np.r_[0, np.flatnonzero(np.diff(sorted_keys)) + 1] if len(order) else []
+    buckets = {int(sorted_keys[start]): tri_ids[order[start:end]]
+               for start, end in zip(starts, np.r_[starts[1:], len(order)])}
+    return {"lo": lo, "hi": hi, "span": span, "cell": cell, "dims": dims,
+            "buckets": buckets, "oversized": oversized}
+
+
+def _ray_box(origin: np.ndarray, direction: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> tuple[float, float] | None:
+    near, far = 0.0, math.inf
+    for axis in range(3):
+        if abs(direction[axis]) < 1e-15:
+            if origin[axis] < lo[axis] or origin[axis] > hi[axis]:
+                return None
+            continue
+        a = (lo[axis] - origin[axis]) / direction[axis]
+        b = (hi[axis] - origin[axis]) / direction[axis]
+        near = max(near, min(a, b))
+        far = min(far, max(a, b))
+        if far < near:
+            return None
+    return near, far
+
+
+def _ray_triangles(origin: np.ndarray, direction: np.ndarray, tri: np.ndarray) -> float:
+    p0 = tri[:, 0]
+    e1 = tri[:, 1] - p0
+    e2 = tri[:, 2] - p0
+    h = np.cross(np.broadcast_to(direction, e2.shape), e2)
+    det = np.einsum("ij,ij->i", e1, h)
+    valid = np.abs(det) > 1e-12
+    inv_det = 1 / np.where(valid, det, 1)
+    s = origin - p0
+    u = inv_det * np.einsum("ij,ij->i", s, h)
+    q = np.cross(s, e1)
+    v = inv_det * np.einsum("j,ij->i", direction, q)
+    distance = inv_det * np.einsum("ij,ij->i", e2, q)
+    hit = valid & (u >= 0) & (v >= 0) & (u + v <= 1) & (distance > 1e-6)
+    return float(distance[hit].min()) if np.any(hit) else math.inf
+
+
 def thickness(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, offset: float) -> np.ndarray:
-    """Distance from each face centroid (idx) along its inward normal to the next face of the part (Möller–Trumbore)."""
-    p0, e1, e2 = tri[:, 0], tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0]
+    """Distance from sampled face centroids along inward normals to the next mesh face."""
+    if not len(idx):
+        return np.empty(0)
+    grid = _triangle_grid(tri)
+    lo, hi, cell, dims = grid["lo"], grid["hi"], grid["cell"], grid["dims"]
     out = np.full(len(idx), np.nan)
-    for s in range(0, len(idx), 128):
-        k = idx[s:s + 128]
-        o = tri[k].mean(axis=1) - n[k] * offset
-        d = -n[k]
-        h = np.cross(d[:, None, :], e2[None])
-        a = (e1[None] * h).sum(-1)
-        ok = np.abs(a) > 1e-12
-        f = 1 / np.where(ok, a, 1)
-        sv = o[:, None, :] - p0[None]
-        u = f * (sv * h).sum(-1)
-        q = np.cross(sv, e1[None])
-        v = f * (d[:, None, :] * q).sum(-1)
-        t = f * (e2[None] * q).sum(-1)
-        good = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 1e-6)
-        t = np.where(good, t, np.inf).min(axis=1)
-        out[s:s + 128] = np.where(np.isfinite(t), t + offset, np.nan)
+    for out_i, face_i in enumerate(idx):
+        origin = tri[face_i].mean(axis=0) - n[face_i] * offset
+        direction = -n[face_i]
+        interval = _ray_box(origin, direction, lo, hi)
+        if interval is None:
+            continue
+        current, exit_t = interval
+        current += max(cell * 1e-10, 1e-12)
+        position = origin + direction * current
+        cell_pos = np.floor((position - lo) / cell).astype(int)
+        cell_pos = np.minimum(np.maximum(cell_pos, 0), dims - 1)
+        ray_step = np.sign(direction).astype(int)
+        next_boundary = lo + (cell_pos + (ray_step > 0)) * cell
+        t_max = np.divide(next_boundary - origin, direction,
+                          out=np.full(3, math.inf), where=np.abs(direction) > 1e-15)
+        t_delta = np.divide(cell, np.abs(direction),
+                            out=np.full(3, math.inf), where=np.abs(direction) > 1e-15)
+        best = math.inf
+        seen = set()
+        oversized = grid["oversized"]
+        if len(oversized):
+            best = _ray_triangles(origin, direction, tri[oversized])
+            seen.update(oversized.tolist())
+        while np.all((cell_pos >= 0) & (cell_pos < dims)) and current <= exit_t and current < best:
+            key = (cell_pos[0] * dims[1] + cell_pos[1]) * dims[2] + cell_pos[2]
+            faces = grid["buckets"].get(int(key))
+            if faces is not None:
+                new_faces = [int(face) for face in faces if int(face) not in seen]
+                if new_faces:
+                    seen.update(new_faces)
+                    best = min(best, _ray_triangles(origin, direction, tri[new_faces]))
+            axis = int(np.argmin(t_max))
+            current = t_max[axis]
+            if current >= best:
+                break
+            cell_pos[axis] += ray_step[axis]
+            t_max[axis] += t_delta[axis]
+        if math.isfinite(best):
+            out[out_i] = best + offset
     return out
 
 
@@ -81,9 +170,10 @@ def _machine(part_type: str, force_t: float) -> dict:
             "biggest_t": max((m["tonnage_t"] or 0 for m in ms), default=0)}
 
 
-def run(vertices, triangles, part_type: str, facts: dict, projected_area_mm2: dict) -> dict:
+def run(vertices, triangles, part_type: str, facts: dict, projected_area_mm2: dict,
+        concept_result: dict | None = None) -> dict:
     rules = _rules(part_type)
-    c = concept.analyze(vertices, triangles, part_type, projected_area_mm2)
+    c = dict(concept_result) if concept_result is not None else concept.analyze(vertices, triangles, part_type, projected_area_mm2)
     p = c["rules"]
     v = np.asarray(vertices, float)
     tri = v[np.asarray(triangles, int)]
