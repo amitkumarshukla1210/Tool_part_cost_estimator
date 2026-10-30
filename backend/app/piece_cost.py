@@ -4,6 +4,9 @@
                + inserts (BOP price × quantity + handling) + rejection (incl. inserts lost with a reject)
                + overhead + profit + packing + tool amortisation + logistics
 
+    tool amortisation (stage 41) = cost of one tool ÷ parts per tool,
+    parts per tool = min(tool / mould life shots × cavities, programme parts ÷ tools running side by side for capacity)
+
 The steps are the Cost formulas of scope "piece" (Countries, machines & formulas). Their inputs are Formula inputs
 of that scope: Parameters rows (source parameter), the rate library (source rate) or a value worked out here
 (source piece, see costing_setup.PIECE_ITEMS): the stored RM and tool cost versions of the current revision, the
@@ -108,6 +111,11 @@ def run(part_id: int, country: str | None = None) -> dict:
     rules = register_setup.insert_rules()
     capex_inr = tool["tool_capex_inr"] or tool["tool_cost_inr"]
     fx_cur = 1.0 if cur == "INR" else rates.lookup("forex", cur, "", as_of)["value"]
+    stage_c = tool_tr.get("stage_c") or {}
+    if stage_c.get("tools_for_capacity"):
+        tools_cap, cap_note = stage_c["tools_for_capacity"], f"Tools for capacity: {stage_c.get('note', 'Stage C')}"
+    else:   # machined: one fixture set per machine; older versions without Stage C: the tools of the version
+        tools_cap, cap_note = tool_tr.get("tools_count") or 1, stage_c.get("note") or f"Tools of tool cost version {tool['version']}"
     if tool_tr.get("cycle_node") and "cycle_s" not in typed:   # machined (stage 37): the traced machining time
         cycle = graft(t, tool_tr, "mc:") and "mc:" + tool_tr["cycle_node"]
     else:
@@ -123,6 +131,9 @@ def run(part_id: int, country: str | None = None) -> dict:
         "insert_cost": (ins_cost, cur, reg(" + ".join(notes) or "no moulded-in inserts"), True),
         "inserts_per_part": (float(d["insert_count"]), "pcs", reg("Inserts linked to the part"), False),
         "tool_capex": (capex_inr / fx_cur, cur, reg(f"Tool CAPEX of tool cost version {tool['version']}: INR {capex_inr:,.0f} at the {as_of} forex rate"), True),
+        "tool_cost": (tool["tool_cost_inr"] / fx_cur, cur,
+                      reg(f"One tool of tool cost version {tool['version']}: INR {tool['tool_cost_inr']:,.0f} at the {as_of} forex rate"), True),
+        "tools_for_capacity": (tools_cap, "tools", reg(cap_note), False),
         "lifetime_volume": ((volume or 0) * (years or 0), "pcs", reg(f"{vnote} × {years} programme years"), False),
         "total_weight_kg": (weight_g / 1000, "kg", reg("Body + inserts weight from the 3D model"), False),
     }

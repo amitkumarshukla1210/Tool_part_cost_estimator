@@ -14,6 +14,8 @@ Rules
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import io
 import json
@@ -1550,6 +1552,20 @@ def tool_drawing(part_id: int, kind: str = "pdf", die: str | None = None) -> byt
     return (drawings.tool_drawing_dxf if kind == "dxf" else drawings.tool_drawing_pdf)(d, tr, die)
 
 
+# Die type forced for one calculation (stage 41 comparison: progressive vs stage dies); None = the part's own choice.
+_SHEET_MODE: contextvars.ContextVar = contextvars.ContextVar("sheet_mode", default=None)
+
+
+@contextlib.contextmanager
+def sheet_mode(mode: str):
+    """Work out the sheet-metal tools and dies as if the part's die type were `mode`; nothing is stored."""
+    token = _SHEET_MODE.set(mode)
+    try:
+        yield
+    finally:
+        _SHEET_MODE.reset(token)
+
+
 def _sheet_context(part_id: int):
     """(part detail, revision, 3D shape, blank, sheet-tools result) of a sheet-metal part's current revision."""
     from . import sheet_tools
@@ -1570,6 +1586,8 @@ def _sheet_context(part_id: int):
     if not density:
         raise ToolNotApplicable("Set the part's material (with a density in Master data → Materials).")
     g, typed = rev["geometry"], d["sheet_inputs"] or {}
+    if _SHEET_MODE.get():
+        typed = typed | {"mode": _SHEET_MODE.get()}
     volume, _ = _annual_volume(d)
     shape = load_step(str(path))
     blank = _developed_blank(rev, g, g.get("wall_mm") or 1.0, shape)
