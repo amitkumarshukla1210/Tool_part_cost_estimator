@@ -93,7 +93,7 @@ def _ray_box(origin: np.ndarray, direction: np.ndarray, lo: np.ndarray, hi: np.n
     return near, far
 
 
-def _ray_triangles(origin: np.ndarray, direction: np.ndarray, tri: np.ndarray) -> float:
+def _ray_triangles(origin: np.ndarray, direction: np.ndarray, tri: np.ndarray) -> tuple[float, int]:
     p0 = tri[:, 0]
     e1 = tri[:, 1] - p0
     e2 = tri[:, 2] - p0
@@ -107,19 +107,30 @@ def _ray_triangles(origin: np.ndarray, direction: np.ndarray, tri: np.ndarray) -
     v = inv_det * np.einsum("j,ij->i", direction, q)
     distance = inv_det * np.einsum("ij,ij->i", e2, q)
     hit = valid & (u >= 0) & (v >= 0) & (u + v <= 1) & (distance > 1e-6)
-    return float(distance[hit].min()) if np.any(hit) else math.inf
+    if not np.any(hit):
+        return math.inf, -1
+    k = int(np.argmin(np.where(hit, distance, math.inf)))
+    return float(distance[k]), k
 
 
 def thickness(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, offset: float) -> np.ndarray:
     """Distance from sampled face centroids along inward normals to the next mesh face."""
+    return thickness_hits(tri, n, idx, offset)[0]
+
+
+def thickness_hits(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, offset: float,
+                   dirs: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """thickness() and the face each ray hits (-1 = none): the opposite skin of the wall. dirs: other ray directions
+    (one per face of idx) instead of the inward normal."""
     if not len(idx):
-        return np.empty(0)
+        return np.empty(0), np.empty(0, int)
     grid = _triangle_grid(tri)
     lo, hi, cell, dims = grid["lo"], grid["hi"], grid["cell"], grid["dims"]
     out = np.full(len(idx), np.nan)
+    opp = np.full(len(idx), -1)
     for out_i, face_i in enumerate(idx):
         origin = tri[face_i].mean(axis=0) - n[face_i] * offset
-        direction = -n[face_i]
+        direction = -n[face_i] if dirs is None else dirs[out_i]
         interval = _ray_box(origin, direction, lo, hi)
         if interval is None:
             continue
@@ -134,11 +145,12 @@ def thickness(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, offset: float) ->
                           out=np.full(3, math.inf), where=np.abs(direction) > 1e-15)
         t_delta = np.divide(cell, np.abs(direction),
                             out=np.full(3, math.inf), where=np.abs(direction) > 1e-15)
-        best = math.inf
+        best, best_face = math.inf, -1
         seen = set()
         oversized = grid["oversized"]
         if len(oversized):
-            best = _ray_triangles(origin, direction, tri[oversized])
+            best, k = _ray_triangles(origin, direction, tri[oversized])
+            best_face = int(oversized[k]) if k >= 0 else -1
             seen.update(oversized.tolist())
         while np.all((cell_pos >= 0) & (cell_pos < dims)) and current <= exit_t and current < best:
             key = (cell_pos[0] * dims[1] + cell_pos[1]) * dims[2] + cell_pos[2]
@@ -147,7 +159,9 @@ def thickness(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, offset: float) ->
                 new_faces = [int(face) for face in faces if int(face) not in seen]
                 if new_faces:
                     seen.update(new_faces)
-                    best = min(best, _ray_triangles(origin, direction, tri[new_faces]))
+                    d, k = _ray_triangles(origin, direction, tri[new_faces])
+                    if d < best:
+                        best, best_face = d, new_faces[k]
             axis = int(np.argmin(t_max))
             current = t_max[axis]
             if current >= best:
@@ -156,7 +170,8 @@ def thickness(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, offset: float) ->
             t_max[axis] += t_delta[axis]
         if math.isfinite(best):
             out[out_i] = best + offset
-    return out
+            opp[out_i] = best_face
+    return out, opp
 
 
 def _machine(part_type: str, force_t: float) -> dict:
