@@ -3092,29 +3092,31 @@ def _rm_rollup(bom: list[dict]) -> dict:
 
 
 def dashboard(project_id: int) -> dict:
+    from . import scope
     project = get_project(project_id)
     statuses = register_setup.statuses()
     with db.engine().connect() as conn:
-        by = lambda col: dict(conn.execute(select(col, func.count()).where(db.parts.c.project_id == project_id)
+        sv = scope.project_view(conn, project_id)          # stage 40: a user limited to tool groups sees their parts only
+        cond = scope.part_condition(scope.groups()) if sv["limited"] else None
+        mine = lambda *c: and_(db.parts.c.project_id == project_id, *c, *([cond] if cond is not None else []))
+        by = lambda col: dict(conn.execute(select(col, func.count()).where(mine())
                                            .group_by(col)).all())
         by_status, by_process, by_sourcing = by(db.parts.c.status), by(db.parts.c.process), by(db.parts.c.sourcing)
         r = db.revisions.alias("cur")
         missing = conn.execute(select(func.count()).select_from(db.parts.outerjoin(r, r.c.id == db.parts.c.current_revision_id))
-                               .where(and_(db.parts.c.project_id == project_id, r.c.file_id.is_(None)))).scalar()
+                               .where(mine(r.c.file_id.is_(None)))).scalar()
         total = sum(by_status.values())
-        rm_costed = conn.execute(select(func.count()).where(and_(db.parts.c.project_id == project_id,
-                                                                  db.parts.c.rm_cost_inr.is_not(None)))).scalar()
+        rm_costed = conn.execute(select(func.count()).where(mine(db.parts.c.rm_cost_inr.is_not(None)))).scalar()
         targets = conn.execute(select(func.count(), func.sum(db.parts.c.target_piece_cost_inr))
-                               .where(and_(db.parts.c.project_id == project_id,
-                                           db.parts.c.target_piece_cost_inr.is_not(None)))).one()
+                               .where(mine(db.parts.c.target_piece_cost_inr.is_not(None)))).one()
         tool_rows = conn.execute(select(db.parts.c.id, db.parts.c.process, db.parts.c.sourcing, db.parts.c.tool_cost_inr,
                                         db.parts.c.tool_capex_inr)
-                                 .where(and_(db.parts.c.project_id == project_id, db.parts.c.is_assembly.is_(False)))
+                                 .where(mine(db.parts.c.is_assembly.is_(False)))
                                  ).mappings().all()
         tool_example = _tool_example_parts(conn, [r["id"] for r in tool_rows if r["tool_capex_inr"] is not None])
     variants = []
     for v in project["variants"]:
-        bom = variant_bom(v["id"])
+        bom = [b for b in variant_bom(v["id"]) if sv["visible"] is None or b["child_part_id"] in sv["visible"]]
         variants.append(v | {"bom_lines": len(bom), "unique_parts": len({b["child_part_id"] for b in bom}),
                              "bom_cost_inr": None} | _rm_rollup(bom))
     procs, srcs = register_setup.processes(), register_setup.sourcing()
@@ -3141,6 +3143,7 @@ def dashboard(project_id: int) -> dict:
                   "tool_note": "Tool CAPEX = Σ over the project's parts of tool cost per tool × tools over the programme "
                                "(latest stored tool cost version; moulds, dies and patterns of every tool group: plastic, die casting, foundry, sheet metal, EPS, blow)."},
         "open_corrections": corrections,
+        "scope": {"limited": sv["limited"], "hidden_parts": sv["hidden"], "note": sv["note"]},
         "parts_rm_costed": rm_costed,
         "rm_is_example": any(v.get("rm_is_example") for v in variants),
         "tool_is_example": bool(tool_example),

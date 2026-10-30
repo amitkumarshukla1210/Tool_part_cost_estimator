@@ -45,9 +45,10 @@ CASES = [
     ("sheet_channel_large", "large_sheet_channel.step", "Mild steel CRCA / HR", "sheet_metal_multistage", 30000, "sheet_metal"),
     ("eps", "plastic_cover.step", "EPS bead grade S (20 kg/m3)", "eps_moulding", 100000, "eps"),
     ("blow", "pet_bottle.step", "PET bottle grade (IV 0.80)", "stretch_blow_moulding", 5000000, "blow"),
-    ("machined", "plate_with_hole.step", "Mild steel CRCA / HR", "machined", 5000, ""),
+    ("machined_shaft", "machined_shaft.step", "Carbon steel EN8 (C45) bar", "machined", 20000, "machined"),
+    ("machined_block", "machined_block.step", "Aluminium 6061-T6 bar", "machined", 5000, "machined"),
 ]
-TOOL_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow")
+TOOL_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow")      # moulds and dies (detailed tool design)
 MOULD_TYPES = ("plastic", "die_casting", "eps", "blow", "foundry")
 
 
@@ -194,17 +195,18 @@ def run_case(a: Audit, name, file, material, process, volume, ptype) -> dict:
     out = {"case": name, "part_id": pid, "ok": True}
     d = a.call(name, "get", P)
     a.call(name, "get", f"{P}/trace")
-    rx = "ok" if ptype else "any"              # machined / bought-out: RM comes in a later stage (main says so)
+    rx = "ok" if ptype else "any"              # bought-out / assembly: no RM of their own
     a.call(name, "post", f"{P}/rm-cost", json={}, expect=rx)
     a.call(name, "get", f"{P}/rm-cost/trace", expect=rx)
     a.call(name, "get", f"{P}/rm-cost/export.xlsx", expect=rx, file_kind="xlsx")
     a.call(name, "get", f"{P}/rm-cost/export.pdf", expect=rx, file_kind="pdf")
     a.call(name, "get", f"{P}/concept", expect="ok" if mould else "any")
     a.call(name, "get", f"{P}/design-loop")
-    tc = a.call(name, "post", f"{P}/tool-cost", json={}, expect="ok" if tool else "any")
-    a.call(name, "get", f"{P}/tool-cost/trace", expect="ok" if tool else "any")
-    a.call(name, "get", f"{P}/tool-cost/export.xlsx", expect="ok" if tool else "any", file_kind="xlsx")
-    a.call(name, "get", f"{P}/tool-cost/export.pdf", expect="ok" if tool else "any", file_kind="pdf")
+    costed_tool = tool or ptype == "machined"           # machined: machining & fixture is stored as the tool cost (stage 37)
+    tc = a.call(name, "post", f"{P}/tool-cost", json={}, expect="ok" if costed_tool else "any")
+    a.call(name, "get", f"{P}/tool-cost/trace", expect="ok" if costed_tool else "any")
+    a.call(name, "get", f"{P}/tool-cost/export.xlsx", expect="ok" if costed_tool else "any", file_kind="xlsx")
+    a.call(name, "get", f"{P}/tool-cost/export.pdf", expect="ok" if costed_tool else "any", file_kind="pdf")
     sim = a.call(name, "get", f"{P}/simulation", expect="ok" if mould else "any")
     if mould:
         a.call(name, "get", f"{P}/simulation/report.pdf", file_kind="pdf")
@@ -307,7 +309,7 @@ def logins(a: Audit) -> None:
             s.post("/api/auth/logout")
             s.post("/api/auth/login", json={"username": "eng", "password": "correct horse battery"})
             seen = {p["process"] for p in s.get("/api/parts", params={"limit": 500}).json()["rows"]}
-            if seen - {"sheet_metal_multistage", "sheet_metal_progressive", "machined", "bought_out", "assembly", ""}:
+            if seen - {"sheet_metal_multistage", "sheet_metal_progressive", "bought_out", "assembly", ""}:
                 a._find("logins", "/api/parts", "engineer sees parts outside the tool group", ", ".join(sorted(seen)))
             if plastic and s.get(f"/api/parts/{plastic['id']}").status_code != 403:
                 a._find("logins", f"/api/parts/{plastic['id']}", "engineer opens another group's part", "")

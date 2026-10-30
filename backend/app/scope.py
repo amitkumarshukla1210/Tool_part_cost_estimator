@@ -1,7 +1,7 @@
 """Data access by tool group (roadmap stage 30).
 
 Each login ID has tool groups (part types: plastic, die casting, foundry, sheet metal, EPS, blow moulding) that the admin
-sets on Admin → Users & roles and can change at any time (people change responsibility, the data stays where it is).
+sets on Admin → Users & roles (machined parts since stage 37 as the group Machining) and can change at any time (people change responsibility, the data stays where it is).
 
     viewer / engineer / approver   see and work on the parts whose process belongs to one of their groups, and the projects
                                    that hold such parts (or that they created, or that have no tool-group part yet)
@@ -20,9 +20,9 @@ from sqlalchemy import and_, func, not_, or_, select
 from . import auth, register_setup
 from . import projects_db as db
 
-GROUPS = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow")
+GROUPS = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow", "machined")
 LABELS = {"plastic": "Plastic moulding", "die_casting": "Die casting", "foundry": "Foundry", "sheet_metal": "Sheet metal",
-          "eps": "EPS (thermocole)", "blow": "Blow moulding"}
+          "eps": "EPS (thermocole)", "blow": "Blow moulding", "machined": "Machining"}
 
 
 def groups(user: dict | None = None) -> set | None:
@@ -127,3 +127,19 @@ def guard(path: str) -> str | None:
         if p and not project_ok(conn, int(p.group(1)), g):
             return f"This project has no parts of your tool groups ({_names(g)})."
     return None
+
+
+# ---------- project totals per tool group (stage 40) ----------
+
+def project_view(conn, project_id: int) -> dict:
+    """What the project dashboard / leader view of the logged-in user covers: {limited, visible (part ids or None = all),
+    hidden (count), note}."""
+    g = groups()
+    if g is None:
+        return {"limited": False, "visible": None, "hidden": 0, "note": ""}
+    all_ids = set(conn.execute(select(db.parts.c.id).where(db.parts.c.project_id == project_id)).scalars())
+    vis = set(conn.execute(select(db.parts.c.id).where(and_(db.parts.c.project_id == project_id, part_condition(g)))).scalars())
+    hidden = len(all_ids - vis)
+    note = (f"Your tool groups only ({_names(g)}): {hidden} part(s) of other tool groups are not counted in these figures."
+            if hidden else f"Your tool groups: {_names(g)}.")
+    return {"limited": True, "visible": vis, "hidden": hidden, "note": note}

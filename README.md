@@ -1107,10 +1107,10 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 
 - **Roles:** viewer < engineer < approver < **head** < admin. *Head* (head of department) sees and changes the data of every tool group and
   every user, like an admin, but does not manage login IDs (role defaults and per-user overrides are managed by admins).
-- **Tool groups:** Admin → Users, roles & permissions has check boxes per login ID: *Plastic moulding, Die casting, Foundry, Sheet metal, EPS, Blow moulding*.
+- **Tool groups:** Admin → Users, roles & permissions has check boxes per login ID: *Plastic moulding, Die casting, Foundry, Sheet metal, EPS, Blow moulding, Machining* (Machining added with the machined parts of stage 37).
   A viewer, engineer or approver with groups ticked sees only the parts whose process belongs to those groups, and the projects that hold
   such parts, that they created themselves, or that have no tool-group part yet; opening another group's part or project gives "not your tool
-  group". They can give a part only a process of their own groups. Parts without a tool group (assemblies, bought-out, machined) are seen by all.
+  group". They can give a part only a process of their own groups. Parts without a tool group (assemblies, bought-out) are seen by all.
 - **Change of responsibility:** example: today *user1* has Sheet metal and EPS, *user2* Die casting and Plastic; in six months the admin ticks
   Die casting and EPS for user1 and Sheet metal and Plastic for user2. The data stays where it is; each user now sees the other groups.
 - An ID with no group ticked sees everything (as before this stage), so existing IDs keep working until the admin sets their groups.
@@ -1194,7 +1194,7 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 - Files meant to be uploaded again stay plain: master-data, mould & die, costing setup, rates and register setup downloads, the import template
   and the price master export. Code: `backend/app/branding.py` (middleware in `main.py`). Tests: `tests/test_branding.py`.
 
-## AI assistant: Ask AI (stage 37)
+## AI assistant: Ask AI (stage 36)
 
 - **Ask AI** (bottom right of every page) answers questions in plain language, for example *What is the part cost of 1023 and what
   drives it?*, *Compare the tool cost of 1023 in India and China*, *Which parts of project X are over their target?*, *Send me the tool
@@ -1212,6 +1212,16 @@ World Bank WDI consumer price index (indexation). The others in the table are no
   (not the answer) is written to the **Activity log** (what: *bot*).
 - The chat stays in the browser tab; *New chat* clears it. Code: `backend/app/bot.py`, `frontend/bot.js`, `frontend/bot.css`.
   Tests: `tests/test_bot.py` (a stand-in for Claude, so no key or internet is needed).
+
+## Project totals per tool group (stage 40)
+
+- For a user limited to tool groups (Admin → Users, roles & permissions, stage 30), the **project dashboard** and the **project leader view** count only the
+  parts of their groups: part counts, files missing, RM, tool & mould CAPEX, BOM cost vs target of every variant (lines of other groups left out),
+  machines needed and their CAPEX, and the CAPEX plan (tool lines of their parts, machine lines of the machines their parts need, and the other lines).
+  A note says *"Your tool groups only (…): N part(s) of other tool groups are not counted"*; the Excel and PDF exports carry the same note.
+- *Recalculate part costs* on the dashboard recalculates only their parts. Head of department and admin always see the whole project.
+- Machined parts (stage 37) are the tool group **Machining**: tick it on Admin → Users, roles & permissions for the users who cost machined parts.
+- Code: `scope.project_view`, `register.dashboard`, `leader.py`. Tests: `tests/test_scope.py`.
 
 ## End-to-end audit (run before every release)
 
