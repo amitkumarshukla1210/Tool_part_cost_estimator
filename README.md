@@ -469,7 +469,8 @@ On a part's panel (plastic or die casting), open **Simulation & analysis** and p
 - **Corrections required**: low draft, sink risk, thin walls, undercuts, no machine large enough, cycle above plan.
 
 Every formula is a row of **Mould & die database → Simulation rules**, evaluated in order (each may use the ones above
-it, Parameters and Insert moulding rules; `log` and `exp` are allowed). All rows are EXAMPLE values. This is an analytical estimate, not Moldflow.
+it, Parameters and Insert moulding rules; `log` and `exp` are allowed). All rows are EXAMPLE values. This is a quick analytical
+estimate; the filling, pressure and defects come from the **Flow simulation** (stage 39).
 Large STEP files are tessellated once per server process and reused by the concept, simulation and process-parameter
 cards. An unchanged simulation is also reused for its report, video and process settings; a new revision or changed
 master-data input triggers a fresh calculation. The first run on a detailed model can still take a minute.
@@ -1212,7 +1213,7 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 - The chat stays in the browser tab; *New chat* clears it. Code: `backend/app/bot.py`, `frontend/bot.js`, `frontend/bot.css`.
   Tests: `tests/test_bot.py` (a stand-in for Claude, so no key or internet is needed).
 
-## Project totals per tool group (stage 39)
+## Project totals per tool group (stage 40)
 
 - For a user limited to tool groups (Admin → Users, roles & permissions, stage 30), the **project dashboard** and the **project leader view** count only the
   parts of their groups: part counts, files missing, RM, tool & mould CAPEX, BOM cost vs target of every variant (lines of other groups left out),
@@ -1261,6 +1262,48 @@ moulded and pressed parts: RM → machining & fixture → part cost → country 
   Parameters rows, the tables *Stock sizes* and *Machining data*, the formulas of `rm_machined` and `machining`, and EXAMPLE rates
   (bar, chips, fixture, duty). All EXAMPLE until you replace them. Samples: `samples/machined_shaft.step`, `samples/machined_block.step`.
 - Code: `backend/app/machining.py` (seed, stock search, machining & fixture), `geometry.machining_features`. Tests: `tests/test_machining.py`.
+
+## Flow simulation: filling, pressure, defects, cooling, stress and machine (stage 39)
+
+On a part's panel (plastic, die casting, foundry, EPS, blow moulding) open **Flow simulation** and press *Run flow simulation*.
+It runs in the background with a **progress bar** (it also says when it waits for another simulation), so a large part never
+leaves the page silent. Every run is **saved** with its **PDF report** and **video** under *Saved simulation runs* (date, revision,
+who, clamp force, cycle, corrections), to download again later without calculating again.
+
+- **Method** (`backend/app/flow_sim.py`): a 2.5D "dual-domain" solver on the surface of the 3D model. The CAD triangles are split
+  to an even mesh (`mesh_size_mm`, at most `mesh_faces` triangles), the wall thickness is measured by rays through the part (rims and
+  edges are told from thick sections by 4 tilted rays), and the two skins of every wall are linked through the thickness.
+- **Gate**: typed (x, y, z in mm) or found by the solver (the gate with the least flow resistance to the last point to fill); 2–8
+  gates are added where the flow resistance is highest.
+- **Filling**: the part fills in the order of its flow resistance, Σ length / (h / h_ref)^k (Hele-Shaw); fill time from *Flow rules*
+  (plastic: shot volume; die casting: the **NADCA** formula K · (Ti − Tf + S·Z) / (Tf − Td) · T; foundry: bottom-up by height, pour
+  time K · √kg; EPS: bead filling). **Fill-time map** and a **filling animation** in the video.
+- **Pressure** (plastic): power-law melt, dp = 12 η(γ̇) v L / h², η = η_ref (γ̇ / γ̇_ref)^(n−1) → injection pressure (+ runner loss),
+  pressure map, **clamp force** from the pressure on the projected area or the hold pressure (die casting: intensification
+  pressure; EPS: steam; blow: blow pressure; foundry: the **weight on the cope** against the metal head).
+- **Thermal**: cooling time h² / (π² α) · ln(4/π · (Tm − Tw) / (Te − Tw)) (plastic), solidification B · (h/2)² (Chvorinov; metal, EPS),
+  flow-front temperature.
+- **Defects, with where they are** (cm² at x, y, z): short shot / hesitation / misrun (a thin section crossed for longer than its
+  freeze-off time, or pressure above the machine), **weld lines / cold shuts** (fronts meeting head-on; weak when the front is
+  cooler), **air traps / gas porosity and blow holes** (last to fill; foundry: gas that cannot rise to the vents), **sink marks,
+  voids and shrinkage porosity** (hot spots that solidify after their feed path from the gate; risers sized by modulus × 1.2 for
+  castings), **stress areas** (sharp inside corners, steep cooling-time changes: residual stress / warpage); blow moulding: wall
+  after stretching, over-stretch, thin corners.
+- **Machine**: clamp force, injection / metal pressure, shot volume and weight → the smallest machine of `trial_machine_process`
+  that takes it, and a check against the production machine of stage 33.
+- **Master data** (Mould & die database, EXAMPLE values until you replace them): **Flow materials** (viscosity and n, diffusivity,
+  no-flow / min-flow, solidus, liquidus, Chvorinov B, NADCA K and Z, shrinkage, modulus, bead size, PET stretch limit; one row for
+  every moulded / cast material) and **Flow rules** (per part type, formulas evaluated in order). Every number of the report shows
+  its rule or material row.
+- **Accuracy**: a physics estimate for design and costing decisions, not a certified 3D Moldflow / MAGMA result (no packing,
+  fibre orientation, warpage magnitude or turbulence). For the tool release of a critical part, run such a program and **attach
+  its report** (PDF / MP4) under *Saved simulation runs*.
+- **Speed**: about 15–60 s for a large part (150,000 solver triangles), plus about a minute for the video. The analysis video of
+  *Simulation & analysis* is also made in the background now (*▶ Make the video*) and is 10× faster than before: each view of the
+  part is drawn once (`render3d.face_view`) and only coloured for each map. Before, a detailed 3D model (300,000 triangles) took
+  13 minutes on a server and more than 30 minutes on an office PC, so *Analysing the 3D model…* seemed to hang.
+- Code: `flow_sim.py`, `sim_jobs.py` (background jobs), `render3d.py` (`face_view`, `paint`), `pdf_report.flow_pdf`, saved runs in the
+  table `sim_runs` of your project database (files in the storage folder). Tests: `tests/test_flow_sim.py`.
 
 ## Look & feel: Design to Cost theme
 

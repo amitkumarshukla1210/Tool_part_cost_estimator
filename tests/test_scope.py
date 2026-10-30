@@ -117,7 +117,7 @@ def _part_in_variant(c, project_id, variant_id, file, material, process, code):
 
 
 def test_project_dashboard_and_leader_view_count_only_my_tool_groups(server):
-    """Stage 39: a limited user's project totals (dashboard, leader view, exports) cover their tool groups only."""
+    """Stage 40: a limited user's project totals (dashboard, leader view, exports) cover their tool groups only."""
     login(server)
     p = server.post("/api/projects", json={"code": "MIX", "name": "Mixed project"}).json()
     vid = next(v["id"] for v in server.post(f"/api/projects/{p['id']}/variants", json={"code": "V1", "name": "Base", "annual_volume": 10000,

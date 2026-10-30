@@ -33,7 +33,7 @@ def _fx(cur: str, as_of: str) -> float:
 
 
 def _part_costs(project_id: int) -> dict:
-    """{part_id: row with the latest stored piece cost trace (or None)}: the parts the logged-in user may see (stage 39)."""
+    """{part_id: row with the latest stored piece cost trace (or None)}: the parts the logged-in user may see (stage 40)."""
     from . import scope
     with db.engine().connect() as conn:
         sv = scope.project_view(conn, project_id)
@@ -47,7 +47,7 @@ def _part_costs(project_id: int) -> dict:
 
 
 def variant_costs(variant: dict, parts: dict, visible: set | None = None) -> dict:
-    """visible: the part ids the user may see (None = all); lines of other tool groups are left out (stage 39)."""
+    """visible: the part ids the user may see (None = all); lines of other tool groups are left out (stage 40)."""
     lines, total, missing, example = [], 0.0, 0, False
     for b in register.variant_bom(variant["id"]):
         if b["kind"] != "bom" or b["is_assembly"]:
@@ -127,7 +127,7 @@ def _items(project_id: int) -> list[dict]:
 
 
 def plan(project: dict, keep=None) -> dict:
-    """keep(item) -> bool: the CAPEX lines the user may see (stage 39); None = all."""
+    """keep(item) -> bool: the CAPEX lines the user may see (stage 40); None = all."""
     ms = register_setup.capex_milestones()
     sop = project.get("sop_date") or ""
     items, by_month, by_supplier, by_country = [], defaultdict(float), defaultdict(float), defaultdict(float)
@@ -372,7 +372,7 @@ def to_pdf(project_id: int) -> bytes:
     story = [Paragraph("PROJECT LEADER VIEW", ParagraphStyle("k", parent=ss["Normal"], textColor=theme["brand"], fontSize=8)),
              Paragraph(f"{p['code']} · {p['name']}", h1),
              Paragraph(f"{p['customer'] or ''} · SOP {p.get('sop_date') or 'not set'} · {date.today().isoformat()}", note)]
-    if v["scope"]["limited"]:                                     # stage 39: only the user's tool groups
+    if v["scope"]["limited"]:                                     # stage 40: only the user's tool groups
         story.append(Paragraph(f"<b>{v['scope']['note']}</b>", note))
     if v["is_example"]:
         story += [Spacer(1, 2 * mm), _example_banner(ss)]

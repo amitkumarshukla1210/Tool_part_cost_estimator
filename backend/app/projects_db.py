@@ -370,6 +370,23 @@ tool_drawing_edits = Table(
     Column("at", DateTime, default=now),
 )
 
+# Simulation runs saved with their reports (roadmap stage 39): flow simulation, analysis video, attached reports of other programs.
+sim_runs = Table(
+    "sim_runs", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),
+    Column("rev", String(20), default=""),
+    Column("kind", String(20), nullable=False),        # flow, analysis_video, external
+    Column("title", String(200), default=""),
+    Column("summary", JSON),                           # results, corrections, settings (no per-face arrays)
+    Column("pdf_file_id", ForeignKey("files.id")),
+    Column("video_file_id", ForeignKey("files.id")),
+    Column("is_example", Boolean, default=False),
+    Column("created_by", String(100), default=""),
+    Column("created_at", DateTime, default=now),
+    Index("ix_sim_runs_part", "part_id"),
+)
+
 # Admin: the lowest role allowed for each action (rows missing = the default in auth.PERMISSIONS).
 role_permissions = Table(
     "role_permissions", meta,
