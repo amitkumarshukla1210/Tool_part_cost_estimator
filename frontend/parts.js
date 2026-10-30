@@ -393,11 +393,14 @@ function toolBlock(p) {
       <button type="button" class="btn btn-outline small" id="conceptRun">Analyse</button> <span class="status" id="conceptStatus"></span>
       <div id="conceptOut"></div></details>
       <details class="card add-insert"><summary class="btn btn-outline small">Simulation &amp; analysis (wall, draft, sink, cycle, clamp)</summary>
-      <p class="note">Analytical estimate from the 3D model and the Simulation rules in Master data, not a flow simulation.</p>
+      <p class="note">Quick analytical check from the 3D model and the Simulation rules in Master data. For the filling, pressure and the defects
+        (weld lines, air traps / blow holes, porosity, stress) use <b>Flow simulation</b> below.</p>
       <button type="button" class="btn btn-outline small" id="simRun">Analyse</button>
       <a class="link" href="/api/parts/${p.id}/simulation/report.pdf">PDF report with maps</a> ·
-      <a class="link" href="/api/parts/${p.id}/simulation/video" title="Takes about 30 s to make">▶ Video (MP4)</a> <span class="status" id="simStatus"></span>
+      <button type="button" class="btn btn-outline small" id="simVideo">▶ Make the video</button> <span class="status" id="simStatus"></span>
+      <div id="simVideoJob"></div>
       <div id="simOut"></div></details>
+      ${flowBox(p)}
       ${processBox(p)}`;
   }
   if (t.versions) {
@@ -1604,3 +1607,151 @@ $("panelBody").addEventListener("change", (e) => {
 });
 
 init();
+
+// ---------- flow simulation, background jobs with progress, saved simulation runs (stage 39) ----------
+function flowBox(p) {
+  return `<details class="card add-insert" id="flowBox"><summary class="btn btn-outline small">Flow simulation (fill, pressure, weld lines, air traps / blow holes, porosity, cooling, stress, machine)</summary>
+    <p class="note">Physics solver on the 3D model (dual-domain method): fill pattern from the gate, injection / metal pressure, clamp force,
+      flow-front temperature, cooling or solidification time, and where the defects are: short shot / misrun, weld lines / cold shuts,
+      air traps / gas porosity and blow holes, sinks / shrinkage porosity (feeding of hot spots), stress at sharp corners and uneven cooling.
+      Material data and rules: Mould &amp; die database → Flow materials, Flow rules (EXAMPLE until replaced). Runs in the background with a progress bar;
+      every run is saved with its PDF report and video. For the tool release of a critical part, also attach the report of Moldflow / MAGMA / ProCAST.</p>
+    <form id="flowForm" class="toolbar">
+      <label>Gates <input type="number" name="gates" min="1" max="8" value="1" style="width:4em" /></label>
+      <label>Gate point x, y, z (mm) <input name="gate_point" placeholder="empty = found by the solver" size="22" /></label>
+      <label class="check"><input type="checkbox" name="video" checked /> Video</label>
+      <button type="submit" class="btn btn-primary small">Run flow simulation</button>
+    </form>
+    <div id="flowJob"></div><div id="flowOut"></div>
+    <h4>Saved simulation runs</h4><div id="simRuns"><p class="note">Loading…</p></div>
+    <form id="simAttach" class="toolbar">
+      <label>Attach a report of another program <input type="file" name="file" accept=".pdf,.mp4" required /></label>
+      <label>Program <input name="program" placeholder="Moldflow, MAGMA, ProCAST…" size="14" /></label>
+      <label>Note <input name="note" size="16" /></label>
+      <button type="submit" class="btn btn-outline small">Attach</button> <span class="status" id="simAttachStatus"></span>
+    </form></details>`;
+}
+
+const jobBox = (j) => `<div class="card"><progress max="100" value="${j.pct}" style="width:100%"></progress>
+  <p class="note">${j.status === "failed" ? `<b class="error">Failed:</b> ${esc(j.error)}` : `${esc(j.text)} · ${j.pct} % · ${fmt(j.elapsed_s, 0)} s`}</p></div>`;
+
+// start a background job and show its progress until it is done; then onDone(job)
+async function runJob(url, box, onDone, body) {
+  let j;
+  try {
+    j = await api(url, { method: "POST", body: JSON.stringify(body || {}) });
+  } catch (err) {
+    box.innerHTML = `<p class="status error">${esc(err.message)}</p>`;
+    return;
+  }
+  const partId = part.id;
+  while (true) {
+    box.innerHTML = jobBox(j);
+    if (j.status === "done") return onDone(j);
+    if (j.status === "failed") return;
+    await new Promise((r) => setTimeout(r, 2000));
+    if (!part || part.id !== partId) return;          // another part was opened: the job goes on, its run is saved
+    try {
+      j = await api(`/api/parts/${partId}/sim-jobs/${j.id}`);
+    } catch (err) {
+      box.innerHTML = `<p class="status error">${esc(err.message)}</p>`;
+      return;
+    }
+  }
+}
+
+const kindName = { flow: "Flow simulation", analysis_video: "Analysis video", external: "Attached report" };
+async function loadRuns() {
+  const el = $("simRuns");
+  if (!el || !part) return;
+  try {
+    const runs = await api(`/api/parts/${part.id}/sim-runs`);
+    const base = `/api/parts/${part.id}/sim-runs`;
+    el.innerHTML = runs.length ? `<div class="table-wrap"><table class="cost-table"><thead><tr><th>When</th><th>Rev</th><th>Run</th><th>By</th>
+      <th class="num">Clamp t</th><th class="num">Cycle s</th><th>Corrections</th><th>Files</th><th></th></tr></thead><tbody>
+      ${runs.map((r) => `<tr><td>${esc((r.created_at || "").replace("T", " ").slice(0, 16))}</td><td>${esc(r.rev)}</td>
+        <td>${esc(r.title || kindName[r.kind] || r.kind)}${r.is_example ? ' <span class="note">(EXAMPLE data)</span>' : ""}</td><td>${esc(r.created_by)}</td>
+        <td class="num">${r.results.clamp_t == null ? "" : fmt(r.results.clamp_t, 0)}</td><td class="num">${r.results.cycle_s == null ? "" : fmt(r.results.cycle_s, 1)}</td>
+        <td>${r.kind === "external" ? "" : r.corrections.length || "none"}</td>
+        <td>${r.pdf ? `<a class="link" href="${base}/${r.id}/pdf">⬇ PDF</a>` : ""} ${r.video ? `<a class="link" href="${base}/${r.id}/video">▶ Video</a>` : ""}</td>
+        <td><button type="button" class="btn btn-outline small" data-rundel="${r.id}" title="Delete this run">✕</button></td></tr>`).join("")}</tbody></table></div>`
+      : '<p class="note">No saved run yet.</p>';
+  } catch (err) {
+    el.innerHTML = `<p class="status error">${esc(err.message)}</p>`;
+  }
+}
+
+function flowResult(r) {
+  const s = r.summary, x = s.results || {};
+  const row = (label, v, unit, d = 1) => (v == null ? "" : `<tr><td>${label}</td><td class="num">${fmt(v, d)}</td><td>${unit}</td></tr>`);
+  return `${r.is_example ? '<p class="note"><b>Uses EXAMPLE flow data / rules.</b></p>' : ""}
+    <h4>${s.corrections.length ? "Corrections required" : "No corrections required"}</h4>
+    <ul>${s.corrections.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+    <p>Gate ${s.gates.map((g) => `(${g.at_mm.join(", ")})`).join(", ") || "-"} mm · ${esc(s.gate_note)} · machine <b>${esc(s.machine?.machine_id || (x.clamp_t ? "none large enough" : "-"))}</b>
+      ${s.machine?.tonnage_t ? ` (${fmt(s.machine.tonnage_t)} t)` : ""}</p>
+    <div class="table-wrap"><table class="cost-table"><tbody>
+      ${row("Fill time", x.fill_time_s, "s", 3)}${row("Injection pressure", x.injection_bar, "bar", 0)}${row("Hold pressure in the cavity", x.hold_bar, "bar", 0)}
+      ${row("Intensification pressure", x.intensification_bar, "bar", 0)}${row("Coolest flow front", x.front_temp_min_c, "°C", 0)}
+      ${row("Cooling time", x.cooling_s, "s")}${row("Solidification time", x.solidification_s, "s")}${row("Cycle time", x.cycle_s, "s")}
+      ${row("Clamp force", x.clamp_t, "t", 0)}${row("Weight on the cope", x.cope_weight_kg, "kg", 0)}${row("Shot weight", x.shot_weight_g, "g", 0)}
+      ${row("Longest flow path", x.flow_length_mm, "mm", 0)}${row("Highest stretch ratio", x.stretch_max, "", 1)}${row("Thinnest wall after blowing", x.wall_min_mm, "mm", 2)}
+    </tbody></table></div>
+    <p><a class="link" href="/api/parts/${part.id}/sim-runs/${r.id}/pdf">⬇ PDF report with maps</a>
+      ${r.video_file_id ? ` · <a class="link" href="/api/parts/${part.id}/sim-runs/${r.id}/video">▶ Video</a>` : ""}</p>`;
+}
+
+$("panelBody").addEventListener("toggle", (e) => {
+  if (e.target.id === "flowBox" && e.target.open) loadRuns();
+}, true);
+
+$("panelBody").addEventListener("submit", async (e) => {
+  if (e.target.id === "flowForm") {
+    e.preventDefault();
+    const f = e.target.elements;
+    const gp = f.gate_point.value.trim();
+    const body = { gates: Number(f.gates.value || 1), video: f.video.checked,
+                   gate_point: gp ? gp.split(/[,;\s]+/).filter(Boolean).map(Number) : null };
+    if (body.gate_point && (body.gate_point.length !== 3 || body.gate_point.some((v) => !Number.isFinite(v)))) {
+      $("flowJob").innerHTML = '<p class="status error">Gate point: three numbers x, y, z in mm (or leave it empty).</p>';
+      return;
+    }
+    $("flowOut").innerHTML = "";
+    await runJob(`/api/parts/${part.id}/flow-simulation`, $("flowJob"), async (j) => {
+      const r = await api(`/api/parts/${part.id}/sim-runs/${j.run_id}`);
+      $("flowJob").innerHTML = "";
+      $("flowOut").innerHTML = flowResult(r);
+      loadRuns();
+    }, body);
+  }
+  if (e.target.id === "simAttach") {
+    e.preventDefault();
+    try {
+      await api(`/api/parts/${part.id}/sim-runs/external`, { method: "POST", body: new FormData(e.target) });
+      e.target.reset();
+      status($("simAttachStatus"), "Attached.");
+      loadRuns();
+    } catch (err) {
+      status($("simAttachStatus"), err.message, "error");
+    }
+  }
+});
+
+$("panelBody").addEventListener("click", async (e) => {
+  if (e.target.id === "simVideo") {
+    await runJob(`/api/parts/${part.id}/simulation/video-job`, $("simVideoJob"), (j) => {
+      $("simVideoJob").innerHTML = `<p>Video ready: <a class="link" href="/api/parts/${part.id}/sim-runs/${j.run_id}/video">▶ open / download</a>
+        (saved under Flow simulation → Saved simulation runs).</p>`;
+      loadRuns();
+    });
+  }
+  const del = e.target.closest("[data-rundel]");
+  if (del) {
+    if (!confirm("Delete this saved simulation run (its PDF and video stay in the storage folder)?")) return;
+    try {
+      await api(`/api/parts/${part.id}/sim-runs/${del.dataset.rundel}`, { method: "DELETE" });
+      loadRuns();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+});

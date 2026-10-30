@@ -14,6 +14,7 @@ Holds the data that sizes a mould or die and builds its BOM:
     design_rules    detailed 3D tool design: clearances, fits, plate / pillar / screw sizes, tolerances, finish, shrinkage
     general_tolerances  ISO 2768-1 linear and angular general tolerances by class, printed on the tool drawings (stage 31)
     process_windows / process_parameters  material temperature windows and the formulas of the process setting sheet (stage 34)
+    flow_materials / flow_rules  material data and rules of the flow simulation (stage 39)
     fit_tolerances  ISO 286 limits of the fits (H7, g6 …) by size: the tolerance of every fitted dimension (stage 32)
     time_parameters removal rates, set-up hours and shares that the BOM hour / amount rules use
 
@@ -322,11 +323,44 @@ TABLES = {
         col("is_example", "Example", "bool"),
         col("notes", "Notes", required=False),
     ]},
+    # Flow simulation (roadmap stage 39): material data of the solver and its rules per part type
+    "flow_materials": {"title": "Flow materials", "unique": ("material",), "columns": [
+        col("material", "Material (Master data → Materials)"),
+        col("family", "Family (plastic, metal, eps, pet)", "text", ("plastic", "metal", "eps", "pet")),
+        col("viscosity_pa_s", "Plastic: viscosity at the melt temperature and the reference shear rate (Pa·s)", "number", required=False),
+        col("shear_index_n", "Plastic: power-law index n (shear thinning, 0.2–1)", "number", required=False),
+        col("ref_shear_1_s", "Plastic: reference shear rate (1/s)", "number", required=False),
+        col("diffusivity_mm2_s", "Thermal diffusivity (mm²/s)", "number", required=False),
+        col("no_flow_c", "No-flow (plastic) / minimum flow (metal) temperature (°C)", "number", required=False),
+        col("solidus_c", "Metal: solidus (°C)", "number", required=False),
+        col("liquidus_c", "Metal: liquidus (°C)", "number", required=False),
+        col("chvorinov_s_mm2", "Metal: Chvorinov B, t = B·M² (s/mm²); EPS: cooling s per mm² of wall", "number", required=False),
+        col("nadca_k_s_mm", "Die casting: NADCA fill-time factor K (s/mm)", "number", required=False),
+        col("nadca_z_c_pct", "Die casting: NADCA Z (°C per % solid)", "number", required=False),
+        col("shrinkage_pct", "Shrinkage (%)", "number", required=False),
+        col("modulus_mpa", "Elastic modulus (MPa)", "number", required=False),
+        col("max_shear_1_s", "Plastic: highest shear rate allowed (1/s)", "number", required=False),
+        col("bead_mm", "EPS: bead diameter (mm)", "number", required=False),
+        col("stretch_max", "PET: highest total stretch ratio", "number", required=False),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes", required=False),
+    ]},
+    "flow_rules": {"title": "Flow rules", "unique": ("part_type", "name"), "columns": [
+        col("part_type", "Part type", "part_type", PART_TYPES),
+        col("step", "Order", "number"),
+        col("name", "Name"),
+        col("formula", "Formula", "formula"),
+        col("unit", "Unit", required=False),
+        col("label", "Meaning"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes", required=False),
+    ]},
 }
 
 
 def _check(clean: dict) -> None:
-    from . import dim_tolerances, drawing_data, process_params
+    from . import dim_tolerances, drawing_data, flow_sim, process_params
+    flow_sim.validate(clean)
     drawing_data.validate(clean)
     dim_tolerances.validate(clean)
     process_params.validate(clean)
