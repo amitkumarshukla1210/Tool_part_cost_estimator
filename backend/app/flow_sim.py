@@ -410,8 +410,9 @@ def _maximin(g, sources: list[int], value: np.ndarray) -> np.ndarray:
 
 
 def _clusters(flag: np.ndarray, a: np.ndarray, b: np.ndarray, cen: np.ndarray, area: np.ndarray, top: int = 8,
-              min_cm2: float = 0.0) -> list[dict]:
-    """Groups of neighbouring flagged faces: area (cm²), centre and span (mm), largest first; smaller than min_cm2 left out."""
+              min_cm2: float = 0.0, min_faces: int = 1) -> list[dict]:
+    """Groups of neighbouring flagged faces: area (cm²), centre and span (mm), largest first; groups smaller than min_cm2
+    or with fewer than min_faces faces (lines: weld lines) are left out."""
     idx = np.nonzero(flag)[0]
     if not len(idx):
         return []
@@ -424,7 +425,7 @@ def _clusters(flag: np.ndarray, a: np.ndarray, b: np.ndarray, cen: np.ndarray, a
     for c in range(n):
         f = idx[lab == c]
         ar = float(area[f].sum())
-        if ar / 100 < min_cm2:
+        if ar / 100 < min_cm2 or len(f) < min_faces:
             continue
         out.append({"area_cm2": ar / 100, "centre_mm": [round(float(x), 1) for x in (cen[f] * area[f, None]).sum(0) / max(ar, 1e-12)],
                     "span_mm": [round(float(x)) for x in np.ptp(cen[f], axis=0)], "faces": int(len(f))})
@@ -638,7 +639,8 @@ def run(vertices, triangles, part_type: str, mat: dict, window: dict, facts: dic
     cosw = math.cos(math.radians(env["weld_angle_deg"]))
     not_tree = (pred[a] != b) & (pred[b] != a) & has_pred[a] & has_pred[b] & reach[a] & reach[b]
     together = np.abs(np.nan_to_num(t[a]) - np.nan_to_num(t[b])) < 0.02 * t_fill    # the fronts arrive at the same time
-    meet = not_tree & together & (np.einsum("ij,ij->i", dirs[a], dirs[b]) < cosw)
+    late = (np.nan_to_num(t[a]) > 0.05 * t_fill) & (np.nan_to_num(t[b]) > 0.05 * t_fill)          # not the spreading at the gate
+    meet = not_tree & together & late & (np.einsum("ij,ij->i", dirs[a], dirs[b]) < cosw)
     weld = np.zeros(m, bool)
     weld[a[meet]] = True
     weld[b[meet]] = True
@@ -735,7 +737,9 @@ def run(vertices, triangles, part_type: str, mat: dict, window: dict, facts: dic
     res |= {"fill_time_s": t_fill, "clamp_t": clamp_t, "cycle_s": cycle, "shot_volume_cm3": shot_cm3, "shot_weight_g": shot_cm3 * rho,
             "flow_length_mm": float(np.nanmax(geo_len)), "front_temp_min_c": float(np.nanmin(T_front)) if np.isfinite(T_front).any() else None,
             "unfilled_cm2": float(area[~reach].sum()) / 100}
-    clusters = {k: _clusters(f, a, b, cen, area, min_cm2=env.get("min_defect_cm2", 0)) for k, f in maps.items()}
+    lines = ("weld", "weak_weld")                                       # thin by nature: judged by length, not by area
+    clusters = {k: _clusters(f, a, b, cen, area, min_cm2=0 if k in lines else env.get("min_defect_cm2", 0),
+                             min_faces=2 if k in lines else 1) for k, f in maps.items()}
     out |= {"gates": [{"face": g, "at_mm": [round(float(x), 1) for x in cen[g]]} for g in gate_faces], "gate_note": gate_note,
             "results": res, "machine": machine, "risers": risers, "areas_cm2": {k: float(area[f].sum()) / 100 for k, f in maps.items()},
             "clusters": clusters,
