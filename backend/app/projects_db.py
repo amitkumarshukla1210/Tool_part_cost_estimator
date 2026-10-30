@@ -379,6 +379,15 @@ role_permissions = Table(
     Column("updated_at", DateTime, default=now, onupdate=now),
 )
 
+user_permission_overrides = Table(
+    "user_permission_overrides", meta,
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("action", String(40), primary_key=True),
+    Column("effect", String(10), nullable=False),
+    Column("updated_by", String(100), default=""),
+    Column("updated_at", DateTime, default=now, onupdate=now),
+)
+
 users = Table(
     "users", meta,
     Column("id", Integer, primary_key=True),

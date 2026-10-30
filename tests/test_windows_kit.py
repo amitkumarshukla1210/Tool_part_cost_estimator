@@ -84,6 +84,15 @@ def test_first_update_moves_data_out_installs_and_merges(kit, tmp_path):
     assert v["zip"] == z.name and Path(v["previous_app"]).exists()
     env = kit.app_env()
     assert env["DATABASE_URL"].endswith("DTC_Data/data/projects.sqlite") and env["DTC_STORAGE_FOLDER"] == str(kit.DATA / "storage")
+    assert env["DTC_KIT_MANAGER"] == str(base / "dtc_manager.py") and env["DTC_PORT"] == "8000"
+
+
+def test_update_wait_runs_noninteractive_download_after_server_stops(kit, monkeypatch):
+    calls = []
+    monkeypatch.setattr(kit, "cmd_update", lambda args: calls.append(args))
+    monkeypatch.setattr(kit, "running", lambda p=None: False)
+    kit.cmd_update_wait([])
+    assert calls == [["download", "--start", "--no-browser"]]
 
 
 def test_next_update_backup_restore_and_rollback(kit, tmp_path):
@@ -131,11 +140,21 @@ def test_refuses_bad_zip_and_running_app(kit, tmp_path, monkeypatch):
         kit.cmd_update([])
 
 
+def test_update_ignores_leftover_legacy_staging_folder(kit, tmp_path):
+    kit.STAGING.mkdir()
+    (kit.STAGING / "locked.tmp").write_text("in use")
+
+    kit.cmd_update([str(release_zip(tmp_path, "fresh"))])
+
+    assert (kit.STAGING / "locked.tmp").read_text() == "in use"
+    assert kit.is_app(kit.BASE / "Tool_part_cost_estimator")
+
+
 def test_a_broken_new_version_changes_nothing(kit, tmp_path):
     kit.cmd_update([str(release_zip(tmp_path, "v1"))])
     before = (kit.DATA / "master_data" / "costing_db.sqlite").read_bytes()
     broken = release_zip(tmp_path, "broken", lambda src: (src / "backend" / "app" / "main.py").write_text("raise SystemExit('boom')\nimport nothing_here"))
     with pytest.raises(kit.KitError, match="does not start"):
         kit.cmd_update([str(broken)])
-    assert not (kit.BASE / "_dtc_new").exists() and kit.is_app(kit.BASE / "Tool_part_cost_estimator")
+    assert not list(kit.BASE.glob("_dtc_new_*")) and kit.is_app(kit.BASE / "Tool_part_cost_estimator")
     assert (kit.DATA / "master_data" / "costing_db.sqlite").read_bytes() == before

@@ -81,7 +81,7 @@ def dashboard_pdf(d: dict) -> bytes:
     story = [head, Spacer(1, 4 * mm), Paragraph("PROJECT SUMMARY", kicker),
              Paragraph(f"{p['code']} · {p['name']}", h1),
              Paragraph(f"Customer: {p.get('customer') or '—'} · CAPEX budget: {_money(p.get('capex_budget_inr'))}", note)]
-    if (d.get("scope") or {}).get("limited"):                       # stage 38: only the user's tool groups
+    if (d.get("scope") or {}).get("limited"):                       # stage 39: only the user's tool groups
         story.append(Paragraph(f"<b>{d['scope']['note']}</b>", note))
     if any(v.get("rm_is_example") for v in d["variants"]) or d["capex"].get("tool_is_example"):
         what = [w for w, on in (("the RM cost of at least one variant", any(v.get("rm_is_example") for v in d["variants"])),

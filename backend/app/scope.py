@@ -129,7 +129,7 @@ def guard(path: str) -> str | None:
     return None
 
 
-# ---------- project totals per tool group (stage 38) ----------
+# ---------- project totals per tool group (stage 39) ----------
 
 def project_view(conn, project_id: int) -> dict:
     """What the project dashboard / leader view of the logged-in user covers: {limited, visible (part ids or None = all),

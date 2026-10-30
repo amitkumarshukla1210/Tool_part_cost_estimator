@@ -18,8 +18,10 @@ import hashlib
 import io
 import json
 import shutil
+import threading
 import uuid
 import zipfile
+from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 
@@ -36,6 +38,34 @@ from .trace import EXAMPLE_WARNING
 
 class RegisterError(ValueError):
     pass
+
+
+_PART_MESH_CACHE = OrderedDict()
+_PART_MESH_CACHE_LOCK = threading.Lock()
+_PART_MESH_CACHE_LIMIT = 2
+_SIMULATION_CACHE_LOCK = threading.Lock()
+_SIMULATION_CACHE_KEY = None
+_SIMULATION_CACHE_VALUE = None
+
+
+def _part_mesh(path: Path):
+    """Load each immutable, content-addressed CAD mesh once per server process."""
+    import numpy as np
+    from .geometry import load_step, tessellate
+
+    stat = path.stat()
+    key = (str(path.resolve()), stat.st_size, stat.st_mtime_ns)
+    with _PART_MESH_CACHE_LOCK:
+        if key in _PART_MESH_CACHE:
+            _PART_MESH_CACHE.move_to_end(key)
+            return _PART_MESH_CACHE[key]
+        mesh = tuple(np.asarray(array) for array in tessellate(load_step(str(path))))
+        for array in mesh:
+            array.setflags(write=False)
+        _PART_MESH_CACHE[key] = mesh
+        while len(_PART_MESH_CACHE) > _PART_MESH_CACHE_LIMIT:
+            _PART_MESH_CACHE.popitem(last=False)
+        return mesh
 
 
 def user() -> str:
@@ -2184,7 +2214,6 @@ def bom_choices() -> dict:
 
 def _concept_inputs(part_id: int):
     """(part detail, revision, part type, vertices, triangles, concept result, part facts) of the current revision."""
-    from .geometry import load_step, tessellate
     d = part_detail(part_id, with_rm=False)
     why = tool_eligibility(d)
     if why:
@@ -2199,12 +2228,11 @@ def _concept_inputs(part_id: int):
     if not path.exists():
         raise ToolNotApplicable(f"The 3D file is missing from the storage folder ({row['stored_path']}).")
     g = rev["geometry"]
-    verts, tris = tessellate(load_step(str(path)))
+    verts, tris = _part_mesh(path)
     try:
         res = concept.analyze(verts, tris, part_type, g["projected_area_mm2"])
     except ValueError as exc:
         raise ToolNotApplicable(str(exc)) from None
-    res.pop("_mask")
     axis = res["opening_axis"]
     across = sorted((v for a, v in g["bbox_axes_mm"].items() if a != axis), reverse=True)
     typed = d["tool_inputs"] or {}
@@ -2225,20 +2253,70 @@ def _concept_inputs(part_id: int):
 def mould_concept(part_id: int) -> dict:
     """Concept v1 of the part's current revision: opening direction, undercuts -> slides / lifters, proposals."""
     d, rev, part_type, _, _, res, facts = _concept_inputs(part_id)
+    res.pop("_mask")
     typed = d["tool_inputs"] or {}
     return res | {"part_id": part_id, "rev": rev["rev"], "stored_pull_direction": rev["geometry"]["pull_direction"],
                   "facts": facts, "proposals": concept.proposals(part_type, facts),
                   "typed": {k: typed[k] for k in ("slides_per_cavity", "lifters_per_cavity") if k in typed}}
 
 
+def _simulation_key(part_id: int) -> str | None:
+    d = part_detail(part_id, with_rm=False)
+    rev = d["revisions"][0] if d["revisions"] else None
+    if not rev or not rev["file_id"]:
+        return None
+    with db.engine().connect() as conn:
+        row = conn.execute(select(db.files).where(db.files.c.id == rev["file_id"])).mappings().first()
+    if not row:
+        return None
+    part_type = (register_setup.processes().get(d["process"]) or {}).get("part_type")
+    tables = mould_db.tables()
+    typed = d["tool_inputs"] or {}
+    try:
+        cavities = typed.get("cavities") or _tool_compute(part_id)["stage_c"]["cavities_per_tool"]
+    except (RegisterError, ToolNotApplicable, tool_cost.ToolCostError):
+        cavities = 1
+    inputs = {
+        "sha256": row["sha256"],
+        "part_id": part_id,
+        "part_type": part_type,
+        "process": d["process"],
+        "material": d["material"],
+        "material_density": _density(d["material"]),
+        "tool_inputs": typed,
+        "cavities": cavities,
+        "insert_count": d["insert_count"],
+        "geometry": rev["geometry"],
+        "parameters": master_data.parameters(part_type) if part_type else {},
+        "master_tables": tables,
+        "machines": costing_setup.tables()["machines"],
+        "insert_rules": register_setup.insert_rules() if part_type == "plastic" else {},
+    }
+    return hashlib.sha256(json.dumps(inputs, sort_keys=True, default=str).encode()).hexdigest()
+
+
 def _simulate(part_id: int):
     from . import simulation
-    d, rev, part_type, verts, tris, _, facts = _concept_inputs(part_id)
-    try:
-        res = simulation.run(verts, tris, part_type, facts, rev["geometry"]["projected_area_mm2"])
-    except ValueError as exc:
-        raise ToolNotApplicable(str(exc)) from None
-    return d, rev, res
+    global _SIMULATION_CACHE_KEY, _SIMULATION_CACHE_VALUE
+
+    def calculate():
+        d, rev, part_type, verts, tris, concept_result, facts = _concept_inputs(part_id)
+        try:
+            res = simulation.run(verts, tris, part_type, facts, rev["geometry"]["projected_area_mm2"], concept_result)
+        except ValueError as exc:
+            raise ToolNotApplicable(str(exc)) from None
+        return d, rev, res
+
+    key = _simulation_key(part_id)
+    if key is None:
+        return calculate()
+    with _SIMULATION_CACHE_LOCK:
+        if key == _SIMULATION_CACHE_KEY:
+            return _SIMULATION_CACHE_VALUE
+        value = calculate()
+        if _simulation_key(part_id) == key:
+            _SIMULATION_CACHE_KEY, _SIMULATION_CACHE_VALUE = key, value
+        return value
 
 
 def simulation_result(part_id: int) -> dict:
@@ -3018,7 +3096,7 @@ def dashboard(project_id: int) -> dict:
     project = get_project(project_id)
     statuses = register_setup.statuses()
     with db.engine().connect() as conn:
-        sv = scope.project_view(conn, project_id)          # stage 38: a user limited to tool groups sees their parts only
+        sv = scope.project_view(conn, project_id)          # stage 39: a user limited to tool groups sees their parts only
         cond = scope.part_condition(scope.groups()) if sv["limited"] else None
         mine = lambda *c: and_(db.parts.c.project_id == project_id, *c, *([cond] if cond is not None else []))
         by = lambda col: dict(conn.execute(select(col, func.count()).where(mine())

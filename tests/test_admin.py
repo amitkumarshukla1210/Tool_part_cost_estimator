@@ -1,6 +1,7 @@
+import pytest
 from fastapi.testclient import TestClient
 
-from backend.app import auth, server_tools
+from backend.app import admin, auth, server_tools
 from backend.app.main import app
 from tests.test_server_mode import PW, login, make, server  # noqa: F401  (fixture)
 
@@ -35,6 +36,7 @@ def test_permissions_per_role_can_be_changed_by_the_admin(server):
     login(server, "eric")
     assert server.post("/api/suppliers", json={"name": "S1"}).status_code == 200
     assert server.put("/api/admin/permissions", json={"permissions": []}).status_code == 403        # admin only
+    assert server.get("/api/admin/permissions").status_code == 403                                   # admin only
     assert server.get("/api/admin/activity").status_code == 403                                     # approver by default
     server.post("/api/auth/logout")
     login(server)
@@ -48,12 +50,73 @@ def test_permissions_per_role_can_be_changed_by_the_admin(server):
     r = server.post("/api/suppliers", json={"name": "S2"})
     assert r.status_code == 403 and "Manage suppliers" in r.json()["detail"]
     assert server.get("/api/admin/activity").status_code == 200
-    mine = server.get("/api/admin/permissions").json()["mine"]
+    mine = server.get("/api/auth/me").json()["permissions"]
     assert mine["manage_suppliers"] is False and mine["view_activity"] is True
     server.post("/api/auth/logout")
     login(server, "vera")
     assert server.post("/api/gross-weight", json={"part_type": "foundry", "net_weight_g": 650, "density_g_cm3": 7.2}).status_code == 200  # a calculation
     assert server.post("/api/projects", json={"code": "V", "name": "v"}).status_code == 403
+
+
+def test_user_permission_overrides_allow_deny_and_inherit(server, monkeypatch):
+    make(server, "eric", "engineer")
+    login(server)
+    eric = next(u for u in server.get("/api/users").json() if u["username"] == "eric")
+    assert "password_hash" not in eric
+    server.post("/api/auth/logout")
+
+    login(server, "eric")
+    assert server.get("/api/admin/users/1/permissions").status_code == 403
+    mine = server.get("/api/auth/me").json()["permissions"]
+    assert mine["approve_rates"] is False and mine["backups"] is False and mine["update_app"] is False
+    assert server.get("/api/admin/backups").status_code == 403
+    assert server.post("/api/admin/update").status_code == 403
+    server.post("/api/auth/logout")
+
+    login(server)
+    url = f"/api/admin/users/{eric['id']}/permissions"
+    initial = server.get(url)
+    assert initial.status_code == 200 and initial.json()["overrides"] == []
+    saved = server.put(url, json={"overrides": [
+        {"action": "approve_rates", "effect": "allow"},
+        {"action": "backups", "effect": "allow"},
+        {"action": "update_app", "effect": "allow"},
+        {"action": "change_data", "effect": "deny"},
+    ]})
+    assert saved.status_code == 200
+    assert server.put(url, json={"overrides": [{"action": "unknown", "effect": "allow"}]}).status_code == 400
+    assert server.put(url, json={"overrides": [{"action": "backups", "effect": "maybe"}]}).status_code == 400
+    assert server.put(url, json={"overrides": [{"action": "backups", "effect": "allow"},
+                                                {"action": "backups", "effect": "deny"}]}).status_code == 400
+    server.post("/api/auth/logout")
+
+    login(server, "eric")
+    mine = server.get("/api/auth/me").json()["permissions"]
+    assert mine["approve_rates"] and mine["backups"] and mine["update_app"]
+    assert mine["change_data"] is False
+    assert server.get("/api/admin/backups").status_code == 200
+    def no_kit():
+        raise admin.AdminError("test: Windows kit unavailable")
+    monkeypatch.setattr(admin, "start_windows_update", no_kit)
+    assert server.post("/api/admin/update").status_code == 503  # permission passed; updater reports unavailable
+    assert server.post("/api/projects", json={"code": "DENY", "name": "Denied"}).status_code == 403
+    server.post("/api/auth/logout")
+
+    login(server)
+    reset = server.put(url, json={"overrides": []})
+    assert reset.status_code == 200 and reset.json()["overrides"] == []
+    rows = server.get("/api/admin/activity?entity=permissions").json()["rows"]
+    assert any(r["entity_id"] == eric["id"] and r["action"] == "user_overrides_updated" for r in rows)
+    server.post("/api/auth/logout")
+    login(server, "eric")
+    mine = server.get("/api/auth/me").json()["permissions"]
+    assert mine["approve_rates"] is False and mine["backups"] is False and mine["update_app"] is False
+
+
+def test_app_update_requires_windows_kit(monkeypatch):
+    monkeypatch.delenv("DTC_KIT_MANAGER", raising=False)
+    with pytest.raises(admin.AdminError, match="only when this app is running from the Windows kit"):
+        admin.start_windows_update()
 
 
 def test_activity_log_shows_who_did_what(server):

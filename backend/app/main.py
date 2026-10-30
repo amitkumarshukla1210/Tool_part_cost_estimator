@@ -12,7 +12,7 @@ from datetime import datetime
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -1429,7 +1429,7 @@ def _log_settings_change(request, response) -> None:
 
 class AuthMiddleware(BaseHTTPMiddleware):
     """Every page and API call needs a login (DTC_MODE=local: none). The first start, with no user yet, goes to /setup.
-    Permissions (Admin → Permissions) decide who may change what."""
+    Permissions (Admin → Users, roles & permissions) decide who may change what."""
 
     async def dispatch(self, request, call_next):
         path = request.url.path
@@ -1504,7 +1504,8 @@ def auth_logout(request: Request):
 @app.get("/api/auth/me")
 def auth_me():
     u = auth.current()
-    return {"mode": "server" if auth.server_mode() else "local", "user": u, "version": APP_VERSION}
+    return {"mode": "server" if auth.server_mode() else "local", "user": u, "version": APP_VERSION,
+            "permissions": auth.effective_permissions(u)}
 
 
 @app.post("/api/auth/password")
@@ -1583,15 +1584,33 @@ def admin_page():
 
 @app.get("/api/admin/permissions")
 def admin_permissions():
+    auth.require("admin")
     me = auth.current()
     return {"roles": list(auth.ROLES), "groups": [{"key": g, "label": scope.LABELS[g]} for g in scope.GROUPS], "permissions": auth.permissions(), "me": me,
-            "mine": {p["action"]: auth.may(p["action"], me) for p in auth.permissions()}}
+            "mine": auth.effective_permissions(me)}
 
 
 @app.put("/api/admin/permissions")
 def admin_permissions_save(data: dict):
     auth.require("admin")
     return {"permissions": auth.save_permissions(data.get("permissions", []), auth.current())}
+
+
+@app.get("/api/admin/users/{uid}/permissions")
+def admin_user_permissions(uid: int):
+    auth.require("admin")
+    user = auth.get_user(uid)
+    overrides = auth.user_overrides(uid)
+    return {"user_id": uid, "overrides": overrides, "effective": auth.effective_permissions(user)}
+
+
+@app.put("/api/admin/users/{uid}/permissions")
+def admin_user_permissions_save(uid: int, data: dict):
+    auth.require("admin")
+    rows = data.get("overrides", [])
+    if not isinstance(rows, list):
+        raise HTTPException(400, "Overrides must be a list.")
+    return {"user_id": uid, "overrides": auth.save_user_overrides(uid, rows, auth.current())}
 
 
 def _activity_filters(entity, user, q, date_from, date_to):
@@ -1627,6 +1646,19 @@ def admin_backups():
 def admin_backup_now():
     from . import admin
     return admin.make_backup()
+
+
+@app.post("/api/admin/update")
+def admin_update(background_tasks: BackgroundTasks):
+    from . import admin, server_control
+    if not auth.server_mode():
+        raise HTTPException(403, "App updates require a logged-in server-mode user.")
+    try:
+        result = admin.start_windows_update()
+    except admin.AdminError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    background_tasks.add_task(server_control.request_shutdown)
+    return result
 
 
 @app.get("/api/admin/backups/{name}")

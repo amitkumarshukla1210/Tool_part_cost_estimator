@@ -275,7 +275,7 @@ it with `backup.py --restore` or `DTC_Restore.bat`), and in server mode only an 
   - Type the part code to confirm.
   - A backup ZIP `dtc-before-delete-<code>-<time>.zip` is made first.
   - It is refused while the part is moulded into another part.
-  - Who may do it: *Admin → Permissions → Delete parts* (approver by default).
+  - Who may do it: *Admin → Users, roles & permissions → Delete parts* (approver by default).
 
 **Every table has column filters:** the ▾ in a column header opens a search box and the column's values as tick boxes
 (multi-select, with Select all, Clear all and Reset). Filters on several columns combine; *Clear all filters* above the
@@ -470,6 +470,9 @@ On a part's panel (plastic or die casting), open **Simulation & analysis** and p
 
 Every formula is a row of **Mould & die database → Simulation rules**, evaluated in order (each may use the ones above
 it, Parameters and Insert moulding rules; `log` and `exp` are allowed). All rows are EXAMPLE values. This is an analytical estimate, not Moldflow.
+Large STEP files are tessellated once per server process and reused by the concept, simulation and process-parameter
+cards. An unchanged simulation is also reused for its report, video and process settings; a new revision or changed
+master-data input triggers a fresh calculation. The first run on a detailed model can still take a minute.
 
 ## Design loop (roadmap stage 7)
 
@@ -738,14 +741,16 @@ Otherwise an element keeps its default grade (2738 for plastic inserts, D2 for c
 - **Forgotten password** (also the admin's): at the PC that runs the app, double-click **`DTC_ResetPassword.bat`**
   (or `python -m backend.app.server_tools reset-password NAME`). The user is made active again and logged out everywhere.
 
-**Admin** (menu, top right) has four tabs:
+**Admin** (menu, top right) shows tabs according to the signed-in user's permissions. **Users, roles & permissions** is visible only to admins; **My password** remains available to every signed-in user.
 
 | Tab | What it does |
 |---|---|
-| **Users & roles** | Admin creates login IDs (user ID, full name, role, first password), changes name and role, blocks / unblocks a user and sets a new password. The last active admin cannot be removed or demoted. Everyone can change their own password here. |
-| **Permissions** | The lowest role for each action, editable by the admin: change project data (engineer), edit master data (engineer), edit rates (engineer), approve rates (approver), manage suppliers (engineer), delete projects (admin), see the activity log (approver), backups (admin). Managing users and permissions is always admin only. *Back to defaults* restores the column. Roles go viewer < engineer < approver < admin; pure calculations (Estimate page) are open to every logged-in user. |
+| **Users, roles & permissions** | Admin creates login IDs (user ID, full name, role, first password), changes name and role, blocks / unblocks a user and sets a new password. The last active admin cannot be removed or demoted. The same tab sets role defaults and per-user **Inherit / Allow / Deny** overrides; overrides are audited. |
+| **My password** | Every user changes their own password after confirming the old one. Admins can set a new password for another user, but existing passwords are never displayed. |
 | **Activity log** | Who changed what and when, newest first: projects, variants, parts (incl. status, revisions, costs, suppliers), suppliers, users, permissions, master-data and rate saves, rate approvals and backups. Filters (what, who, from, to, search), *Show more*, **Export Excel**. |
-| **Backups & update** | Installed version and data folder, **Backup now**, every backup ZIP with *Download*, and the reports of the last updates (what the master-data merge did). |
+| **Backups & update** | Installed version and data folder, **Backup now**, every backup ZIP with *Download*, update reports, and—when the user has **Update the app** permission—an authenticated update action that stops and restarts the Windows kit after making a backup. |
+
+Role defaults include project data and master-data changes (engineer), rate approval (approver), and backups / app updates (admin). A per-user Allow can grant an engineer extra authority; Deny removes an action even if the user's role normally allows it. **Managing login IDs and permissions stays admin-only.** On the Windows kit, the authenticated update button is permission-checked; `DTC_Update.bat` remains a local host-maintenance tool and is controlled by Windows access to the installation.
 
 **Suppliers** (menu) is the supplier master:
 
@@ -775,8 +780,7 @@ export DTC_COOKIE_SECURE=1                                        # when served 
 uvicorn backend.app.main:app --host 0.0.0.0 --port 8000           # put an HTTPS reverse proxy (nginx, Caddy, IIS) in front
 ```
 
-- **Logins and roles**: everybody logs in; the admin adds users on **Admin → Users & roles** (user name, role, password of 10+ characters, active) and sets
-  **Admin → Permissions**. **viewer** reads; **engineer** changes projects, parts, costs and master data; **approver** also approves rates; **admin** also manages users. The last admin cannot be removed. Passwords are stored as scrypt hashes, sessions expire after 12 hours,
+- **Logins and roles**: everybody, including admins, logs in; the admin adds users and manages role defaults and per-user overrides on **Admin → Users, roles & permissions** (user ID, role, active, groups). **viewer** reads; **engineer** changes projects, parts, costs and master data; **approver** also approves rates; **admin** also manages users. The last admin cannot be removed. Admins can reset a password but cannot view one; passwords are stored as scrypt hashes, sessions expire after 12 hours,
   changing a password or deactivating a user ends their sessions.
 - **Who did what**: every history record shows the logged-in user, and an approved rate shows the approver who clicked, never a typed name.
 - **Move from the local PC**: `python -m backend.app.server_tools migrate-projects --from sqlite:///data/projects.sqlite --to postgresql+psycopg://...` copies all project data into an empty
@@ -934,7 +938,7 @@ D:\DTC\                           base folder (any name)
 | Double-click | What it does |
 |---|---|
 | `DTC_Start.bat` | Backup if the last one is older than a day, then the app on **http://127.0.0.1:8000** (the browser opens). Keep the window open; close it to stop the app. |
-| `DTC_Update.bat` | 1) checks the app is stopped, 2) **backup**, 3) new version: **download from GitHub** or **a ZIP you downloaded**, 4) installs the libraries and test-starts the new version: if that fails, nothing is changed, 5) old app folder → `DTC_Old\`, new one in place, 6) **merges the new master data into yours** (below), 7) writes a report to `DTC_Data\logs\`. |
+| `DTC_Update.bat` | 1) checks the app is stopped, 2) **backup**, 3) new version: **download from GitHub** or **a ZIP you downloaded**, 4) installs the libraries and test-starts the new version: if that fails, nothing is changed, 5) old app folder → `DTC_Old\`, new one in place, 6) **merges the new master data into yours** (below), 7) writes a report to `DTC_Data\logs\`. Each update uses a fresh `_dtc_new_*` staging folder, so a leftover `_dtc_new` from an older update cannot block it; stale staging folders can be deleted later after closing Explorer or other programs using them. |
 | `DTC_Backup.bat` | Backup now (`DTC_Backups\dtc-backup-<time>.zip`, plus the copy folder if set). |
 | `DTC_Restore.bat` | Lists the backups; pick one and choose: everything, only projects + CAD files, or only master data. What is there now is backed up first. Backups made by `backup.py` work too. |
 | `DTC_Rollback.bat` | Back to the version before the last update **with the data of that moment** (data changed after the update stays in the safety backup). |
@@ -1101,8 +1105,8 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 ## Head of department and data access by tool group (stage 30)
 
 - **Roles:** viewer < engineer < approver < **head** < admin. *Head* (head of department) sees and changes the data of every tool group and
-  every user, like an admin, but does not manage login IDs (the permissions per role on Admin → Permissions apply as before).
-- **Tool groups:** Admin → Users & roles has check boxes per login ID: *Plastic moulding, Die casting, Foundry, Sheet metal, EPS, Blow moulding, Machining* (Machining added with the machined parts of stage 37).
+  every user, like an admin, but does not manage login IDs (role defaults and per-user overrides are managed by admins).
+- **Tool groups:** Admin → Users, roles & permissions has check boxes per login ID: *Plastic moulding, Die casting, Foundry, Sheet metal, EPS, Blow moulding, Machining* (Machining added with the machined parts of stage 37).
   A viewer, engineer or approver with groups ticked sees only the parts whose process belongs to those groups, and the projects that hold
   such parts, that they created themselves, or that have no tool-group part yet; opening another group's part or project gives "not your tool
   group". They can give a part only a process of their own groups. Parts without a tool group (assemblies, bought-out) are seen by all.
@@ -1208,14 +1212,14 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 - The chat stays in the browser tab; *New chat* clears it. Code: `backend/app/bot.py`, `frontend/bot.js`, `frontend/bot.css`.
   Tests: `tests/test_bot.py` (a stand-in for Claude, so no key or internet is needed).
 
-## Project totals per tool group (stage 38)
+## Project totals per tool group (stage 39)
 
-- For a user limited to tool groups (Admin → Users & roles, stage 30), the **project dashboard** and the **project leader view** count only the
+- For a user limited to tool groups (Admin → Users, roles & permissions, stage 30), the **project dashboard** and the **project leader view** count only the
   parts of their groups: part counts, files missing, RM, tool & mould CAPEX, BOM cost vs target of every variant (lines of other groups left out),
   machines needed and their CAPEX, and the CAPEX plan (tool lines of their parts, machine lines of the machines their parts need, and the other lines).
   A note says *"Your tool groups only (…): N part(s) of other tool groups are not counted"*; the Excel and PDF exports carry the same note.
 - *Recalculate part costs* on the dashboard recalculates only their parts. Head of department and admin always see the whole project.
-- Machined parts (stage 37) are the tool group **Machining**: tick it on Admin → Users & roles for the users who cost machined parts.
+- Machined parts (stage 37) are the tool group **Machining**: tick it on Admin → Users, roles & permissions for the users who cost machined parts.
 - Code: `scope.project_view`, `register.dashboard`, `leader.py`. Tests: `tests/test_scope.py`.
 
 ## End-to-end audit (run before every release)
