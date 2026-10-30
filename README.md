@@ -1223,6 +1223,37 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 - Machined parts (stage 37) are the tool group **Machining**: tick it on Admin → Users, roles & permissions for the users who cost machined parts.
 - Code: `scope.project_view`, `register.dashboard`, `leader.py`. Tests: `tests/test_scope.py`.
 
+## Progressive die vs stage dies, and tool / mould life (stage 41)
+
+**Part page → Sheet-metal tools → Progressive die vs stage dies → Compare.** Both die types are worked out live for the part
+(nothing is stored, the part keeps its own die type):
+
+| Line | Progressive die | Stage dies |
+|---|---|---|
+| Presses | 1 (all stations), picked by the total force | one per operation, each picked by its die's force |
+| Time per part | 60 ÷ `progressive_spm` | `stage_hit_time_s` (the presses work side by side) |
+| Operators | `progressive_operators` per press | `stage_operators_per_press` per press |
+| Die life | `progressive_die_life_strokes` | `stage_die_life_strokes` |
+
+RM cost is the same for both; the die set cost is the live tool cost of that die type (stage 23). The Cost formulas of scope
+**sheet_compare** then give: process cost = (Σ press MHR + operators × labour rate) ÷ parts per hour, rejection, overhead,
+profit, packing → ex-works cost; press lines needed for the volume; die sets over the programme = max(lines, ⌈programme parts ÷
+die life⌉); tool CAPEX; parts per die set = min(die life, programme parts ÷ lines); amortisation = die set cost ÷ parts per die
+set; **part cost per piece** = ex-works + amortisation; cost over the programme = ex-works × parts + tool CAPEX.
+The card says which die type is cheaper at the part's volume (₹ per part and per year) and lists the part cost of both from
+`compare_volume_min_factor` to `compare_volume_max_factor` × the volume; the **break-even volume** is found by a search
+(bisection) between those volumes. Click any value for its trace. All new Parameters rows are **EXAMPLE** values.
+
+**Tool / mould life in the part cost (all part types).** The part cost amortises one tool over the parts it makes:
+
+    parts per tool  = min(tool_life_shots × cavities, programme parts ÷ tools for capacity)
+    amortisation    = cost of one tool ÷ parts per tool
+
+`tool_life_shots` is Master data → Parameters of the part type (plastic, die casting, foundry, sheet metal, EPS, blow; machined:
+fixture life, EXAMPLE). Before stage 41 it was tool CAPEX ÷ programme parts, which charged the last tool in full even when most
+of its life was unused. Tool CAPEX (the cash you spend) is unchanged. On your own install the update kit takes the new
+amortisation formula only if you never edited that row; stored part costs change when you recalculate them.
+
 ## End-to-end audit (run before every release)
 
 `python scripts/audit_e2e.py` drives the whole tool through its API like a user, on temporary copies of the master data (your data is not touched):

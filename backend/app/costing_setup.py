@@ -25,7 +25,8 @@ from .table_set import TableSet, col
 
 RM_FAMILIES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow", "machined")
 TOOL_SCOPES = ("tool_clamp", "tool")
-PIECE_SCOPES = ("piece", "harness", "pcb")     # costed by piece_cost.py / electro_cost.py; source "piece" = a value the engine works out
+COMPARE_SCOPE = "sheet_compare"                # progressive vs stage tools (stage 41), sheet_compare.py
+PIECE_SCOPES = ("piece", "harness", "pcb", COMPARE_SCOPE)  # costed by piece_cost.py / electro_cost.py / sheet_compare.py; source "piece" = a value the engine works out
 MACHINING_SCOPE = "machining"                  # machined parts (stage 37): machining time and fixture, machining.py
 SCOPES = ("mhr", "labour") + tuple(f"rm_{f}" for f in RM_FAMILIES) + TOOL_SCOPES + PIECE_SCOPES + (MACHINING_SCOPE,)
 SOURCES = ("rate", "machine", "parameter", "part", "tool", "piece", "machining")
@@ -34,7 +35,8 @@ MACHINE_FIELDS = ("power_kw", "load_factor_pct", "floor_area_m2", "life_years", 
 RESULT_OF = ({"mhr": "Machine hour rate", "labour": "Labour rate"} | {f"rm_{f}": "Net RM cost per part" for f in RM_FAMILIES}
              | {"tool_clamp": "Clamp force for the try-out machine", "tool": "Tool cost per tool", "piece": "Part cost per piece",
                                                                     "harness": "Harness cost", "pcb": "PCB assembly cost",
-                                                                    "machining": "Fixture cost per set (machined parts)"})
+                                                                    "machining": "Fixture cost per set (machined parts)",
+                                                                    COMPARE_SCOPE: "Part cost per piece for one die type"})
 # Values worked out by the part cost engine (piece_cost.py) that the piece formulas can use (source = piece);
 # the Insert moulding rules (Part register setup) can be used by their key as well.
 PIECE_ITEMS = {
@@ -47,8 +49,22 @@ PIECE_ITEMS = {
     "insert_cost": "Σ insert quantity × insert price per piece (bought-out), in the producing country's currency",
     "inserts_per_part": "Moulded-in inserts per part",
     "tool_capex": "Tool CAPEX of the latest tool cost version, in the producing country's currency",
+    "tool_cost": "Cost of one tool (mould, die set or fixture set) of the latest tool cost version, in the producing country's currency",
+    "tools_for_capacity": "Tools running side by side for the annual volume (Stage C; machined: machines and fixture sets)",
     "lifetime_volume": "Annual volume × programme years (parts over the tool's programme)",
     "total_weight_kg": "Part weight body + inserts (kg)",
+}
+# Values worked out by sheet_compare.py for each die type (progressive / multi-stage) that the sheet_compare formulas can use
+# (source = piece).
+COMPARE_ITEMS = {
+    "rm_cost": "Net RM cost per part (live RM cost of the current revision; the same for both die types)",
+    "progressive": "1 for the progressive die, 0 for the stage (multi-stage) dies",
+    "presses": "Presses the part runs on: 1 for a progressive die, one per operation for stage dies",
+    "presses_mhr": "Σ machine hour rate of those presses (each picked by the force of its die, full MHR trace)",
+    "labour_rate": "Labour rate of Parameters → operator_grade (full labour-rate trace)",
+    "tool_cost": "Cost of one die set of this die type (live tool cost), in the producing country's currency",
+    "annual_volume": "Annual volume of the part (part, else Σ variants, else Parameters); varied for the break-even",
+    "programme_years": "Programme years of the part, else Parameters",
 }
 # Values worked out by the tool cost engine that the tool formulas can use (source = tool).
 TOOL_ITEMS = {
@@ -285,6 +301,8 @@ def _help() -> list:
         ["source = tool", "Tool scopes only: a value of the tool cost engine: " + "; ".join(f"{k} = {v}" for k, v in TOOL_ITEMS.items())],
         ["source = piece", "Scope piece only: a value of the part cost engine: " + "; ".join(f"{k} = {v}" for k, v in PIECE_ITEMS.items())
                            + "; and any key of Part register setup → Insert moulding rules"],
+        ["Scope sheet_compare", "Progressive die vs stage dies (stage 41): part cost per die type with its own process, tool life "
+                                "and amortisation. source = piece: " + "; ".join(f"{k} = {v}" for k, v in COMPARE_ITEMS.items())],
         ["Scope machining", "Machined parts (stage 37): machining time per part (cycle_s), machines needed, fixture cost per "
                             "set (the final result) and fixture CAPEX. source = machining: " + "; ".join(f"{k} = {v}" for k, v in MACHINING_ITEMS.items())],
         ["functions", "ceil, floor, round, min, max, abs, sqrt; 'a if condition else b'; and, or, not"],

@@ -910,6 +910,10 @@ function sheetBlock(p) {
         <td class="num">${fmt(o.length, 1)} × ${fmt(o.width, 1)}</td><td class="num">${fmt(o.yield_pct, 1)} %</td><td>${esc(o.note)}</td></tr>`).join("")}</tbody></table></div>
       <p class="note">The chosen blank is used for the gross weight, the RM cost, the nesting and the dies. Type other blank sizes under RM inputs if needed.</p>` : ""}
     ${s.problems.length ? `<h4>Formability</h4><ul>${s.problems.map((x) => `<li>${esc(x.message)}</li>`).join("")}</ul>` : '<p class="note">Formability checks passed.</p>'}
+    <h4>Progressive die vs stage dies</h4>
+    <div id="cmpBox">${sheetCompare && sheetCompare.part_id === p.id ? compareHtml(sheetCompare) : `<p class="note">Part cost, tool CAPEX, die life,
+      amortisation and break-even of both die types, worked out live (nothing is stored).</p>
+      <button type="button" class="btn btn-outline small" data-cmp="1">Compare progressive vs stage dies</button>`}</div>
     ${layoutBlock(p)}
     <form id="sheetForm" class="card grid2">
       <label>Die type <select name="mode"><option value="">Follow the part's process</option>
@@ -924,6 +928,67 @@ function sheetBlock(p) {
       <p class="status span2" id="sheetStatus"></p></form>`;
   return html;
 }
+
+// progressive die vs stage dies (stage 41): live, traced, INR first
+let sheetCompare = null;
+const rs = (v, d = 2) => (v == null ? "—" : `₹${Number(v).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d })}`);
+function compareHtml(c) {
+  const modes = ["progressive", "multi_stage"].filter((m) => c.modes[m]);
+  const errs = Object.entries(c.errors).map(([m, e]) => `<p class="note">${m === "progressive" ? "Progressive die" : "Stage dies"}: ${esc(e)}</p>`).join("");
+  if (!modes.length) return errs;
+  const fx = (m) => (c.modes[m].value ? c.modes[m].value_inr / c.modes[m].value : 1);
+  const cell = (m, name, kind) => {
+    const x = c.modes[m], v = x.named[name];
+    const txt = kind === "inr" ? rs(v * fx(m)) : kind === "lakh" ? rs(v * fx(m), 0) : fmt(v, kind === "int" ? 0 : 2);
+    return `<td class="calc num"><button type="button" class="tv" data-cmptrace="${m}" data-node="calc:${name}">${txt}</button></td>`;
+  };
+  const row = (label, name, kind) => `<tr><td>${label}</td>${modes.map((m) => cell(m, name, kind)).join("")}</tr>`;
+  const head = modes.map((m) => `<th class="num">${esc(c.modes[m].label)}${c.current_mode === m ? " (part's die type)" : ""}</th>`).join("");
+  const name = (m) => (m === "progressive" ? "Progressive die" : "Stage dies");
+  let summary = "";
+  if (c.cheaper) {
+    summary = `<p>At ${Number(c.annual_volume).toLocaleString("en-IN")} parts/yr the <b>${name(c.cheaper)}</b> is cheaper by
+      <b>${rs(c.saving_per_piece_inr)}</b> per part = <b>${rs(c.saving_per_year_inr, 0)}</b> per year.</p>`;
+    summary += c.break_even.length
+      ? c.break_even.map((b) => `<p>Break-even at <b>${Number(b.annual_volume).toLocaleString("en-IN")} parts/yr</b> (${rs(b.piece_inr)} per part):
+          the progressive die is cheaper ${b.progressive_cheaper_above ? "above" : "below"} it.</p>`).join("")
+      : `<p class="note">No break-even between ${Number(c.sweep[0].annual_volume).toLocaleString("en-IN")} and
+          ${Number(c.sweep[c.sweep.length - 1].annual_volume).toLocaleString("en-IN")} parts/yr: the cheaper die type stays the same.</p>`;
+  }
+  const sweep = c.sweep.length ? `<div class="table-wrap"><table class="cost-table" data-nofilter><thead><tr><th class="num">Parts per year</th>
+      <th class="num">Progressive die ₹/part</th><th class="num">Stage dies ₹/part</th><th>Cheaper</th></tr></thead><tbody>
+      ${c.sweep.map((r) => `<tr class="${r.is_part_volume ? "total" : ""}"><td class="num">${Number(r.annual_volume).toLocaleString("en-IN")}${r.is_part_volume ? " (part)" : ""}</td>
+        <td class="num">${rs(r.progressive_inr)}</td><td class="num">${rs(r.multi_stage_inr)}</td>
+        <td>${r.progressive_inr <= r.multi_stage_inr ? "Progressive" : "Stage dies"}</td></tr>`).join("")}</tbody></table></div>
+      <p class="note">${esc(c.break_even_method)}.</p>` : "";
+  return `${c.is_example ? '<p class="note"><span class="badge badge-example">EXAMPLE</span> Uses example rates or parameters – not for negotiation.</p>' : ""}
+    ${errs}${summary}
+    <div class="table-wrap"><table class="cost-table" data-nofilter><thead><tr><th>INR first · click a value for its trace</th>${head}</tr></thead><tbody>
+      <tr><td>Dies and presses</td>${modes.map((m) => `<td>${c.modes[m].dies.map((d) => `${esc(d.name)} · ${esc(d.press)}`).join("<br>")}</td>`).join("")}</tr>
+      ${row("Time per part (s)", "hit_s")}${row("Operators", "operators")}
+      ${row("Process cost per part", "process_cost", "inr")}${row("Ex-works part cost without tool", "ex_works", "inr")}
+      <tr><td>Die set cost (one set)</td>${modes.map((m) => `<td class="calc num"><button type="button" class="tv" data-cmptrace="${m}" data-node="in:tool_cost">${rs(c.modes[m].nodes["in:tool_cost"].value * fx(m), 0)}</button></td>`).join("")}</tr>
+      ${row("Die life (parts)", "tool_life", "int")}${row("Press lines needed", "lines_needed", "int")}
+      ${row("Die sets over the programme", "tools_needed", "int")}${row("Tool CAPEX", "tool_capex", "lakh")}
+      ${row("Parts per die set", "parts_per_tool", "int")}${row("Tool amortisation per part", "amortisation", "inr")}
+      <tr class="total"><td>Part cost per piece</td>${modes.map((m) => cell(m, "piece_cost", "inr")).join("")}</tr>
+      ${row("Cost over the programme", "programme_cost", "lakh")}</tbody></table></div>
+    ${c.formability.length ? `<p class="note">Formability (part's die type): ${c.formability.map(esc).join(" · ")}</p>` : ""}
+    ${sweep}
+    <button type="button" class="btn btn-outline small" data-cmp="1">Recalculate the comparison</button>`;
+}
+$("panelBody").addEventListener("click", async (e) => {
+  const t = e.target.closest("[data-cmptrace]");
+  if (t && sheetCompare) return window.TracePanel.open(sheetCompare.modes[t.dataset.cmptrace], t.dataset.node);
+  if (!e.target.closest("[data-cmp]")) return;
+  $("cmpBox").innerHTML = '<p class="note">Working out both die types…</p>';
+  try {
+    sheetCompare = await api(`/api/parts/${part.id}/sheet-compare`);
+    $("cmpBox").innerHTML = compareHtml(sheetCompare);
+  } catch (err) {
+    $("cmpBox").innerHTML = `<p class="note">${esc(err.message)}</p>`;
+  }
+});
 
 // operation order editor: the current sequence (yours or the suggested one), move up / down, remove, add, reset
 let sheetOps = null;        // codes in order while editing; null = untouched

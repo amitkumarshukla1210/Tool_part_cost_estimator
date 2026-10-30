@@ -1145,6 +1145,16 @@ def parts_sheet_tools(part_id: int):
         raise HTTPException(400, str(exc)) from None
 
 
+@app.get("/api/parts/{part_id}/sheet-compare")
+def parts_sheet_compare(part_id: int):
+    """Progressive die vs stage dies: part cost, tool CAPEX, die life, amortisation and break-even (roadmap stage 41)."""
+    from . import sheet_compare
+    try:
+        return sheet_compare.run(part_id)
+    except (sheet_compare.CompareError, register.RegisterError) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
 @app.get("/api/parts/{part_id}/sheet-layout")
 def parts_sheet_layout(part_id: int):
     """Flat pattern and progressive strip layout (roadmap stage 10)."""
