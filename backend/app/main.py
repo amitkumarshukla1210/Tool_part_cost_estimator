@@ -1225,6 +1225,89 @@ def parts_simulation_pdf(part_id: int):
                     headers={"Content-Disposition": f'attachment; filename="simulation_part_{part_id}.pdf"'})
 
 
+# ---------- flow simulation, background jobs and saved simulation runs (roadmap stage 39) ----------
+
+@app.post("/api/parts/{part_id}/flow-simulation")
+def parts_flow_simulation(part_id: int, data: Optional[dict] = None):
+    """Start a flow simulation in the background. data: {gates: 1-8, gate_point: [x, y, z] mm or null, video: true}.
+    Returns the job; GET …/sim-jobs/{id} gives its progress, and the saved run when done."""
+    from . import sim_jobs
+    data = data or {}
+    try:
+        gates = int(data.get("gates") or 1)
+        gp = data.get("gate_point")
+        gp = [float(x) for x in gp] if gp else None
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Gates must be a whole number and the gate point three numbers (x, y, z in mm).") from None
+    if not 1 <= gates <= 8 or (gp is not None and len(gp) != 3):
+        raise HTTPException(400, "Gates: 1 to 8. Gate point: x, y, z in mm.")
+    register.part_detail(part_id, with_rm=False)
+    return sim_jobs.start(part_id, "flow", lambda progress: register.flow_simulation_run(
+        part_id, gates, gp, bool(data.get("video", True)), progress), register.user())
+
+
+@app.post("/api/parts/{part_id}/simulation/video-job")
+def parts_simulation_video_job(part_id: int):
+    """Make the Simulation & analysis video in the background (with progress) and save it as a run."""
+    from . import sim_jobs
+    register.part_detail(part_id, with_rm=False)
+    return sim_jobs.start(part_id, "analysis_video", lambda progress: register.simulation_video_run(part_id, progress), register.user())
+
+
+@app.get("/api/parts/{part_id}/sim-jobs/{job_id}")
+def parts_sim_job(part_id: int, job_id: str):
+    from . import sim_jobs
+    j = sim_jobs.get(job_id, part_id)
+    if not j:
+        raise HTTPException(404, "This simulation job is not known (the server was restarted?). Saved runs are listed below.")
+    return j
+
+
+@app.get("/api/parts/{part_id}/sim-runs")
+def parts_sim_runs(part_id: int):
+    return register.sim_runs(part_id)
+
+
+@app.get("/api/parts/{part_id}/sim-runs/{run_id}")
+def parts_sim_run(part_id: int, run_id: int):
+    try:
+        r = register.sim_run(part_id, run_id)
+    except register.RegisterError as exc:
+        raise HTTPException(404, str(exc)) from None
+    return {k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in r.items()}
+
+
+@app.get("/api/parts/{part_id}/sim-runs/{run_id}/{what}")
+def parts_sim_run_file(part_id: int, run_id: int, what: str):
+    """what: pdf or video (MP4 / GIF)."""
+    if what not in ("pdf", "video"):
+        raise HTTPException(404, "pdf or video")
+    try:
+        data, media, name = register.sim_run_file(part_id, run_id, what)
+    except register.RegisterError as exc:
+        raise HTTPException(404, str(exc)) from None
+    return Response(data, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.post("/api/parts/{part_id}/sim-runs/external")
+async def parts_sim_run_external(part_id: int, file: UploadFile = File(...), program: str = Form(""), note: str = Form("")):
+    """Attach the report of another simulation program (PDF, or MP4) to the part."""
+    try:
+        rid = register.attach_simulation_report(part_id, await file.read(), file.filename or "", program, note)
+    except register.RegisterError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return {"id": rid}
+
+
+@app.delete("/api/parts/{part_id}/sim-runs/{run_id}")
+def parts_sim_run_delete(part_id: int, run_id: int):
+    try:
+        register.delete_sim_run(part_id, run_id)
+    except register.RegisterError as exc:
+        raise HTTPException(404, str(exc)) from None
+    return {"ok": True}
+
+
 @app.get("/api/parts/{part_id}/tool-cost")
 def parts_tool_versions(part_id: int):
     return register.tool_versions(part_id)

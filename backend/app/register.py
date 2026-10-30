@@ -3430,3 +3430,146 @@ def simulation_video(part_id: int) -> tuple[bytes, str, str]:
     d, rev, res = _simulate(part_id)
     data, ext = sim_report.moulding_video(res, d)
     return data, "video/mp4" if ext == "mp4" else "image/gif", f"{d['part_code']}_rev{rev['rev']}_simulation.{ext}"
+
+
+# ---------- simulation runs: flow simulation, videos and attached reports, saved (roadmap stage 39) ----------
+
+SIM_MEDIA = {"pdf": "application/pdf", "mp4": "video/mp4", "gif": "image/gif"}
+
+
+def _jsonable(x):
+    """numpy numbers and arrays as plain numbers and lists; NaN and infinity as None (JSON has neither)."""
+    import math as _m
+    if isinstance(x, dict):
+        return {str(k): _jsonable(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_jsonable(v) for v in x]
+    if hasattr(x, "tolist"):
+        return _jsonable(x.tolist())
+    if isinstance(x, float) and not _m.isfinite(x):
+        return None
+    return x
+
+
+def _save_sim_run(part_id: int, rev: str, kind: str, title: str, summary: dict, pdf: tuple | None, video: tuple | None,
+                  is_example: bool) -> int:
+    """pdf / video: (bytes, file name). Stored in the storage folder like the 3D files; the run row keeps their ids."""
+    with db.engine().begin() as conn:
+        pdf_row = file_store.put(pdf[0], pdf[1], "simulation", conn) if pdf else None
+        vid_row = file_store.put(video[0], video[1], "simulation", conn) if video else None
+        rid = conn.execute(db.sim_runs.insert().values(
+            part_id=part_id, rev=rev, kind=kind, title=title, summary=_jsonable(summary), is_example=is_example, created_by=user(),
+            pdf_file_id=pdf_row["id"] if pdf_row else None, video_file_id=vid_row["id"] if vid_row else None)).inserted_primary_key[0]
+        _log(conn, "part", part_id, "simulation_saved", {"run": rid, "kind": kind, "title": title})
+    return rid
+
+
+def flow_simulation_run(part_id: int, gates: int = 1, gate_point: list | None = None, video: bool = True, progress=None) -> int:
+    """Flow simulation of the part's current revision (flow_sim.py) with its PDF report and video, saved as a run."""
+    from . import flow_sim, machine_spec, process_params
+    from .pdf_report import flow_pdf
+    say = progress or (lambda pct, text: None)
+    say(1, "Reading the 3D model")
+    d, rev, part_type, verts, tris, cres, facts = _concept_inputs(part_id)
+    density = _density(d["material"])[0]
+    try:
+        res = flow_sim.run(verts, tris, part_type, flow_sim.material(d["material"]), process_params.window(d["material"]),
+                           facts | {"density_g_cm3": density}, cres["opening_axis"], gates, gate_point, say)
+    except flow_sim.FlowError as exc:
+        raise ToolNotApplicable(str(exc)) from None
+    try:
+        spec = (machine_spec.get(part_id) or {}).get("spec") or {}
+    except Exception:  # no production machine family for this process
+        spec = {}
+    need = res["results"].get("clamp_t") or 0
+    if spec.get("tonnage_t") and need:
+        res["production_machine"] = {"tonnage_t": spec["tonnage_t"], "machine_id": spec.get("machine_id"), "ok": spec["tonnage_t"] >= need}
+        if spec["tonnage_t"] < need:
+            res["corrections"].append(f"The production machine (stage 33, {spec['tonnage_t']:g} t) is smaller than the {need:.0f} t "
+                                      "needed: a bigger machine, fewer cavities, or the remedies above.")
+    res["settings"] = {"gates": gates, "gate_point": gate_point}
+    say(81, "Writing the PDF report")
+    pub = flow_sim.public(res)
+    pdf = flow_pdf(pub, flow_sim.pictures(res), d, rev["rev"])
+    vid = None
+    if video:
+        data, ext = flow_sim.video(res, d, progress=say)
+        vid = (data, f"{d['part_code']}_rev{rev['rev']}_flow.{ext}")
+    say(97, "Saving")
+    title = f"Flow simulation · {pub['material']['material']} · {len(pub['gates']) or 'no'} gate(s)"
+    return _save_sim_run(part_id, rev["rev"], "flow", title, pub, (pdf, f"{d['part_code']}_rev{rev['rev']}_flow.pdf"), vid,
+                         pub["is_example"])
+
+
+def simulation_video_run(part_id: int, progress=None) -> int:
+    """The video of Simulation & analysis (maps turning), made in the background and saved as a run."""
+    from . import sim_report, simulation
+    say = progress or (lambda pct, text: None)
+    say(2, "Analysing the 3D model")
+    d, rev, res = _simulate(part_id)
+    data, ext = sim_report.moulding_video(res, d, progress=lambda i, n: say(10 + 80 * i / n, f"Drawing the video ({i} of {n} views)"))
+    say(95, "Saving")
+    pub = simulation.public(res)
+    return _save_sim_run(part_id, rev["rev"], "analysis_video", "Simulation & analysis video", {"corrections": pub["corrections"],
+                         "results": {k: pub["results"].get(k) for k in ("cycle_s", "clamp_t")}}, None,
+                         (data, f"{d['part_code']}_rev{rev['rev']}_simulation.{ext}"), pub["is_example"])
+
+
+def attach_simulation_report(part_id: int, content: bytes, filename: str, program: str = "", note: str = "") -> int:
+    """A report of another program (Moldflow, Moldex3D, MAGMA, ProCAST, FLOW-3D …) kept with the part's simulation runs."""
+    d = part_detail(part_id, with_rm=False)
+    rev = d["revisions"][0]["rev"] if d["revisions"] else ""
+    ext = Path(filename or "").suffix.lower()
+    if ext not in (".pdf", ".mp4"):
+        raise RegisterError("Attach the report as a PDF (or a video as MP4).")
+    if not content:
+        raise RegisterError("The file is empty.")
+    title = f"{program.strip() or 'External'} report" + (f" · {note.strip()}" if note.strip() else "")
+    pdf = (content, filename) if ext == ".pdf" else None
+    vid = (content, filename) if ext == ".mp4" else None
+    return _save_sim_run(part_id, rev, "external", title[:200], {"program": program.strip(), "note": note.strip(), "file": filename},
+                         pdf, vid, False)
+
+
+def sim_runs(part_id: int) -> list[dict]:
+    with db.engine().connect() as conn:
+        rows = conn.execute(select(db.sim_runs).where(db.sim_runs.c.part_id == part_id)
+                            .order_by(db.sim_runs.c.id.desc())).mappings().all()
+    out = []
+    for r in rows:
+        s = r["summary"] or {}
+        out.append({"id": r["id"], "rev": r["rev"], "kind": r["kind"], "title": r["title"], "is_example": bool(r["is_example"]),
+                    "created_by": r["created_by"], "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                    "pdf": bool(r["pdf_file_id"]), "video": bool(r["video_file_id"]), "corrections": s.get("corrections") or [],
+                    "results": s.get("results") or {}})
+    return out
+
+
+def sim_run(part_id: int, run_id: int) -> dict:
+    with db.engine().connect() as conn:
+        r = conn.execute(select(db.sim_runs).where((db.sim_runs.c.id == run_id) & (db.sim_runs.c.part_id == part_id))).mappings().first()
+    if not r:
+        raise RegisterError("Simulation run not found.")
+    return dict(r)
+
+
+def sim_run_file(part_id: int, run_id: int, what: str) -> tuple[bytes, str, str]:
+    """(content, media type, file name) of a saved run's PDF or video."""
+    r = sim_run(part_id, run_id)
+    fid = r["pdf_file_id"] if what == "pdf" else r["video_file_id"] if what == "video" else None
+    if not fid:
+        raise RegisterError(f"This run has no {what}.")
+    with db.engine().connect() as conn:
+        row = conn.execute(select(db.files).where(db.files.c.id == fid)).mappings().first()
+    path = file_store.path_of(dict(row))
+    if not path.exists():
+        raise RegisterError(f"The file is missing from the storage folder ({row['stored_path']}).")
+    ext = Path(row["original_name"]).suffix.lower().lstrip(".")
+    return path.read_bytes(), SIM_MEDIA.get(ext, "application/octet-stream"), row["original_name"]
+
+
+def delete_sim_run(part_id: int, run_id: int) -> None:
+    sim_run(part_id, run_id)
+    with db.engine().begin() as conn:
+        conn.execute(db.sim_runs.delete().where(db.sim_runs.c.id == run_id))
+        _log(conn, "part", part_id, "simulation_deleted", {"run": run_id})

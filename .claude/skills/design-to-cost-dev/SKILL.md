@@ -1,14 +1,14 @@
 ---
 name: design-to-cost-dev
-description: Use for any work on the Design to Cost / Part Cost Estimator repository (part, RM and tool cost, tool design and drawings, master data, rates, releases). Holds the project memory (stages 1-37) and the working rules (master data only added, main wins, one PR).
+description: Use for any work on the Design to Cost / Part Cost Estimator repository (part, RM and tool cost, tool design and drawings, master data, rates, releases). Holds the project memory (stages 1-39) and the working rules (master data only added, main wins, one PR).
 ---
 
 Project: **Design to Cost — Part Cost Estimator**, repository `amitkumarshukla1210/Tool_part_cost_estimator`.
 I am Amit, Head of Operations / costing at an OEM (supply chain, production, strategic sourcing, projects; RM, part and tool cost,
 BOM cost and CAPEX, EBITDA, digital transformation). Answer simply, **INR first**.
 
-**State (30 Oct 2026):** stages 1–37 are built and merged (last PRs 46–48: faster CAD analysis on large parts, Windows update
-staging, per-user admin permissions); the next stage is **38** (first free number in `ROADMAP.md`).
+**State (30 Oct 2026):** stages 1–39 are built (38 = per-user admin permissions, PR 48; 39 = flow simulation, on the branch of this
+memory update until merged); the next stage is **40** (first free number in `ROADMAP.md`).
 To save tokens, do not read the whole README (1350+ lines): read the stage table in `ROADMAP.md` and only the README section of the topic I ask about.
 Stack: Python / FastAPI (`backend/app/`), plain HTML / JS (`frontend/`), SQLite (`data/projects.sqlite` = my data, `master_data/costing_db.sqlite`
 + `master_data/master_data.xlsx` = master data), CadQuery for 3D, reportlab (PDF), ezdxf (DXF), openpyxl (Excel). Local: Windows kit `windows/`
@@ -28,6 +28,11 @@ What the later stages added (details in README):
 - 35: logo and name on every Excel and PDF download (`branding.py`).
 - 36: AI assistant (Ask AI) on every page, read only, through the user's own login; Admin → AI assistant (`bot.py`).
 - 37: machined parts end to end: turned / milled from the 3D model, bar stock from Stock sizes, machining time and fixture (scope `machining`), part cost on the lathe / VMC (`machining.py`).
+- 38: admin user permissions: per-user allow / deny overrides on top of the role, update started from Admin (PR 48).
+- 39: flow simulation (`flow_sim.py`): dual-domain solver on the 3D model for plastic, die casting, foundry, EPS, blow — fill,
+  pressure, clamp, front temperature, cooling / solidification, weld lines / cold shuts, air traps / blow holes, sinks / shrinkage
+  porosity (feeding), stress areas, machine; tables *Flow materials*, *Flow rules*; background jobs with progress (`sim_jobs.py`),
+  saved runs with PDF + video (`sim_runs`), external reports attached; video 10× faster (`render3d.face_view` / `paint`).
 - Audit (PR 45): `python scripts/audit_e2e.py` drives the whole tool (14 cases, 829 calls), 0 findings; report `docs/audit_e2e_report.md`.
   Run it before every release. Many costs still use EXAMPLE rates (Master data → checklist) until I replace them.
 

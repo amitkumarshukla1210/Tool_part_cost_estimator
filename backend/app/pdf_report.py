@@ -11,7 +11,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import PageBreak, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import KeepTogether, PageBreak, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from .trace import EXAMPLE_WARNING
 
@@ -332,5 +332,101 @@ def piece_cost_pdf(tr: dict, part: dict, steps: list, inputs: list, rts: list, k
                      [60 * mm, 35 * mm, 25 * mm, 130 * mm]),
               Paragraph("Rate versions used", h2),
               _table([["#", "Category", "Item", "Country", "Month", "Value", "Unit", "Status", ""]] + [[*r[:5], num(r[5]), *r[6:]] for r in rts], theme)]
+    doc.build(story)
+    return buf.getvalue()
+
+
+FLOW_RESULTS = [("fill_time_s", "Fill time", "s"), ("injection_bar", "Injection pressure (machine)", "bar"),
+                ("cavity_bar", "Pressure in the cavity at the end of filling", "bar"), ("hold_bar", "Hold pressure in the cavity", "bar"),
+                ("intensification_bar", "Intensification pressure", "bar"), ("steam_bar", "Steam pressure", "bar"),
+                ("blow_bar", "Blow pressure", "bar"), ("front_speed_m_s", "Mean flow-front speed", "m/s"),
+                ("front_temp_min_c", "Coolest flow front", "°C"), ("cooling_s", "Cooling time (thickest 5 %)", "s"),
+                ("solidification_s", "Solidification time", "s"), ("cycle_s", "Cycle time", "s"), ("clamp_t", "Clamp force needed", "t"),
+                ("cope_weight_kg", "Weight on the cope (lift of the metal)", "kg"), ("metallostatic_bar", "Metal head pressure", "bar"),
+                ("shot_volume_cm3", "Shot volume", "cm³"), ("shot_weight_g", "Shot weight", "g"), ("flow_length_mm", "Longest flow path", "mm"),
+                ("unfilled_cm2", "Not reached from the gate", "cm²"), ("stretch_max", "Highest stretch ratio", "-"),
+                ("hoop_max", "Highest hoop stretch", "-"), ("axial", "Axial stretch", "-"), ("wall_min_mm", "Thinnest wall after blowing", "mm"),
+                ("wall_max_mm", "Thickest wall after blowing", "mm")]
+FLOW_DEFECTS = {"short_shot": "Short shot / misrun", "air_trap": "Air trap / gas porosity, blow hole", "weld": "Weld line / cold-shut line",
+                "weak_weld": "Weak weld / cold shut", "hot_spot": "Hot spot", "porosity": "Sink, void / shrinkage porosity",
+                "corner": "Sharp inside corner", "stress": "Stress area", "thin": "Thin after stretching", "over_stretch": "Over-stretched"}
+
+
+def flow_pdf(res: dict, pictures: list, part: dict, rev: str) -> bytes:
+    """Flow simulation report: corrections, results, machine, defect locations, maps, inputs, method and accuracy."""
+    theme = _theme()
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=14 * mm, rightMargin=14 * mm, topMargin=12 * mm,
+                            bottomMargin=12 * mm, title=f"Design to Cost — Flow simulation {part['part_code']}", author="Design to Cost")
+    ss = getSampleStyleSheet()
+    h1 = ParagraphStyle("h1", parent=ss["Title"], textColor=theme["ink"], fontSize=18, alignment=0, spaceAfter=2)
+    h2 = ParagraphStyle("h2", parent=ss["Heading2"], textColor=theme["ink"], fontSize=11, spaceBefore=10, spaceAfter=4)
+    note = ParagraphStyle("n", parent=ss["Normal"], textColor=theme["grey"], fontSize=7.5)
+    cell = ParagraphStyle("c", parent=ss["Normal"], fontSize=7.5, leading=9)
+    wrap = lambda t: Paragraph(str(t).replace("&", "&amp;").replace("<", "&lt;"), cell)
+    num = lambda v: "-" if v is None else f"{v:,.3f}".rstrip("0").rstrip(".") if isinstance(v, float) else str(v)
+    mat = res["material"]
+    story = [Paragraph("FLOW SIMULATION", ParagraphStyle("k", parent=ss["Normal"], textColor=theme["brand"], fontSize=8)),
+             Paragraph(f"{part['part_code']} · {part['name']}", h1),
+             Paragraph(f"Rev {rev} · {res['part_type'].replace('_', ' ')} · {mat['material']} · opening {res['opening_axis'].upper()} · "
+                       f"wall {res['wall_mm']:.2f} mm · solver mesh {res['faces']:,} triangles ({res.get('mesh_mm', 0):.1f} mm) · "
+                       f"{date.today().isoformat()}", note)]
+    if res["is_example"]:
+        story += [Spacer(1, 2 * mm), _example_banner(ss, "Flow materials / Flow rules are EXAMPLE values.")]
+    story.append(Paragraph("Corrections required" if res["corrections"] else "No corrections required", h2))
+    for c in res["corrections"]:
+        story.append(Paragraph(f"<font color='#b91c1c'>■</font> {c}".replace("&", "&amp;").replace("&amp;lt;", "&lt;"), ss["Normal"]))
+    r = res["results"]
+    rows = [["Result", "Value", "Unit"]] + [[label, num(r[k]), unit] for k, label, unit in FLOW_RESULTS if r.get(k) is not None]
+    m = res["machine"]
+    mrows = [["Gate and machine", ""], ["Gate(s)", "; ".join(f"({', '.join(f'{x:g}' for x in g['at_mm'])}) mm" for g in res["gates"]) or "-"],
+             ["How the gate was chosen", res["gate_note"]],
+             ["Machine (smallest that takes the clamp force)", f"{m['machine_id']} ({m['tonnage_t']:g} t)" if m.get("machine_id") else
+              ("none large enough" if r.get("clamp_t") else "-")]]
+    pm = res.get("production_machine")
+    if pm:
+        mrows.append(["Production machine (stage 33)", f"{pm['tonnage_t']:g} t · " + ("enough" if pm["ok"] else "TOO SMALL")])
+    story.append(Table([[_table(rows, theme, [72 * mm, 30 * mm, 14 * mm]), _table(mrows, theme, [60 * mm, 70 * mm])]],
+                       style=[("VALIGN", (0, 0), (-1, -1), "TOP")]))
+    drows = [["Defect / area", "Area (cm²)", "Where (largest areas: cm² at the centre x, y, z mm; size of the area)"]]
+    for k, label in FLOW_DEFECTS.items():
+        cl = res["clusters"].get(k) or []
+        if cl:
+            where = "; ".join(f"{c['area_cm2']:.1f} at ({', '.join(f'{x:g}' for x in c['centre_mm'])}) "
+                              f"[{' × '.join(f'{x:g}' for x in c.get('span_mm', []))} mm]" for c in cl[:4])
+            drows.append([label, f"{sum(c['area_cm2'] for c in cl):,.1f}", wrap(where)])
+    if len(drows) > 1:
+        story.append(KeepTogether([Paragraph("Defects and where they are", h2), _table(drows, theme, [55 * mm, 22 * mm, 180 * mm])]))
+    if res.get("risers"):
+        story += [Paragraph("Feeding (hot spots)", h2), _table([["Hot spot at (mm)", "Area (cm²)", "Modulus (mm)", "Riser modulus (mm)", "Riser Ø (mm)"]] +
+                  [[", ".join(f"{x:g}" for x in x_["centre_mm"]), f"{x_['area_cm2']:.1f}", f"{x_['modulus_mm']:.1f}", f"{x_['riser_modulus_mm']:.1f}",
+                    f"{x_['riser_d_mm']:.0f}"] for x_ in res["risers"]], theme)]
+    story += [PageBreak(), Paragraph("Maps", h2)]
+    pics = [[Image(io.BytesIO(png), 125 * mm, 78 * mm), Paragraph(cap.replace("&", "&amp;"), note)] for cap, png in pictures]
+    grid = []
+    for i in range(0, len(pics), 2):
+        row = pics[i:i + 2]
+        grid.append([x[0] for x in row] + [""] * (2 - len(row)))
+        grid.append([x[1] for x in row] + [""] * (2 - len(row)))
+    story.append(Table(grid))
+    story += [PageBreak(), Paragraph("Inputs: Mould &amp; die database → Flow rules", h2),
+              _table([["Name", "Meaning", "Formula", "Value", "Unit"]] + [[s["name"], wrap(s["label"]), wrap(s["formula"]), num(s["value"]), s["unit"]]
+                                                                         for s in res["steps"]], theme, [38 * mm, 80 * mm, 90 * mm, 25 * mm, 14 * mm])]
+    mrow = [[k.replace("_", " "), num(v)] for k, v in mat.items() if k not in ("material", "is_example") and v not in (None, 0, "")]
+    w = res.get("window") or {}
+    story += [Paragraph(f"Inputs: Flow materials → {mat['material']}" + (" (EXAMPLE)" if mat.get("is_example") else "") +
+                        " and Process windows", h2),
+              _table([["Property", "Value"]] + mrow + [["melt / metal temperature (°C)", num(w.get("melt_c"))],
+                                                    ["mould / die temperature (°C)", num(w.get("mould_c"))],
+                                                    ["ejection temperature (°C)", num(w.get("eject_c"))]], theme, [80 * mm, 40 * mm])]
+    story += [Paragraph("Method and accuracy", h2), Paragraph(
+        "2.5D flow solver on the surface mesh of the 3D model (dual-domain method): the wall thickness is measured by rays through "
+        "the part, the two skins of every wall are linked, the gate is typed or found (least flow resistance), the part fills in "
+        "the order of the flow resistance length / (h / h_ref)^k (Hele-Shaw), the pressure drop follows the power-law melt "
+        "viscosity (12 η v L / h²), cooling and solidification follow the wall thickness (h² / (π² α) · ln …, Chvorinov B · M²), "
+        "feeding is checked from the gate (a hot spot that freezes after its feed path = shrinkage porosity / sink). "
+        "A physics estimate for design and costing decisions — not a certified 3D Moldflow / MAGMA result: packing, fibre "
+        "orientation, warpage magnitude and turbulence are not calculated. Before a tool release of a critical part, check it "
+        "with such a program and attach its report to this part (Simulation runs → Attach a report).", ss["Normal"])]
     doc.build(story)
     return buf.getvalue()
