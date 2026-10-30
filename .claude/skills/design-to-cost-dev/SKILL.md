@@ -36,7 +36,7 @@ What the later stages added (details in README):
 - 40: project totals per tool group (`scope.project_view`): a user limited to tool groups sees dashboard / leader view / exports of their parts only; tool group *Machining*.
 - 41: progressive die vs stage dies on the sheet-metal part page (`sheet_compare.py`, scope `sheet_compare`): part cost, die life, die sets, CAPEX,
   amortisation and break-even volume, live and traced; part cost amortisation is life-based: one tool ÷ min(tool_life_shots × cavities, programme ÷ tools for capacity).
-- Audit (PR 45): `python scripts/audit_e2e.py` drives the whole tool (14 cases, 829 calls), 0 findings; report `docs/audit_e2e_report.md`.
+- Audit (PR 45, re-run after stage 41 with its checks): `python scripts/audit_e2e.py` drives the whole tool (15 cases, 883 calls), 0 findings; report `docs/audit_e2e_report.md`.
   Run it before every release. Many costs still use EXAMPLE rates (Master data → checklist) until I replace them.
 
 **Rules (always):**

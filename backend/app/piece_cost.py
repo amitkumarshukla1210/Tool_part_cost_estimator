@@ -16,6 +16,9 @@ trace), the inserts and the Insert moulding rules. Every value you can type over
 
 from __future__ import annotations
 
+import hashlib
+import json
+
 from . import costing_setup, master_data, rate_engine, rates, register_setup
 from .trace import Trace
 
@@ -37,6 +40,16 @@ def graft(t: Trace, sub: dict, prefix: str) -> str:
     for r in sub.get("rates_used", []):
         t.rates_used[r["id"]] = r
     return prefix + sub["root"]
+
+
+def master_hash(part_type: str) -> str:
+    """Fingerprint of the master data the part cost uses (piece / MHR / labour formulas and inputs, machines, labour grades,
+    Parameters of the part type, Insert moulding rules): a change marks the stored part cost outdated and lets it be recalculated."""
+    setup = costing_setup.tables()
+    data = {"formulas": [r for k in ("cost_formulas", "formula_inputs") for r in setup[k] if r["scope"] in (SCOPE, "mhr", "labour")],
+            "machines": setup["machines"], "grades": setup["labour_grades"], "parameters": master_data.parameters(part_type),
+            "insert_rules": register_setup.insert_rules()}
+    return hashlib.sha1(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()[:12]
 
 
 def run(part_id: int, country: str | None = None) -> dict:
@@ -189,6 +202,6 @@ def run(part_id: int, country: str | None = None) -> dict:
                            if "tool_weight" in tool_tr["nodes"] else 0.0}
     out["key"] = {"revision_id": rev_id, "rm": rm["version"], "tool": tool["version"], "inputs": typed,
                   "overrides": (d.get("trace_overrides") or {}).get("piece") or {},
-                  "rates": sorted(x["id"] for x in out["rates_used"]), "as_of": as_of}
+                  "rates": sorted(x["id"] for x in out["rates_used"]), "as_of": as_of, "master": master_hash(part_type)}
     out["is_example"] = any(x.get("is_example") for x in out["rates_used"])
     return out

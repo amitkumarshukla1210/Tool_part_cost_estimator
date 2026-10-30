@@ -216,8 +216,25 @@ def run_case(a: Audit, name, file, material, process, volume, ptype) -> dict:
         for k, fk in (("blank.dxf", "dxf"), ("strip.dxf", "dxf"), ("tool-pack.pdf", "pdf")):
             a.call(name, "get", f"{P}/sheet-layout/{k}", file_kind=fk)
         a.call(name, "get", f"{P}/forming-simulation.pdf", file_kind="pdf")
+        cmp = a.call(name, "get", f"{P}/sheet-compare")          # stage 41: progressive die vs stage dies
+        if cmp:
+            for mode, err in cmp["errors"].items():      # a die type may not fit (e.g. no die set for a large progressive die)
+                if not err or err.count(":") > 1 and err.split(":")[0] == err.split(":")[1].strip():
+                    a._find(name, "sheet-compare", f"{mode} not costed without a clear message", err)
+            if not cmp["modes"]:
+                a._find(name, "sheet-compare", "neither die type costed", repr(cmp["errors"]))
+            for mode, x in cmp["modes"].items():
+                nm = x["named"]
+                if abs(x["value"] - (nm["ex_works"] + nm["amortisation"])) > 1e-6 * max(1, x["value"]):
+                    a._find(name, "sheet-compare", f"{mode}: part cost is not ex-works + amortisation", "")
+                if nm["tools_needed"] < nm["lines_needed"] or nm["parts_per_tool"] > nm["tool_life"] + 1e-9:
+                    a._find(name, "sheet-compare", f"{mode}: die sets / parts per die set inconsistent", repr(nm))
+            for b in cmp["break_even"]:
+                if not cmp["sweep"][0]["annual_volume"] <= b["annual_volume"] <= cmp["sweep"][-1]["annual_volume"]:
+                    a._find(name, "sheet-compare", "break-even outside the volume range", repr(b))
     else:
         a.call(name, "get", f"{P}/sheet-tools", expect="any")
+        a.call(name, "get", f"{P}/sheet-compare", expect="any")
     a.call(name, "get", f"{P}/correction", expect="any")
     pc = a.call(name, "post", f"{P}/piece-cost", json={}, expect="ok" if ptype else "any")
     stored = a.call(name, "get", P) or {}
@@ -229,7 +246,14 @@ def run_case(a: Audit, name, file, material, process, volume, ptype) -> dict:
             a._find(name, "part cost", "part cost below its RM cost", f"{out['piece_inr']:.2f} < {out['rm_inr']:.2f}")
     if tool:
         _positive(a, name, "tool cost", out["tool_inr"])
-    a.call(name, "get", f"{P}/piece-cost/trace", expect="ok" if ptype else "any")
+    ptr = a.call(name, "get", f"{P}/piece-cost/trace", expect="ok" if ptype else "any")
+    if ptype and ptr and "calc:parts_per_tool" in (ptr.get("nodes") or {}):      # stage 41: amortisation by tool / mould life
+        nd = ptr["nodes"]
+        ppt = nd["calc:parts_per_tool"]["value"]
+        if ppt <= 0 or ppt > nd["in:lifetime_volume"]["value"] + 1e-6:
+            a._find(name, "piece-cost", "parts per tool not within the programme", repr(ppt))
+        elif abs(nd["calc:amortisation"]["value"] - nd["in:tool_cost"]["value"] / ppt) > 1e-6 * max(1, nd["calc:amortisation"]["value"]):
+            a._find(name, "piece-cost", "amortisation is not tool cost ÷ parts per tool", "")
     a.call(name, "get", f"{P}/piece-cost/export.xlsx", expect="ok" if ptype else "any", file_kind="xlsx")
     a.call(name, "get", f"{P}/piece-cost/export.pdf", expect="ok" if ptype else "any", file_kind="pdf")
     a.call(name, "get", f"{P}/drawing.pdf", file_kind="pdf")

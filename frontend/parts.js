@@ -83,6 +83,7 @@ $("panelClose").addEventListener("click", () => {
 async function openPart(id) {
   sheetOps = null;
   sheetOpsReset = false;
+  sheetCompare = null;      // a saved change (die type, operations, volume) makes the comparison stale
   try {
     part = await api(`/api/parts/${id}`);
   } catch (err) {

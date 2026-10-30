@@ -489,25 +489,8 @@ def run(vertices, triangles, part_type: str, mat: dict, window: dict, facts: dic
     idx = np.arange(0, m, step)
     off = sim_p.get("undercut_offset_mm", 0.01)
     th, opp = simulation.thickness_hits(tri, n, idx, off)
-    # a long ray may run along a wall (from a rim, an edge, through an opening) instead of across it: 4 more rays tilted by
-    # 40° tell a rim (thin sideways) from a thick section (thick every way). Two opposite tilted rays leaving a section of
-    # width W through its sides run d1 + d2 = W / sin 40° wherever the face is: the width is the smaller pair, never more than
-    # the straight ray; only a straight ray that agrees with it links the two skins
     typical = float(np.nanmedian(th[np.isfinite(th)])) if np.isfinite(th).any() else wall
-    sus = np.nonzero(~np.isfinite(th) | (th > 1.5 * max(typical, wall)))[0]
-    tmin = th.copy()
-    if len(sus):
-        nn = n[idx[sus]]
-        helper = np.where(np.abs(nn[:, [0]]) < 0.9, [[1.0, 0, 0]], [[0, 1.0, 0]])
-        u = np.cross(nn, helper)
-        u /= np.linalg.norm(u, axis=1)[:, None]
-        w = np.cross(nn, u)
-        c, sn = math.cos(math.radians(40)), math.sin(math.radians(40))
-        tilted = np.stack([simulation.thickness_hits(tri, n, idx[sus], off, -nn * c + side * sn)[0] for side in (u, -u, w, -w)], 1)
-        tilted = np.where(np.isfinite(tilted), tilted, np.inf)
-        width = np.minimum(tilted[:, 0] + tilted[:, 1], tilted[:, 2] + tilted[:, 3]) * sn
-        tmin[sus] = np.fmin(np.where(np.isfinite(th[sus]), th[sus], np.inf), width)
-        tmin[sus] = np.where(np.isfinite(tmin[sus]), tmin[sus], np.nan)
+    tmin = simulation.rim_corrected(tri, n, idx, th, off, max(typical, wall))
     cap = float(env.get("max_wall_ratio") or 4) * wall
     tmin = np.where(np.isfinite(tmin), np.minimum(tmin, cap), np.nan)
     good = np.isfinite(tmin) & (opp >= 0)
