@@ -1,7 +1,7 @@
 """Data access by tool group (roadmap stage 30).
 
 Each login ID has tool groups (part types: plastic, die casting, foundry, sheet metal, EPS, blow moulding) that the admin
-sets on Admin → Users & roles and can change at any time (people change responsibility, the data stays where it is).
+sets on Admin → Users & roles (machined parts since stage 37 as the group Machining) and can change at any time (people change responsibility, the data stays where it is).
 
     viewer / engineer / approver   see and work on the parts whose process belongs to one of their groups, and the projects
                                    that hold such parts (or that they created, or that have no tool-group part yet)
@@ -20,9 +20,9 @@ from sqlalchemy import and_, func, not_, or_, select
 from . import auth, register_setup
 from . import projects_db as db
 
-GROUPS = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow")
+GROUPS = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow", "machined")
 LABELS = {"plastic": "Plastic moulding", "die_casting": "Die casting", "foundry": "Foundry", "sheet_metal": "Sheet metal",
-          "eps": "EPS (thermocole)", "blow": "Blow moulding"}
+          "eps": "EPS (thermocole)", "blow": "Blow moulding", "machined": "Machining"}
 
 
 def groups(user: dict | None = None) -> set | None:
@@ -129,7 +129,7 @@ def guard(path: str) -> str | None:
     return None
 
 
-# ---------- project totals per tool group (stage 37) ----------
+# ---------- project totals per tool group (stage 38) ----------
 
 def project_view(conn, project_id: int) -> dict:
     """What the project dashboard / leader view of the logged-in user covers: {limited, visible (part ids or None = all),

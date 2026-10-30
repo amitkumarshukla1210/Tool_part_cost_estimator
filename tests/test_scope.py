@@ -117,7 +117,7 @@ def _part_in_variant(c, project_id, variant_id, file, material, process, code):
 
 
 def test_project_dashboard_and_leader_view_count_only_my_tool_groups(server):
-    """Stage 37: a limited user's project totals (dashboard, leader view, exports) cover their tool groups only."""
+    """Stage 38: a limited user's project totals (dashboard, leader view, exports) cover their tool groups only."""
     login(server)
     p = server.post("/api/projects", json={"code": "MIX", "name": "Mixed project"}).json()
     vid = next(v["id"] for v in server.post(f"/api/projects/{p['id']}/variants", json={"code": "V1", "name": "Base", "annual_volume": 10000,
@@ -148,3 +148,18 @@ def test_project_dashboard_and_leader_view_count_only_my_tool_groups(server):
     _user(server, "hod", "head", [])
     login(server, "hod")
     assert server.get(f"/api/projects/{p['id']}/dashboard").json()["parts_total"] == 2
+
+
+def test_machined_parts_are_the_tool_group_machining(server):
+    """Machined parts (stage 37) are a tool group of their own: only users with Machining ticked see them."""
+    login(server)
+    p = server.post("/api/projects", json={"code": "MCH", "name": "Machined"}).json()
+    assert _part(server, p["id"], "plate_with_hole.step", "Mild steel CRCA / HR", "machined", "MCH-1").status_code == 200
+    server.post("/api/auth/logout")
+    _user(server, "mach", "engineer", ["machined"])
+    _user(server, "sheet2", "engineer", ["sheet_metal"])
+    login(server, "mach")
+    assert [r["part_code"] for r in server.get("/api/parts").json()["rows"]] == ["MCH-1"]
+    server.post("/api/auth/logout")
+    login(server, "sheet2")
+    assert server.get("/api/parts").json()["rows"] == []

@@ -20,7 +20,8 @@ def set_param(data, part_type, name, value):
 
 
 def test_every_part_type_has_its_defaults():
-    for pt in master_data.PART_TYPES:
+    from backend.app.geometry import PART_TYPES as ESTIMATE_TYPES   # the Estimate page (stages A-C); machined parts: part register
+    for pt in ESTIMATE_TYPES:
         assert client.get("/api/gross-weight/defaults").json()[pt]          # master-data defaults of the RM inputs
         assert client.get("/api/capacity/defaults").json()["by_part_type"][pt]["oee_pct"] > 0
     tables = client.get("/api/master-data").json()

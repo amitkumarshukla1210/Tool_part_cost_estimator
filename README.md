@@ -165,7 +165,7 @@ with China's rates, for example. Results are shown in that country's currency an
 - The **tool cost sheet** (Excel: Summary, Cost build-up, BOM & processes, Steps, Inputs, Rates used, Example values; and PDF) is on
   the part and on the Estimate page.
 
-Sheet-metal dies come with stages 9 and 10, and foundry patterns later. Those parts say so instead of showing a cost.
+Sheet-metal dies are costed die by die (stages 9, 10 and 23), foundry patterns since stage 27 and machining fixtures since stage 37.
 
 **Example warning.** Every tool cost shown carries the red **"Uses example rates – not for negotiation"** warning while any
 rate **or** master-data row it uses (machine, BOM element, tool process, time parameter, mould base, sizing rule) is still an
@@ -383,7 +383,7 @@ rates exist* with the old and new value of each rate, and you click **Recalculat
 **Recalculate RM** for a whole project). The same notice appears when you change a formula in master data.
 
 **Who gets an RM cost.** Not assemblies, and not bought-out / existing / not-required parts (those show their bought-out price). Machined
-parts say that their RM (bar stock) comes in a later stage. A part without a material, a density, a 3D file or an approved rate shows
+parts get the RM of their bar stock (stage 37). A part without a material, a density, a 3D file or an approved rate shows
 exactly what is missing; the weights are still shown, and nothing wrong is stored.
 
 **Where it appears.**
@@ -1102,10 +1102,10 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 
 - **Roles:** viewer < engineer < approver < **head** < admin. *Head* (head of department) sees and changes the data of every tool group and
   every user, like an admin, but does not manage login IDs (the permissions per role on Admin → Permissions apply as before).
-- **Tool groups:** Admin → Users & roles has check boxes per login ID: *Plastic moulding, Die casting, Foundry, Sheet metal, EPS, Blow moulding*.
+- **Tool groups:** Admin → Users & roles has check boxes per login ID: *Plastic moulding, Die casting, Foundry, Sheet metal, EPS, Blow moulding, Machining* (Machining added with the machined parts of stage 37).
   A viewer, engineer or approver with groups ticked sees only the parts whose process belongs to those groups, and the projects that hold
   such parts, that they created themselves, or that have no tool-group part yet; opening another group's part or project gives "not your tool
-  group". They can give a part only a process of their own groups. Parts without a tool group (assemblies, bought-out, machined) are seen by all.
+  group". They can give a part only a process of their own groups. Parts without a tool group (assemblies, bought-out) are seen by all.
 - **Change of responsibility:** example: today *user1* has Sheet metal and EPS, *user2* Die casting and Plastic; in six months the admin ticks
   Die casting and EPS for user1 and Sheet metal and Plastic for user2. The data stays where it is; each user now sees the other groups.
 - An ID with no group ticked sees everything (as before this stage), so existing IDs keep working until the admin sets their groups.
@@ -1208,13 +1208,14 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 - The chat stays in the browser tab; *New chat* clears it. Code: `backend/app/bot.py`, `frontend/bot.js`, `frontend/bot.css`.
   Tests: `tests/test_bot.py` (a stand-in for Claude, so no key or internet is needed).
 
-## Project totals per tool group (stage 37)
+## Project totals per tool group (stage 38)
 
 - For a user limited to tool groups (Admin → Users & roles, stage 30), the **project dashboard** and the **project leader view** count only the
   parts of their groups: part counts, files missing, RM, tool & mould CAPEX, BOM cost vs target of every variant (lines of other groups left out),
   machines needed and their CAPEX, and the CAPEX plan (tool lines of their parts, machine lines of the machines their parts need, and the other lines).
   A note says *"Your tool groups only (…): N part(s) of other tool groups are not counted"*; the Excel and PDF exports carry the same note.
 - *Recalculate part costs* on the dashboard recalculates only their parts. Head of department and admin always see the whole project.
+- Machined parts (stage 37) are the tool group **Machining**: tick it on Admin → Users & roles for the users who cost machined parts.
 - Code: `scope.project_view`, `register.dashboard`, `leader.py`. Tests: `tests/test_scope.py`.
 
 ## End-to-end audit (run before every release)
@@ -1225,6 +1226,37 @@ country comparison → PO pack → project dashboard and leader view, for every 
 machined part; then the exports, master-data round trips, wrong input (robustness) and logins with roles and tool groups. Every file is opened
 (PDF, Excel, DXF, STEP, ZIP), every cost must be positive, no NaN, nothing slower than 60 s. Report: `docs/audit_e2e_report.md`.
 `--only plastic` runs the cases whose name contains the word; `--robust` only the wrong-input checks.
+
+## Machined parts: bar stock, machining time, machine and fixture (stage 37)
+
+Parts with the process **Machined** (shafts, pins, bushes, blocks, brackets cut from bar or plate) are now costed end to end, like the
+moulded and pressed parts: RM → machining & fixture → part cost → country comparison → project leader view → Excel / PDF.
+
+- **Turned or milled** is read from the 3D model: the share of the surface that turns about one axis (cylinders, cones, shoulders and end
+  faces) ≥ *Parameters → turned_min_round_share* (0.8) → **turned on the CNC lathe**, else **milled on the machining centre** (machines:
+  *Parameters → machine_turned / machine_milled*). Drilled holes (up to *hole_max_dia_mm*) are found in the model; bores on the turning
+  axis are turned, not drilled. You can type the route over on the part.
+- **Bar stock** = the smallest standard size of *Mould & die database → Stock sizes* that holds the part with the allowances of
+  Parameters: round bar (or hex) above the largest turned Ø + *dia_allowance_mm*; for a milled part the lightest of square bar, flat bar
+  or plate (cut to width) above the part + 2 × *mill_allowance_mm*; cut length = part length + facing allowances + *cut_off_mm*.
+  Example: a Ø40 × 110 shaft → round bar Ø45 × 116.
+- **RM cost** (scope `rm_machined`): stock volume × density → + bar end loss → gross weight × bar rate − chips × scrap rate × chips sold %.
+  Six bar grades seeded (EN1A free-cutting, EN8 / C45, EN19 / 42CrMo4, SS304, Al 6061-T6, brass CW614N) with rates for all 9 countries.
+- **Machining time** (scope `machining`, *Countries, machines & formulas*): volume machined away ÷ rough removal rate + surface ÷ finish rate
+  + drilled depth ÷ feed (rates per material in *Mould & die database → Machining data*) + tool changes and rapids + loading per set-up +
+  set-up ÷ batch. The part cost uses this time as its cycle and the MHR of the lathe / machining centre.
+- **Fixture**: set-ups × fixture rate (rate library *process_unit / Machining fixture (per set-up)*; soft jaws for turned parts = 0.3 of it),
+  one set per machine needed for the annual volume → **fixture CAPEX**. It is stored as a version like a tool cost (part panel →
+  *Machining & fixture*), so it is in the tool CAPEX, the CAPEX plan, the dashboard and the country comparison (HS 8487 part, 8466 fixture).
+  The lathes and machining centres needed appear in the **machine CAPEX** of the project leader view.
+- **Part panel → Machining & fixture**: route and machine with the reason, bar stock, holes, roughing / finishing / drilling time, machining
+  time per part, machines needed, fixture cost and CAPEX; every value clickable to its formula and source. *Machining inputs*: route,
+  stock shape (round, hex, square, flat, plate) and set-ups per part; they change the RM cost too. Excel and PDF sheet with all steps,
+  inputs and rate versions.
+- Everything new is added, nothing changed: the process *Machined* got the part type `machined` (it was empty), new Materials and
+  Parameters rows, the tables *Stock sizes* and *Machining data*, the formulas of `rm_machined` and `machining`, and EXAMPLE rates
+  (bar, chips, fixture, duty). All EXAMPLE until you replace them. Samples: `samples/machined_shaft.step`, `samples/machined_block.step`.
+- Code: `backend/app/machining.py` (seed, stock search, machining & fixture), `geometry.machining_features`. Tests: `tests/test_machining.py`.
 
 ## Look & feel: Design to Cost theme
 
@@ -1287,6 +1319,7 @@ The tests use sample parts whose volume, weight, box and projected area can be c
 ```
 backend/app/geometry.py       STEP reading and all geometry calculations (CadQuery)
 backend/app/gross_weight.py   Estimate page Stage B: request model around the RM engine
+backend/app/machining.py      Machined parts (stage 37): bar stock search, machining time, machine, fixture
 backend/app/rm_cost.py        RM engine: gross weight, yield, RM cost, scrap credit from master-data formulas, fully traced
 backend/app/capacity.py       Stage C: cavities, tools, tool life, machine hours
 backend/app/master_data.py    Reads, checks and saves master_data.xlsx

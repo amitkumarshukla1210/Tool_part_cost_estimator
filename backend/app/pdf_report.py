@@ -81,7 +81,7 @@ def dashboard_pdf(d: dict) -> bytes:
     story = [head, Spacer(1, 4 * mm), Paragraph("PROJECT SUMMARY", kicker),
              Paragraph(f"{p['code']} · {p['name']}", h1),
              Paragraph(f"Customer: {p.get('customer') or '—'} · CAPEX budget: {_money(p.get('capex_budget_inr'))}", note)]
-    if (d.get("scope") or {}).get("limited"):                       # stage 37: only the user's tool groups
+    if (d.get("scope") or {}).get("limited"):                       # stage 38: only the user's tool groups
         story.append(Paragraph(f"<b>{d['scope']['note']}</b>", note))
     if any(v.get("rm_is_example") for v in d["variants"]) or d["capex"].get("tool_is_example"):
         what = [w for w, on in (("the RM cost of at least one variant", any(v.get("rm_is_example") for v in d["variants"])),
@@ -302,12 +302,13 @@ def simulation_pdf(res: dict, pictures: list, part: dict, rev: str) -> bytes:
     return buf.getvalue()
 
 
-def piece_cost_pdf(tr: dict, part: dict, steps: list, inputs: list, rts: list) -> bytes:
+def piece_cost_pdf(tr: dict, part: dict, steps: list, inputs: list, rts: list, kicker: str = "PART COST SHEET",
+                   result_label: str = "Part cost per piece") -> bytes:
     """Part cost sheet: result, calculation steps, inputs with their sources, rate versions used."""
     theme = _theme()
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=14 * mm, rightMargin=14 * mm, topMargin=12 * mm,
-                            bottomMargin=12 * mm, title=f"Design to Cost — Part cost {part['part_code']}", author="Design to Cost")
+                            bottomMargin=12 * mm, title=f"Design to Cost — {kicker.title()} {part['part_code']}", author="Design to Cost")
     ss = getSampleStyleSheet()
     h1 = ParagraphStyle("h1", parent=ss["Title"], textColor=theme["ink"], fontSize=18, alignment=0, spaceAfter=2)
     h2 = ParagraphStyle("h2", parent=ss["Heading2"], textColor=theme["ink"], fontSize=11, spaceBefore=10, spaceAfter=4)
@@ -315,18 +316,19 @@ def piece_cost_pdf(tr: dict, part: dict, steps: list, inputs: list, rts: list) -
     cell = ParagraphStyle("c", parent=ss["Normal"], fontSize=7.5, leading=9)
     wrap = lambda t: Paragraph(str(t).replace("&", "&amp;").replace("<", "&lt;"), cell)
     num = lambda v: f"{v:,.4f}".rstrip("0").rstrip(".") if isinstance(v, (int, float)) else str(v)
-    story = [Paragraph("PART COST SHEET", ParagraphStyle("k", parent=ss["Normal"], textColor=theme["brand"], fontSize=8)),
+    story = [Paragraph(kicker, ParagraphStyle("k", parent=ss["Normal"], textColor=theme["brand"], fontSize=8)),
              Paragraph(f"{part['part_code']} · {part['name']}", h1),
              Paragraph(f"Rev {tr['revision']['rev']} · {tr['part_type'].replace('_', ' ')} · machine {tr['machine']} · country "
                        f"{tr['country']} · month {tr['as_of']} · " + (f"version {tr['version']}" if tr.get("version") else "live, not stored")
                        + f" · {date.today().isoformat()}", note)]
     if tr["is_example"]:
         story += [Spacer(1, 2 * mm), _example_banner(ss)]
-    story += [Paragraph("Result", h2), _table([["", tr["currency"], "INR"], ["Part cost per piece", num(tr["value"]), num(tr["value_inr"])]],
+    story += [Paragraph("Result", h2), _table([["", tr["currency"], "INR"], [result_label, num(tr["value"]), num(tr["value_inr"])]],
                                               theme, [80 * mm, 40 * mm, 40 * mm]),
               Paragraph("Calculation steps", h2),
               _table([["Step", "Formula", "Value", "Unit"]] + [[wrap(a), wrap(b), num(c), dd] for a, b, c, dd in steps], theme,
-                     [60 * mm, 130 * mm, 35 * mm, 25 * mm], total_rows=(len(steps),)),
+                     [60 * mm, 130 * mm, 35 * mm, 25 * mm],
+                     total_rows=(next((i + 1 for i, x in enumerate(tr.get("steps") or []) if x.get("is_result")), len(steps)),)),
               Paragraph("Inputs and where they come from", h2),
               _table([["Input", "Value", "Unit", "Source"]] + [[wrap(a), num(b), c, wrap(dd)] for a, b, c, dd in inputs], theme,
                      [60 * mm, 35 * mm, 25 * mm, 130 * mm]),

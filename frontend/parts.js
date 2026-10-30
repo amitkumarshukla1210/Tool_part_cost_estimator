@@ -201,6 +201,7 @@ function rmBlock(p) {
       <tr><td>Material used per part</td><td class="calc num">${amount("calc:input_g", "g")}</td></tr>
       <tr><td>Material yield</td><td class="calc num">${amount("calc:material_yield_pct", "%", 1)}</td></tr>
       ${has("in:blanks_per_sheet") ? `<tr><td>Blanks per sheet</td><td class="calc num">${amount("in:blanks_per_sheet", "pcs", 0)}</td></tr>` : ""}
+      ${has("calc:stock_volume_cm3") ? `<tr><td>Bar stock${tr.stock ? ` (${esc(tr.stock.label)})` : ""}</td><td class="calc num">${amount("calc:stock_volume_cm3", "cm³", 1)}</td></tr>` : ""}
       <tr><td>Material rate (${esc(tr.country)}, ${esc(tr.as_of)})</td><td class="calc num">${amount("in:material_rate", cur + "/kg")}</td></tr>
       <tr><td>RM cost (material used × rate)</td><td class="calc num">${amount("calc:rm_cost", cur)}</td></tr>
       <tr><td>Scrap credit</td><td class="calc num">${amount("calc:scrap_credit", cur)}</td></tr>
@@ -243,8 +244,74 @@ function rmBlock(p) {
 }
 
 // ---------- tool cost (stage 4) ----------
+// ---------- machined parts: machining & fixture (stage 37) ----------
+function machiningBlock(p) {
+  const t = p.tool, v = t.latest, tr = p.toolTrace;
+  const stored = v && tr?.stored;
+  const tv = (id, text) => (tr?.nodes[id] ? `<button type="button" class="tv" data-tooltrace="${id}">${text}</button>` : text);
+  const val = (id, unit, d = 1) => (tr?.nodes[id] ? tv(id, `${fmt(tr.nodes[id].value, d)} ${esc(unit)}`) : "—");
+  const inrNote = (x) => (tr && tr.currency !== "INR" && x != null ? `<div class="note">${fmt(x, 0)} INR</div>` : "");
+  let html = `<h3 class="block-title">Machining &amp; fixture</h3>`;
+  if (tr?.example?.any) html += window.exampleBanner(esc(tr.example.detail));
+  if (t.problem) html += `<p class="warn">${esc(t.problem)}</p>`;
+  if (t.outdated) {
+    html += `<p class="warn">${esc(t.outdated)}
+      ${t.rate_changes.map((c) => `<br/>${esc(c.rate)}: ${fmt(c.old_value, 2)} (${esc(c.old_month)}) → <b>${fmt(c.new_value, 2)}</b> (${esc(c.new_month)})`).join("")}
+      <br/><button type="button" class="btn btn-primary small" id="toolRecalc">${v ? "Recalculate with latest rates" : "Calculate machining &amp; fixture"}</button></p>`;
+  }
+  if (tr) {
+    const cur = tr.currency, st = tr.stock, m = tr.trial.machine;
+    const drilled = tr.holes.filter((h) => !(tr.route === "turned" && h.on_turn_axis));
+    html += `<div class="table-wrap"><table class="cost-table"><tbody>
+      <tr><td>Route · machine</td><td class="calc num">${esc(tr.route)} · ${esc(m.machine_id)} (${esc(m.name)})<div class="note">${esc(tr.route_why)}</div></td></tr>
+      <tr><td>Bar stock (smallest standard size, Stock sizes)</td><td class="calc num">${esc(st.label)}<div class="note">needs ${esc(st.needed)}</div></td></tr>
+      <tr><td>Drilled holes</td><td class="calc num">${drilled.length ? drilled.map((h) => `Ø${fmt(h.dia_mm, 1)} × ${fmt(h.depth_mm, 0)}`).join(", ") : "none"}</td></tr>
+      <tr><td>Volume machined away</td><td class="calc num">${val("calc:removed_cm3", "cm³")}</td></tr>
+      <tr><td>Roughing · finishing · drilling</td><td class="calc num">${val("calc:rough_min", "min", 2)} · ${val("calc:finish_min", "min", 2)} · ${val("calc:drill_min", "min", 2)}</td></tr>
+      <tr><td>Tool changes and rapids</td><td class="calc num">${val("calc:idle_min", "min", 2)}</td></tr>
+      <tr><td>Loading · set-up per part</td><td class="calc num">${val("calc:handling_s", "s", 0)} · ${val("calc:setup_share_s", "s", 1)}</td></tr>
+      <tr class="total"><td>Machining time per part (cycle of the part cost)</td><td class="calc num">${val("calc:cycle_s", "s", 0)}
+        <div class="note">${fmt(tr.nodes["calc:cycle_s"].value / 60, 2)} min</div></td></tr>
+      <tr><td>Machines needed for the annual volume</td><td class="calc num">${val("calc:machines_needed", "", 0)} (${val("calc:hours_per_year", "h/yr", 0)})</td></tr>
+      <tr class="total"><td>${esc(tr.nodes[tr.root].label)}${stored ? ` · version ${v.version}` : ""}${tr.example?.any ? ' <span class="badge badge-example">EXAMPLE values</span>' : ""}</td>
+        <td class="calc num">${tv(tr.root, `${fmt(tr.value, 0)} ${esc(cur)}`)}${inrNote(tr.value_inr)}</td></tr>
+      ${tr.capex_node ? `<tr class="total"><td>Fixture CAPEX (one set per machine)</td><td class="calc num">${val(tr.capex_node, cur, 0)}${inrNote(tr.capex_inr)}</td></tr>` : ""}
+    </tbody></table></div>
+    <p class="note">${stored ? "" : "<b>Live preview, not stored yet.</b> "}Country ${esc(tr.country)} · rates of ${esc(tr.as_of)}. Click any value for its formula,
+      inputs, sources and rate versions. The part cost uses this machining time and the MHR of ${esc(m.machine_id)}.
+      ${stored ? `Stored ${esc(v.created_at.slice(0, 16).replace("T", " "))} by ${esc(v.created_by)} · ${esc(v.reason)}.
+      <a class="link" href="/api/parts/${p.id}/tool-cost/export.xlsx">Excel</a> · <a class="link" href="/api/parts/${p.id}/tool-cost/export.pdf">PDF</a>` : ""}</p>`;
+  }
+  const typed = p.tool_inputs || {};
+  const opt = (name, list, auto) => `<select name="${name}"><option value="">${esc(auto)}</option>
+    ${list.map((x) => `<option value="${x}" ${typed[name] === x ? "selected" : ""}>${x}</option>`).join("")}</select>`;
+  html += `<details class="card add-insert" ${Object.keys(typed).length || p.tool_country ? "open" : ""}>
+    <summary class="btn btn-outline small">Machining inputs and country</summary>
+    <form id="toolForm" class="grid2">
+      <label>Country <select name="tool_country"><option value="">Same as producing country (${esc(p.effective_country)})</option>
+        ${rmMeta.countries.map((c) => `<option value="${esc(c.code)}" ${c.code === p.tool_country ? "selected" : ""}>${esc(c.name)} (${esc(c.currency)})</option>`).join("")}</select></label>
+      <label>Route ${opt("route", ["turned", "milled"], `From the 3D model${tr ? ` (${tr.route})` : ""}`)}</label>
+      <label>Bar stock shape ${opt("stock_shape", ["round", "hex", "square", "flat", "plate"], `Lightest that fits${tr ? ` (${tr.stock.shape})` : ""}`)}</label>
+      <label>Set-ups per part <input type="number" min="1" step="1" name="setups" value="${typed.setups ?? ""}" placeholder="Parameters" /></label>
+      <p class="note span2">Leave a box empty to follow the 3D model and Master data. Route and stock shape also change the RM cost (bar stock).</p>
+      <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary">Save and calculate</button></div>
+      <p class="status span2" id="toolStatus"></p>
+    </form></details>`;
+  if (t.versions) {
+    html += `<details class="card add-insert"><summary class="btn btn-outline small">Machining &amp; fixture versions (${t.versions})</summary>
+      <div class="table-wrap"><table class="cost-table"><thead><tr><th>Ver</th><th>Rev</th><th>Country</th><th>Month</th>
+        <th class="num">Fixture per set</th><th class="num">INR</th><th class="num">CAPEX (INR)</th><th>Why</th><th>By / when</th></tr></thead><tbody>
+        ${p.toolVersions.map((x) => `<tr class="clickable" data-toolversion="${x.version}"><td><b>${x.version}</b></td><td>${esc(x.rev)}</td>
+          <td>${esc(x.country)}</td><td>${esc(x.as_of)}</td><td class="calc num">${fmt(x.tool_cost, 0)} ${esc(x.currency)}</td>
+          <td class="calc num">${fmt(x.tool_cost_inr, 0)}</td><td class="calc num">${x.tool_capex_inr != null ? fmt(x.tool_capex_inr, 0) : "—"}</td>
+          <td>${esc(x.reason)}</td><td>${esc(x.created_by)} · ${esc(x.created_at.slice(0, 16).replace("T", " "))}</td></tr>`).join("")}</tbody></table></div></details>`;
+  }
+  return html;
+}
+
 function toolBlock(p) {
   if (p.is_assembly || !p.tool) return "";
+  if (p.tool.live?.part_type === "machined" || p.toolTrace?.part_type === "machined") return machiningBlock(p);
   const t = p.tool, v = t.latest, tr = p.toolTrace;
   const stored = v && tr?.stored;
   const tv = (id, text) => (tr?.nodes[id] ? `<button type="button" class="tv" data-tooltrace="${id}">${text}</button>` : text);
@@ -518,7 +585,8 @@ $("panelBody").addEventListener("submit", async (e) => {
   if (e.target.id === "toolForm") {
     const f = new FormData(e.target);
     const inputs = { warranty: f.has("warranty"), hot_runner: f.has("hot_runner") };
-    for (const k of ["cavities", "slides_per_cavity", "lifters_per_cavity", "inserts_per_cavity"]) if (f.get(k)) inputs[k] = Number(f.get(k));
+    for (const k of ["cavities", "slides_per_cavity", "lifters_per_cavity", "inserts_per_cavity", "setups"]) if (f.get(k)) inputs[k] = Number(f.get(k));
+    for (const k of ["route", "stock_shape"]) if (f.get(k)) inputs[k] = f.get(k);
     if (inputs.warranty) delete inputs.warranty; // the default
     if (!inputs.hot_runner) delete inputs.hot_runner;
     status($("toolStatus"), "Calculating…");
@@ -935,8 +1003,8 @@ function pieceBlock(p) {
       ${esc(tr.country)} · ${esc(tr.as_of)}. Click any value for its formula, inputs and rate versions.
       ${s.latest ? `<a class="link" href="/api/parts/${p.id}/piece-cost/export.xlsx">Excel</a> · <a class="link" href="/api/parts/${p.id}/piece-cost/export.pdf">PDF</a>` : ""}</p>
     <form id="pieceForm" class="card grid2">
-      <label>Cycle time (s) <input type="number" min="0" step="any" name="cycle_s" value="${p.piece_inputs?.cycle_s ?? ""}" placeholder="Parameters" /></label>
-      <label>Cavities <input type="number" min="1" step="1" name="cavities" value="${p.piece_inputs?.cavities ?? ""}" placeholder="tool cost" /></label>
+      <label>Cycle time (s) <input type="number" min="0" step="any" name="cycle_s" value="${p.piece_inputs?.cycle_s ?? ""}" placeholder="${p.toolTrace?.part_type === "machined" ? "machining time" : "Parameters"}" /></label>
+      <label>${p.toolTrace?.part_type === "machined" ? "Parts per cycle" : "Cavities"} <input type="number" min="1" step="1" name="cavities" value="${p.piece_inputs?.cavities ?? ""}" placeholder="${p.toolTrace?.part_type === "machined" ? "1" : "tool cost"}" /></label>
       <label>Secondary operations (% of process) <input type="number" min="0" step="any" name="secondary_ops_pct" value="${p.piece_inputs?.secondary_ops_pct ?? ""}" placeholder="Parameters" /></label>
       <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary small">Save and store part cost</button></div>
       <p class="status span2" id="pieceStatus"></p></form>`;
