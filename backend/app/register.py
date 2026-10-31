@@ -1680,7 +1680,7 @@ def piece_summary(part_id: int) -> dict:
     elif latest["key"] != r["key"]:
         same = {k: v for k, v in latest["key"].items() if k not in ("rates", "as_of")} == {k: v for k, v in r["key"].items() if k not in ("rates", "as_of")}
         out["outdated"] = (f"Newer approved rates exist than the ones used in part cost version {latest['version']}." if same
-                           else f"RM / tool cost, inputs or revision changed since part cost version {latest['version']}.")
+                           else f"RM / tool cost, inputs, master data, formulas or revision changed since part cost version {latest['version']}.")
     return out
 
 
@@ -2255,7 +2255,7 @@ def _concept_inputs(part_id: int):
     across = sorted((v for a, v in g["bbox_axes_mm"].items() if a != axis), reverse=True)
     typed = d["tool_inputs"] or {}
     try:
-        cavities = typed.get("cavities") or _tool_compute(part_id)["stage_c"]["cavities_per_tool"]
+        cavities = typed.get("cavities") or _tool_compute(part_id)["stage_c"].get("cavities_per_tool") or 1   # machined: no cavities
     except (RegisterError, ToolNotApplicable, tool_cost.ToolCostError):
         cavities = 1
     t = _geometry_trace(part_id)[0]
@@ -2291,7 +2291,7 @@ def _simulation_key(part_id: int) -> str | None:
     tables = mould_db.tables()
     typed = d["tool_inputs"] or {}
     try:
-        cavities = typed.get("cavities") or _tool_compute(part_id)["stage_c"]["cavities_per_tool"]
+        cavities = typed.get("cavities") or _tool_compute(part_id)["stage_c"].get("cavities_per_tool") or 1   # machined: no cavities
     except (RegisterError, ToolNotApplicable, tool_cost.ToolCostError):
         cavities = 1
     inputs = {

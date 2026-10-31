@@ -999,7 +999,7 @@ def parts_po_pack(part_id: int):
 def parts_forming_simulation(part_id: int, kind: str):
     """Sheet-metal forming simulation report: pdf, or video (MP4, GIF when no ffmpeg) of the stages."""
     if kind not in ("pdf", "video"):
-        raise HTTPException(404, "pdf or video")
+        raise HTTPException(404, "Forming simulation: forming-simulation.pdf or forming-simulation.video.")
     try:
         data, media, name = register.forming_report(part_id, kind)
     except (register.RegisterError, ValueError, register.ToolNotApplicable) as exc:
@@ -1291,7 +1291,7 @@ def parts_sim_run(part_id: int, run_id: int):
 def parts_sim_run_file(part_id: int, run_id: int, what: str):
     """what: pdf or video (MP4 / GIF)."""
     if what not in ("pdf", "video"):
-        raise HTTPException(404, "pdf or video")
+        raise HTTPException(404, "Download a saved run as …/pdf or …/video.")
     try:
         data, media, name = register.sim_run_file(part_id, run_id, what)
     except register.RegisterError as exc:
