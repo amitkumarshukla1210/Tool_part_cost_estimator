@@ -65,7 +65,8 @@ def test_eps_part_rm_tool_and_part_cost(tmp_path):
     steam = pc["nodes"]["calc:utility_cost"]["value"]
     assert steam == pytest.approx(pc["nodes"]["in:total_weight_kg"]["value"] * 0.8 * pc["nodes"]["in:steam_rate"]["value"]) and steam > 0
     assert pc["nodes"]["calc:preform_cost"]["value"] == 0 and pc["machine"].startswith("EPS")
-    assert pc["nodes"]["in:cycle_s"]["value"] == 150
+    sim = client.get(f"/api/parts/{pid}/simulation").json()["results"]["cycle_s"]
+    assert pc["nodes"]["in:cycle_s"]["value"] == pytest.approx(sim, abs=1e-3)       # the calculated cycle, not the 150 s target
 
 
 def test_bottle_weight_is_a_shell_and_both_costs_run(tmp_path):
@@ -86,7 +87,8 @@ def test_bottle_weight_is_a_shell_and_both_costs_run(tmp_path):
     pc = client.get(f"/api/parts/{pid}/piece-cost").json()["live"]
     rmc = pc["nodes"]["in:rm_cost"]["value"]
     assert pc["nodes"]["calc:preform_cost"]["value"] == pytest.approx(rmc * 0.28) and pc["nodes"]["calc:utility_cost"]["value"] == 0
-    assert pc["nodes"]["in:cycle_s"]["value"] == 6 and pc["is_example"]
+    sim = client.get(f"/api/parts/{pid}/simulation").json()["results"]["cycle_s"]
+    assert pc["nodes"]["in:cycle_s"]["value"] == pytest.approx(sim, abs=1e-3) and pc["is_example"]     # calculated, not the 6 s target
 
 
 def test_new_types_work_in_the_country_comparison(tmp_path):
