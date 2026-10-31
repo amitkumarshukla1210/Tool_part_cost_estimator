@@ -1014,7 +1014,7 @@ function pieceBlock(p) {
       ${esc(tr.country)} · ${esc(tr.as_of)}. Click any value for its formula, inputs and rate versions.
       ${s.latest ? `<a class="link" href="/api/parts/${p.id}/piece-cost/export.xlsx">Excel</a> · <a class="link" href="/api/parts/${p.id}/piece-cost/export.pdf">PDF</a>` : ""}</p>
     <form id="pieceForm" class="card grid2">
-      <label>Cycle time (s) <input type="number" min="0" step="any" name="cycle_s" value="${p.piece_inputs?.cycle_s ?? ""}" placeholder="${p.toolTrace?.part_type === "machined" ? "machining time" : "Parameters"}" /></label>
+      <label>Cycle time (s) <input type="number" min="0" step="any" name="cycle_s" value="${p.piece_inputs?.cycle_s ?? ""}" placeholder="${p.toolTrace?.part_type === "machined" ? "machining time" : "calculated"}" /></label>
       <label>${p.toolTrace?.part_type === "machined" ? "Parts per cycle" : "Cavities"} <input type="number" min="1" step="1" name="cavities" value="${p.piece_inputs?.cavities ?? ""}" placeholder="${p.toolTrace?.part_type === "machined" ? "1" : "tool cost"}" /></label>
       <label>Secondary operations (% of process) <input type="number" min="0" step="any" name="secondary_ops_pct" value="${p.piece_inputs?.secondary_ops_pct ?? ""}" placeholder="Parameters" /></label>
       <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary small">Save and store part cost</button></div>

@@ -39,7 +39,7 @@ RESULT_OF = ({"mhr": "Machine hour rate", "labour": "Labour rate"} | {f"rm_{f}":
 # the Insert moulding rules (Part register setup) can be used by their key as well.
 PIECE_ITEMS = {
     "rm_cost": "Net RM cost per part: latest RM cost version of the current revision",
-    "cycle_s": "Cycle time (s): typed on the part, else Parameters → cycle_time_s",
+    "cycle_s": "Cycle time (s): typed on the part, else the calculated cycle (simulation; sheet metal: press speed rules), else Parameters → cycle_time_s",
     "cavities": "Cavities per tool: typed, else the latest tool cost version",
     "mhr": "Machine hour rate of the machine the tool's clamp force selects (full MHR trace)",
     "labour_rate": "Labour rate of Parameters → operator_grade (full labour-rate trace)",

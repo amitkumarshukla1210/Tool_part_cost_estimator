@@ -496,6 +496,15 @@ down to the electricity rate inside the MHR. Type over cycle time, cavities or s
 The steps are Cost formulas of scope **piece**, their inputs Formula inputs of that scope (Parameters, the rate
 library or values worked out by the app: see the Formula help sheet). All are EXAMPLE values.
 
+**Cycle time in the part cost (stage 39).** The cycle time is **the calculated one by default**, never the target of
+Parameters → `cycle_time_s`. Moulds, dies, EPS and blow tools use the cycle of the part's simulation (fill + cooling + open / eject,
+insert loading), the same number as on the Simulation card and the Process parameters sheet. Sheet metal uses strokes per part
+÷ press speed: one stroke for a progressive die, one per operation for multi-stage dies, with the Design rules `press_spm`,
+`press_spm_manual` and `press_spm_draw_factor` (slower for drawn parts; EXAMPLE values). Type your own cycle time on the part (or
+change it from the traceability panel) to override it; clear it to go back to the calculated one. If the cycle cannot be
+calculated (for example no simulation for the part), the target of Parameters is used and the trace says why. Stored part cost
+versions never change: the part shows that inputs changed and you recalculate on purpose.
+
 ## Sheet-metal tools I (roadmap stage 9)
 
 For parts whose process is sheet metal, the **Sheet-metal tools** block on the part panel reads the 3D model (thickness, holes,
