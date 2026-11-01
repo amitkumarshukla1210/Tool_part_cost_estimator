@@ -1082,6 +1082,23 @@ def parts_tool_review_sign(part_id: int, data: dict):
                                                   str(data.get("status") or ""), data.get("comment") or ""))
 
 
+# ---------- supplier production data of the tool parts (roadmap stage 45) ----------
+
+@app.get("/api/parts/{part_id}/production-data")
+def parts_production_data(part_id: int):
+    """Per made tool part: stock size, steel weight, operations and its share of the tool cost (INR); standard parts; tool level."""
+    from . import production_data
+    return _design_error(lambda: production_data.part(part_id))
+
+
+@app.get("/api/parts/{part_id}/production-data.xlsx")
+def parts_production_data_xlsx(part_id: int):
+    from . import production_data
+    data, name = _design_error(lambda: production_data.xlsx(part_id))
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
 # ---------- design skills: learned from drawing-data corrections (roadmap stage 44) ----------
 
 @app.get("/api/design-skills")

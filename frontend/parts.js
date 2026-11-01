@@ -1520,13 +1520,41 @@ async function toolDesignLoad() {
             <td>${esc(c.hardness || "—")}</td><td>${esc(c.std || "—")}</td><td>${c.size.map((v) => fmt(v, 1)).join(" × ")}</td></tr>`).join("")}
           </tbody></table></div></div>`;
     }).join("") + (r.tools.length > 1 ? `<p><a class="btn btn-primary" href="/api/parts/${part.id}/tool-design.zip">⬇ Release pack of all ${r.tools.length} tools</a></p>` : "")
-      + `<div id="ddBox" class="card"></div><div id="rvBox" class="card"></div>`;
+      + `<div id="pdBox" class="card"></div><div id="ddBox" class="card"></div><div id="rvBox" class="card"></div>`;
+    productionDataLoad();
     drawingDataLoad();
     toolReviewLoad();
     machineCheck();
   } catch (err) {
     status($("tdStatus"), err.message, "error");
   }
+}
+
+// supplier production data: stock, weight, operations and cost share per tool part (stage 45)
+async function productionDataLoad() {
+  const box = $("pdBox");
+  if (!box) return;
+  let r;
+  try { r = await api(`/api/parts/${part.id}/production-data`); } catch (err) { box.innerHTML = `<p class="status error">${esc(err.message)}</p>`; return; }
+  const inr = (v) => `₹ ${fmt(v, 0)}`;
+  box.innerHTML = `<h4>Production data for suppliers (steel purchase and toolmaker quotes)</h4>
+    ${r.tool_cost_example || r.tools.some((t) => t.is_example) ? '<p><span class="badge example">EXAMPLE</span> <span class="note">tool cost rates or stock rules are still EXAMPLE values</span></p>' : ""}
+    <p class="note">Stock = finished size + 2 × allowance, rounded up (Mould &amp; die database → Design rules: <code>stock_allowance_mm</code>, <code>stock_round_mm</code>).
+      Cost = the tool cost split: steel lines to their parts, the mould base / die set to the plates, the groups in <code>production_cost_groups</code> over all made parts,
+      both by stock weight. Parts + standard parts + tool level = the tool cost.</p>
+    <p class="downloads"><a class="btn btn-primary small" href="/api/parts/${part.id}/production-data.xlsx">⬇ Production data (Excel)</a></p>
+    ${r.tools.map((t) => `<p><b>Tool ${t.stage}: ${esc(t.name)}</b> · steel ${fmt(t.steel_kg, 1)} kg${t.no_density.length ? ` · <span class="badge missing">no density for ${esc(t.no_density.join(", "))}</span>` : ""}</p>
+      <div class="table-wrap" style="max-height:none"><table class="cost-table"><thead><tr><th>Item</th><th>Part</th><th>Qty</th><th>Material · hardness</th>
+        <th>Finished (mm)</th><th>Stock (mm)</th><th>kg</th><th>Operations</th><th>Steel</th><th>Machining</th><th>Total</th></tr></thead><tbody>
+        ${t.parts.map((p) => `<tr><td>${esc(p.item)}</td><td>${esc(p.name)}</td><td class="num">${p.qty}</td><td>${esc(p.material)} · ${esc(p.hardness)}</td>
+          <td>${p.finished_mm.map((v) => fmt(v, 1)).join(" × ")}</td><td>${p.stock_mm.map((v) => fmt(v, 0)).join(" × ")}</td><td class="num">${p.kg_total == null ? "—" : fmt(p.kg_total, 2)}</td>
+          <td><details><summary>${p.operations.length} operations</summary><ol>${p.operations.map((o) => `<li>${esc(o)}</li>`).join("")}</ol></details></td>
+          <td class="num">${inr(p.steel_inr)}</td><td class="num">${inr(p.process_inr)}</td><td class="num"><b>${inr(p.total_inr)}</b></td></tr>`).join("")}
+        <tr class="subtotal"><td></td><td colspan="9">Made parts</td><td class="num">${inr(t.sums.parts_inr)}</td></tr>
+        ${t.standard.map((x) => `<tr><td></td><td colspan="9">Standard / bought-out: ${esc(x.element)}</td><td class="num">${inr(x.inr)}</td></tr>`).join("")}
+        ${t.tool_level.map((x) => `<tr><td></td><td colspan="9">Tool level: ${esc(x.element)}</td><td class="num">${inr(x.inr)}</td></tr>`).join("")}
+        <tr class="subtotal"><td></td><td colspan="9">Tool cost</td><td class="num"><b>${inr(t.sums.tool_cost_inr)}</b></td></tr>
+      </tbody></table></div>`).join("")}`;
 }
 
 // toolmaker review of the tool design: automatic checks and sign-offs, blocks freezing the design (stage 43)
