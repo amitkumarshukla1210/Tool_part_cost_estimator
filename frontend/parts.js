@@ -1511,7 +1511,9 @@ async function toolDesignLoad() {
         ${t.internals ? `<p class="note"><b>Internals:</b> ejector pins ${t.internals.pins_placed} placed of ${t.internals.pins_wanted} wanted ·
           cooling lines ${t.internals.cool_placed} of ${t.internals.cool_wanted} · screws ${t.internals.screws} · dowels ${t.internals.dowels}
           ${t.internals.pins_placed < t.internals.pins_wanted || t.internals.cool_placed < t.internals.cool_wanted ? ' <span class="badge missing">check in the review</span>' : ""}</p>` : ""}
-        <p class="downloads"><a class="link" href="/api/parts/${part.id}/tool-design.step${q}">⬇ Assembly 3D (STEP)</a> ·
+        <p class="downloads"><a class="btn btn-outline small" href="/api/parts/${part.id}/tool-design.html${q}" target="_blank">🧊 Open 3D viewer</a> ·
+          <a class="link" href="/api/parts/${part.id}/tool-design.stl${q}">⬇ Assembly STL</a> ·
+          <a class="link" href="/api/parts/${part.id}/tool-design.step${q}">⬇ Assembly 3D (STEP)</a> ·
           <a class="link" href="/api/parts/${part.id}/tool-design.pdf${q}">⬇ Drawing set (PDF)</a> ·
           <a class="btn btn-primary small" href="/api/parts/${part.id}/tool-design.zip${q}">⬇ Release pack (3D + PDF + DXF + BOM)</a></p>
         <div class="table-wrap"><table class="cost-table"><thead><tr><th>Item</th><th>Qty</th><th>Part</th><th>Material</th>
@@ -1546,15 +1548,16 @@ async function productionDataLoad() {
     <p class="downloads"><a class="btn btn-primary small" href="/api/parts/${part.id}/production-data.xlsx">⬇ Production data (Excel)</a></p>
     ${r.tools.map((t) => `<p><b>Tool ${t.stage}: ${esc(t.name)}</b> · steel ${fmt(t.steel_kg, 1)} kg${t.no_density.length ? ` · <span class="badge missing">no density for ${esc(t.no_density.join(", "))}</span>` : ""}</p>
       <div class="table-wrap" style="max-height:none"><table class="cost-table"><thead><tr><th>Item</th><th>Part</th><th>Qty</th><th>Material · hardness</th>
-        <th>Finished (mm)</th><th>Stock (mm)</th><th>kg</th><th>Operations</th><th>Steel</th><th>Machining</th><th>Total</th></tr></thead><tbody>
+        <th>Finished (mm)</th><th>Stock (mm)</th><th>kg</th><th>Operations</th><th>Steel</th><th>Machining</th><th>Total</th><th>3D</th></tr></thead><tbody>
         ${t.parts.map((p) => `<tr><td>${esc(p.item)}</td><td>${esc(p.name)}</td><td class="num">${p.qty}</td><td>${esc(p.material)} · ${esc(p.hardness)}</td>
           <td>${p.finished_mm.map((v) => fmt(v, 1)).join(" × ")}</td><td>${p.stock_mm.map((v) => fmt(v, 0)).join(" × ")}</td><td class="num">${p.kg_total == null ? "—" : fmt(p.kg_total, 2)}</td>
           <td><details><summary>${p.operations.length} operations</summary><ol>${p.operations.map((o) => `<li>${esc(o)}</li>`).join("")}</ol></details></td>
-          <td class="num">${inr(p.steel_inr)}</td><td class="num">${inr(p.process_inr)}</td><td class="num"><b>${inr(p.total_inr)}</b></td></tr>`).join("")}
-        <tr class="subtotal"><td></td><td colspan="9">Made parts</td><td class="num">${inr(t.sums.parts_inr)}</td></tr>
-        ${t.standard.map((x) => `<tr><td></td><td colspan="9">Standard / bought-out: ${esc(x.element)}</td><td class="num">${inr(x.inr)}</td></tr>`).join("")}
-        ${t.tool_level.map((x) => `<tr><td></td><td colspan="9">Tool level: ${esc(x.element)}</td><td class="num">${inr(x.inr)}</td></tr>`).join("")}
-        <tr class="subtotal"><td></td><td colspan="9">Tool cost</td><td class="num"><b>${inr(t.sums.tool_cost_inr)}</b></td></tr>
+          <td class="num">${inr(p.steel_inr)}</td><td class="num">${inr(p.process_inr)}</td><td class="num"><b>${inr(p.total_inr)}</b></td>
+          <td>${["step", "stl", "png"].map((k) => `<a class="link" href="/api/parts/${part.id}/tool-design/parts/${encodeURIComponent(p.item)}.${k}?die=${encodeURIComponent(t.key)}"${k === "png" ? ' target="_blank"' : ""}>${k === "png" ? "picture" : k.toUpperCase()}</a>`).join(" · ")}</td></tr>`).join("")}
+        <tr class="subtotal"><td></td><td colspan="9">Made parts</td><td class="num">${inr(t.sums.parts_inr)}</td><td></td></tr>
+        ${t.standard.map((x) => `<tr><td></td><td colspan="9">Standard / bought-out: ${esc(x.element)}</td><td class="num">${inr(x.inr)}</td><td></td></tr>`).join("")}
+        ${t.tool_level.map((x) => `<tr><td></td><td colspan="9">Tool level: ${esc(x.element)}</td><td class="num">${inr(x.inr)}</td><td></td></tr>`).join("")}
+        <tr class="subtotal"><td></td><td colspan="9">Tool cost</td><td class="num"><b>${inr(t.sums.tool_cost_inr)}</b></td><td></td></tr>
       </tbody></table></div>`).join("")}`;
 }
 

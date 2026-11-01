@@ -162,9 +162,10 @@ def tool_data(des: dict, lines: list[dict], value: float, fx: float, part_type: 
             "is_example": R["is_example"]}
 
 
-def part(part_id: int) -> dict:
+def part(part_id: int, made: tuple | None = None) -> dict:
+    """made = (part, revision, designs) of register.tool_designs when the caller has them already (saves designing again)."""
     from . import register
-    d, rev, designs = register.tool_designs(part_id)
+    d, rev, designs = made or register.tool_designs(part_id)
     tr = register.tool_trace(part_id)
     out = []
     for k, des in designs:

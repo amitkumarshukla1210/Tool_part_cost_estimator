@@ -3323,6 +3323,25 @@ def tool_design_summary(part_id: int) -> dict:
         for k, des in designs]}
 
 
+def tool_part_file(part_id: int, item: str, kind: str, key: str | None = None) -> tuple[bytes, str, str]:
+    """(content, media type, file name) of one tool part (stage 45): step, stl or png."""
+    from . import outputs3d, tool_drawings
+    d, rev, designs = tool_designs(part_id, key)
+    k, des = designs[0]
+    try:
+        c = outputs3d.find(des, item)
+    except ValueError as exc:
+        raise RegisterError(str(exc)) from None
+    stem = f"{d['part_code']}_T{k:02d}_{tool_drawings._safe(des['key'])}_{c.no}_{tool_drawings._safe(c.name)}"
+    if kind == "step":
+        return outputs3d.part_step(c), "application/step", f"{stem}.step"
+    if kind == "stl":
+        return outputs3d.part_stl(c), "model/stl", f"{stem}.stl"
+    if kind == "png":
+        return outputs3d.part_png(c), "image/png", f"{stem}.png"
+    raise RegisterError(f"Unknown tool part download '{kind}'.")
+
+
 def tool_design_file(part_id: int, kind: str, key: str | None = None) -> tuple[bytes, str, str]:
     """(content, media type, file name) of a tool design download: zip (release pack), step (assembly), pdf (drawing
     set) or png (iso picture)."""
@@ -3334,11 +3353,25 @@ def tool_design_file(part_id: int, kind: str, key: str | None = None) -> tuple[b
         for _, des in designs:
             if line:
                 des["notes"] = list(des.get("notes", [])) + [line]
+    if kind in ("zip", "html"):                # stage 45: the 3D viewer with each part's production data (INR)
+        from . import outputs3d, production_data
+        try:
+            prod = {t["key"]: t for t in production_data.part(part_id, (d, rev, designs))["tools"]}
+        except (production_data.ProductionError, ValueError):
+            prod = {}
     if kind == "zip":
         tag = f"_{tool_drawings._safe(key)}" if key else ""
-        return tool_drawings.release_zip(d, designs, rev["rev"]), "application/zip", f"{code}_tool_design{tag}.zip"
+        extra = {f"T{k:02d}_{tool_drawings._safe(des['name'])}/{code}_T{k:02d}_{tool_drawings._safe(des['key'])}_3D_viewer.html":
+                 outputs3d.viewer_html(outputs3d.viewer_data(d, des, rev["rev"], prod.get(des["key"]))).encode("utf-8") for k, des in designs}
+        return tool_drawings.release_zip(d, designs, rev["rev"], extra), "application/zip", f"{code}_tool_design{tag}.zip"
     k, des = designs[0]
     stem = f"{code}_T{k:02d}_{tool_drawings._safe(des['key'])}"
+    if kind == "html":
+        return (outputs3d.viewer_html(outputs3d.viewer_data(d, des, rev["rev"], prod.get(des["key"]))).encode("utf-8"),
+                "text/html; charset=utf-8", f"{stem}_3D_viewer.html")
+    if kind == "stl":
+        from . import outputs3d
+        return outputs3d.assembly_stl(des), "model/stl", f"{stem}_assembly.stl"
     if kind == "step":
         return tool_design.step_bytes(tool_design.assembly(des, stem)), "application/step", f"{stem}_assembly.step"
     if kind == "pdf":

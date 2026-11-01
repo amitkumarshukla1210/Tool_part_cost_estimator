@@ -543,6 +543,14 @@ def release_files(part: dict, design: dict, stage: int, rev: str = "") -> dict:
         if c.kind == "made" and c.drawing != "none":
             files[f"2D/DXF/{stem}_{c.no}_{_safe(c.name)}.dxf"] = detail_dxf(part, design, stage, c, rev)
     files[f"{stem}_BOM.xlsx"] = bom_xlsx(part, design, stage)
+    from . import outputs3d                      # stage 45: STL of the assembly and every part, a picture of every made part
+    files[f"3D/STL/{stem}_assembly.stl"] = outputs3d.assembly_stl(design)
+    for c in design["components"]:
+        if c.kind == "ref":
+            continue
+        files[f"3D/STL/parts/{c.no}_{_safe(c.name)}.stl"] = outputs3d.part_stl(c)
+        if c.kind == "made":
+            files[f"pictures/{c.no}_{_safe(c.name)}.png"] = outputs3d.part_png(c)
     return files
 
 
@@ -551,7 +559,9 @@ def release_zip(part: dict, designs: list[tuple[int, dict]], rev: str = "", extr
     buf = io.BytesIO()
     readme = [f"{drawing_style.settings()['company']} - tool design release for {part['part_code']} {part['name']}",
               f"Made {date.today().isoformat()}", "",
-              "Per tool: 3D/ assembly STEP and one STEP per part; 2D/PDF the drawing set (assembly + every made part);",
+              "Per tool: 3D/ assembly STEP and one STEP per part, 3D/STL the same as STL; pictures/ an iso picture of every made part;",
+              "*_3D_viewer.html: the tool in 3D in any browser (offline): rotate, explode, click a part for its data and cost;",
+              "2D/PDF the drawing set (assembly + every made part);",
               "2D/DXF the assembly and every made part at 1:1 with title block and logo; BOM (Excel).", "",
               "First-cut design made by the rules in Master data (Mould & die database -> Design rules): the tool designer",
               "checks and completes it before release for manufacture.", ""]

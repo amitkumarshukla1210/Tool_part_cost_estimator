@@ -1058,10 +1058,10 @@ def parts_tool_design(part_id: int):
 def parts_tool_design_file(part_id: int, kind: str, die: Optional[str] = None):
     """zip = release pack (3D STEP of the assembly and every part, PDF and DXF drawings, BOM) of all tools or one (?die=key);
     step = assembly of one tool; pdf = its drawing set; png = its iso picture."""
-    if kind not in ("zip", "step", "pdf", "png"):
-        raise HTTPException(404, "zip, step, pdf or png")
+    if kind not in ("zip", "step", "pdf", "png", "stl", "html"):
+        raise HTTPException(404, "zip, step, pdf, png, stl or html")
     data, media, name = _design_error(lambda: register.tool_design_file(part_id, kind, die))
-    disp = "inline" if kind == "png" else "attachment"
+    disp = "inline" if kind in ("png", "html") else "attachment"
     return Response(data, media_type=media, headers={"Content-Disposition": f'{disp}; filename="{name}"'})
 
 
@@ -1154,6 +1154,16 @@ def design_skills_status(data: dict):
                                         str(data.get("value") or ""), bool(data.get("active")))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/tool-design/parts/{item}.{kind}")
+def parts_tool_part_file(part_id: int, item: str, kind: str, die: Optional[str] = None):
+    """One tool part (stage 45): step, stl or png (iso picture)."""
+    if kind not in ("step", "stl", "png"):
+        raise HTTPException(404, "step, stl or png")
+    data, media, name = _design_error(lambda: register.tool_part_file(part_id, item, kind, die))
+    disp = "inline" if kind == "png" else "attachment"
+    return Response(data, media_type=media, headers={"Content-Disposition": f'{disp}; filename="{name}"'})
 
 
 # ---------- process parameters for the best part quality (roadmap stage 34) ----------
