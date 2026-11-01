@@ -74,3 +74,19 @@ def test_design_cannot_be_frozen_while_a_blocking_point_is_open():
     ok = client.put(f"/api/parts/{pid}", json={"status": final, "status_comment": "go"})
     assert ok.status_code == 200 or "can only move to" in ok.json()["detail"]        # review no longer stops it; the flow rules may still decide
     assert "toolmaker review" not in (ok.json().get("detail", "") if ok.status_code != 200 else "")
+
+
+def test_internals_are_counted_and_checked_in_the_review():
+    """Stage 45: ejector pins and cooling lines wanted vs placed, screws and dowels, as review facts."""
+    pid = cover("TR5")
+    t = client.get(f"/api/parts/{pid}/tool-design").json()["tools"][0]
+    i = t["internals"]
+    assert i["pins_wanted"] >= 2 and 0 < i["pins_placed"] <= i["pins_wanted"] and i["cool_wanted"] == 4 and i["cool_placed"] <= 4
+    assert i["screws"] >= 4
+    r = client.get(f"/api/parts/{pid}/tool-review").json()["tools"][0]
+    assert r["facts"]["pins_placed"] == i["pins_placed"] and r["facts"]["screws"] == i["screws"]
+    x = rows({"tools": [r]})
+    assert x["All wanted ejector pins are placed"]["status"] == ("ok" if i["pins_placed"] >= i["pins_wanted"] else "issue")
+    assert x["Plates are held by socket head screws"]["status"] == "ok"
+    sheet = client.get(f"/api/parts/{bracket('TR6')}/tool-design").json()["tools"]
+    assert all(s["internals"]["screws"] > 0 and s["internals"]["pins_wanted"] == 0 for s in sheet)

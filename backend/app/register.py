@@ -3307,12 +3307,17 @@ def tool_designs(part_id: int, key: str | None = None) -> tuple[dict, dict, list
     return d, rev, drawing_data.attach(part_id, [(1, des)])
 
 
+def _internals(des: dict) -> dict:
+    from . import tool_review
+    return tool_review.internals(des)
+
+
 def tool_design_summary(part_id: int) -> dict:
     """What the part panel lists: each tool with its parts (no geometry)."""
     d, rev, designs = tool_designs(part_id)
     return {"part_id": part_id, "rev": rev["rev"], "tools": [
         {"stage": k, "key": des["key"], "name": des["name"], "notes": des["notes"], "shut_height": des["shut_height"],
-         "die_set": des["die_set"], "rules_are_examples": des["rules_are_examples"],
+         "die_set": des["die_set"], "rules_are_examples": des["rules_are_examples"], "internals": _internals(des),
          "components": [{"no": c.no, "name": c.name, "qty": c.qty, "kind": c.kind, "material": c.material, "hardness": c.hardness,
                          "std": c.std or c.make, "size": [round(v, 1) for v in c.size]} for c in des["components"] if c.kind != "ref"]}
         for k, des in designs]}

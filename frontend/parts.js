@@ -1508,6 +1508,9 @@ async function toolDesignLoad() {
         <img src="/api/parts/${part.id}/tool-design.png${q}" alt="${esc(t.name)} in 3D" style="display:block;max-width:560px;width:100%;margin:6px 0;border:1px solid #e3e6ea" />
         <p class="note">${esc(t.die_set)} · shut / mould height ${fmt(t.shut_height, 1)} mm${t.rules_are_examples ? " · <b>uses EXAMPLE design rules</b>" : ""}</p>
         <p class="note">${t.notes.map(esc).join("<br/>")}</p>
+        ${t.internals ? `<p class="note"><b>Internals:</b> ejector pins ${t.internals.pins_placed} placed of ${t.internals.pins_wanted} wanted ·
+          cooling lines ${t.internals.cool_placed} of ${t.internals.cool_wanted} · screws ${t.internals.screws} · dowels ${t.internals.dowels}
+          ${t.internals.pins_placed < t.internals.pins_wanted || t.internals.cool_placed < t.internals.cool_wanted ? ' <span class="badge missing">check in the review</span>' : ""}</p>` : ""}
         <p class="downloads"><a class="link" href="/api/parts/${part.id}/tool-design.step${q}">⬇ Assembly 3D (STEP)</a> ·
           <a class="link" href="/api/parts/${part.id}/tool-design.pdf${q}">⬇ Drawing set (PDF)</a> ·
           <a class="btn btn-primary small" href="/api/parts/${part.id}/tool-design.zip${q}">⬇ Release pack (3D + PDF + DXF + BOM)</a></p>

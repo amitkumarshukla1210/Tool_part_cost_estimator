@@ -24,7 +24,11 @@ GOOD = ("ok", "na", "waived")
 FACTS = {"made_parts": "Made parts in the tool", "std_parts": "Bought-out standard parts", "no_material": "Made parts without a material",
          "no_hardness": "Made parts without a hardness", "rules_example": "1 when the design rules used are still EXAMPLE",
          "machine_typed": "1 when a production machine was typed", "machine_bad": "Points of the typed machine this tool does not fit",
-         "sim_runs": "Saved flow simulations of the part", "shut_height": "Shut height of the tool (mm)"}
+         "sim_runs": "Saved flow simulations of the part", "shut_height": "Shut height of the tool (mm)",
+         # stage 45: tool internals
+         "pins_wanted": "Ejector pins the rules want (pitch grid under the part, per cavity)", "pins_placed": "Ejector pins placed under the part",
+         "cool_wanted": "Cooling lines tried in the inserts", "cool_placed": "Cooling lines placed clear of the part",
+         "screws": "Socket head screws in the tool", "dowels": "Dowels / gauge pins in the tool"}
 MOULD = ("plastic", "die_casting", "foundry", "eps", "blow")
 AUTO = (
     ("Every made part has a material", "no_material == 0", "Some made parts have no material: set it in the tool BOM.", 1),
@@ -32,6 +36,14 @@ AUTO = (
     ("The typed production machine takes this tool", "machine_bad == 0", "The tool does not fit the typed machine: see the Machine block.", 1),
     ("Design rules used are not EXAMPLE values", "rules_example == 0", "The design rules (Mould & die database) are still EXAMPLE values.", 0),
 )
+INTERNALS = (       # stage 45: added as new rows; existing rows are never changed
+    ("plastic", "All wanted ejector pins are placed", "pins_placed >= pins_wanted", "Fewer ejector pins fit under the part than the pitch rule wants: place the rest by hand or use blade ejectors.", 0),
+    ("die_casting", "All wanted ejector pins are placed", "pins_placed >= pins_wanted", "Fewer ejector pins fit under the part than the pitch rule wants: place the rest by hand.", 0),
+) + tuple((pt, "All cooling lines are placed clear of the part", "cool_placed >= cool_wanted",
+           "Some cooling lines hit the part and were left out: baffles, bubblers or a different layout are needed.", 0)
+          for pt in ("plastic", "die_casting", "blow")) + tuple(
+    (pt, "Plates are held by socket head screws", "screws >= 4", "Fewer than 4 screws in the tool: check how the plates are held.", 0)
+    for pt in ("plastic", "die_casting", "foundry", "eps", "blow", "sheet_metal"))
 SIM = ("A flow simulation of the part is saved", "sim_runs >= 1", "No flow simulation is saved for this part: run one on the part page.", 0)
 MANUAL = {
     "mould": ("Toolmaker: steel grades and hardness suit the part material and the run",
@@ -52,6 +64,9 @@ def seed_rows() -> list[dict]:
         for step, (item, chk, msg, blocking) in enumerate(items, start=1):
             rows.append({"part_type": pt, "step": step, "item": item, "rule": chk, "message": msg, "blocking": bool(blocking),
                          "is_example": True, "notes": EXAMPLE})
+    for i, (pt, item, chk, msg, blocking) in enumerate(INTERNALS, start=1):
+        rows.append({"part_type": pt, "step": 100 + i, "item": item, "rule": chk, "message": msg, "blocking": bool(blocking),
+                     "is_example": True, "notes": EXAMPLE})
     return rows
 
 
@@ -84,6 +99,15 @@ def rows_for(part_type: str) -> list[dict]:
 
 # ---------- facts of a design ----------
 
+def internals(des: dict) -> dict:
+    """Stage 45: pins and cooling lines wanted vs placed (from the design), screws and dowels counted in the tool BOM."""
+    i = dict(des.get("internals") or {})
+    std = [c for c in des["components"] if c.kind == "std"]
+    i["screws"] = sum(c.qty for c in std if "screw" in c.name.lower())
+    i["dowels"] = sum(c.qty for c in std if "dowel" in (c.name + " " + (c.std or "")).lower())
+    return {k: i.get(k, 0) for k in ("pins_wanted", "pins_placed", "cool_wanted", "cool_placed", "screws", "dowels")}
+
+
 def facts(part_id: int, des: dict, machine: dict | None) -> dict:
     made = [c for c in des["components"] if c.kind == "made"]
     empty = ("", "-", None)
@@ -94,7 +118,7 @@ def facts(part_id: int, des: dict, machine: dict | None) -> dict:
             "no_material": float(sum(1 for c in made if c.material in empty)), "no_hardness": float(sum(1 for c in made if c.hardness in empty)),
             "rules_example": 1.0 if des.get("rules_are_examples") else 0.0,
             "machine_typed": 1.0 if (machine or {}).get("spec") else 0.0, "machine_bad": float(len(bad)),
-            "sim_runs": float(sims), "shut_height": float(des.get("shut_height") or 0)}
+            "sim_runs": float(sims), "shut_height": float(des.get("shut_height") or 0)} | {k: float(v) for k, v in internals(des).items()}
 
 
 # ---------- sign-offs (append only) ----------
