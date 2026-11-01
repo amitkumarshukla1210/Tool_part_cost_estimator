@@ -1375,6 +1375,41 @@ is remembered with the tool part's name (e.g. *Cavity insert*), the part type, w
   (revision history: *Design skill values kept at release*).
 - API: `GET /api/design-skills?part_type=…`, `POST /api/design-skills/status` with `part_type`, `component`, `field`, `value`, `active`.
 
+## Tool internals, production data, strength check (FEA) and 3D outputs (stage 45)
+
+All four are on the part panel under **Tool design**, after *Make the tool design*. Every number comes from the tool design, the tool cost
+or Master data → Mould & die database → Design rules (new rows, EXAMPLE until you replace them).
+
+**1. Tool internals.** Each mould shows *Internals*: ejector pins placed under the part vs the pins the pitch rule wants, cooling lines placed
+clear of the part vs the lines tried, screws and dowels. The toolmaker review checks them (new rows *All wanted ejector pins are placed*,
+*All cooling lines are placed clear of the part*, *Plates are held by socket head screws*).
+
+**2. Production data for suppliers** (steel purchase and toolmaker quotes), per made tool part:
+- **Stock size** = finished size + 2 × `stock_allowance_mm`, rounded up to `stock_round_mm`; **steel kg** = stock volume × the density in Tool materials.
+- **Operations** from the part's own features: saw and square, drill / ream / tap / counterbore by hole kind, deep-hole drill the cooling lines,
+  pockets and openings, CNC / EDM of moulding faces, heat treatment and grinding when hardened, surface treatment from the drawing data.
+- **Cost (INR) = a split of the tool cost**, so the parts never disagree with it: a steel line (e.g. *Cavity insert (steel)*) goes to that part, the mould
+  base / die set to the plates, the process groups in `production_cost_groups` (cutting, machining, polishing, treatment) over all made parts,
+  by stock weight. Standard parts and tool-level costs (design, fitting, try-out, overhead, profit, packing, transport, warranty) are listed;
+  **parts + standard parts + tool level = the tool cost**. Download: *Production data (Excel)*.
+
+**3. Strength check (FEA)** with the free programs **Gmsh** (mesh) and **CalculiX** (solver), real FEA only:
+- Parts: those whose name starts with a name in `fea_parts` (moulds: cavity insert, core insert, B plate; dies: die plate, bottom shoe).
+- Load: the clamp / press force of the tool cost (÷ cavities) as cavity pressure on the moulding / forming faces seen from that side inside the
+  part outline, clamp direction; total = that force. A blanking die plate is loaded on the ring around its opening.
+- Support: inserts and the die plate held on their flat back face; the B plate and the bottom shoe on two strips (spacer block width, else
+  `fea_support_strip_mm`). The B plate is checked alone (the support plate under it is left out): on the safe side.
+- Result: largest deflection and von Mises stress (element average) against `fea_max_deflection_mm` and `fea_allow_stress_mpa`, with a picture;
+  steel `fea_e_mpa`, `fea_poisson`, element size `fea_mesh_mm`. Runs in the background with progress; every run is kept; the toolmaker review
+  reads the latest run of the revision. A peak at a thin feature (a core pin of a boss) is real: the picture shows where.
+- **Install** (once): on Windows run **`DTC_Install_FEA.bat`** (puts Gmsh in the app's Python), then copy **`ccx.exe`** of the Windows CalculiX build
+  (from the official CalculiX site, with its .dll files) into `DTC_Data\tools\calculix`, and restart. Without the programs the check says
+  *Not available* and how to install them; nothing is estimated instead. Linux: `pip install gmsh` and the `calculix-ccx` package.
+
+**4. 3D outputs.** *Open 3D viewer* (per tool): rotate, zoom, explode, show the workpiece, click a part for its item, material, hardness, size,
+stock, steel kg and its INR share. The same viewer is a single HTML file in the release ZIP (opens offline). Also: assembly STL, and STEP, STL and
+a picture of every tool part (production-data table); the release ZIP holds `3D/STL/`, `pictures/` and the viewer.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:

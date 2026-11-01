@@ -1508,7 +1508,12 @@ async function toolDesignLoad() {
         <img src="/api/parts/${part.id}/tool-design.png${q}" alt="${esc(t.name)} in 3D" style="display:block;max-width:560px;width:100%;margin:6px 0;border:1px solid #e3e6ea" />
         <p class="note">${esc(t.die_set)} · shut / mould height ${fmt(t.shut_height, 1)} mm${t.rules_are_examples ? " · <b>uses EXAMPLE design rules</b>" : ""}</p>
         <p class="note">${t.notes.map(esc).join("<br/>")}</p>
-        <p class="downloads"><a class="link" href="/api/parts/${part.id}/tool-design.step${q}">⬇ Assembly 3D (STEP)</a> ·
+        ${t.internals ? `<p class="note"><b>Internals:</b> ejector pins ${t.internals.pins_placed} placed of ${t.internals.pins_wanted} wanted ·
+          cooling lines ${t.internals.cool_placed} of ${t.internals.cool_wanted} · screws ${t.internals.screws} · dowels ${t.internals.dowels}
+          ${t.internals.pins_placed < t.internals.pins_wanted || t.internals.cool_placed < t.internals.cool_wanted ? ' <span class="badge missing">check in the review</span>' : ""}</p>` : ""}
+        <p class="downloads"><a class="btn btn-outline small" href="/api/parts/${part.id}/tool-design.html${q}" target="_blank">🧊 Open 3D viewer</a> ·
+          <a class="link" href="/api/parts/${part.id}/tool-design.stl${q}">⬇ Assembly STL</a> ·
+          <a class="link" href="/api/parts/${part.id}/tool-design.step${q}">⬇ Assembly 3D (STEP)</a> ·
           <a class="link" href="/api/parts/${part.id}/tool-design.pdf${q}">⬇ Drawing set (PDF)</a> ·
           <a class="btn btn-primary small" href="/api/parts/${part.id}/tool-design.zip${q}">⬇ Release pack (3D + PDF + DXF + BOM)</a></p>
         <div class="table-wrap"><table class="cost-table"><thead><tr><th>Item</th><th>Qty</th><th>Part</th><th>Material</th>
@@ -1517,13 +1522,70 @@ async function toolDesignLoad() {
             <td>${esc(c.hardness || "—")}</td><td>${esc(c.std || "—")}</td><td>${c.size.map((v) => fmt(v, 1)).join(" × ")}</td></tr>`).join("")}
           </tbody></table></div></div>`;
     }).join("") + (r.tools.length > 1 ? `<p><a class="btn btn-primary" href="/api/parts/${part.id}/tool-design.zip">⬇ Release pack of all ${r.tools.length} tools</a></p>` : "")
-      + `<div id="ddBox" class="card"></div><div id="rvBox" class="card"></div>`;
+      + `<div id="pdBox" class="card"></div><div id="feBox" class="card"></div><div id="ddBox" class="card"></div><div id="rvBox" class="card"></div>`;
+    productionDataLoad();
+    feaLoad();
     drawingDataLoad();
     toolReviewLoad();
     machineCheck();
   } catch (err) {
     status($("tdStatus"), err.message, "error");
   }
+}
+
+// supplier production data: stock, weight, operations and cost share per tool part (stage 45)
+async function productionDataLoad() {
+  const box = $("pdBox");
+  if (!box) return;
+  let r;
+  try { r = await api(`/api/parts/${part.id}/production-data`); } catch (err) { box.innerHTML = `<p class="status error">${esc(err.message)}</p>`; return; }
+  const inr = (v) => `₹ ${fmt(v, 0)}`;
+  box.innerHTML = `<h4>Production data for suppliers (steel purchase and toolmaker quotes)</h4>
+    ${r.tool_cost_example || r.tools.some((t) => t.is_example) ? '<p><span class="badge example">EXAMPLE</span> <span class="note">tool cost rates or stock rules are still EXAMPLE values</span></p>' : ""}
+    <p class="note">Stock = finished size + 2 × allowance, rounded up (Mould &amp; die database → Design rules: <code>stock_allowance_mm</code>, <code>stock_round_mm</code>).
+      Cost = the tool cost split: steel lines to their parts, the mould base / die set to the plates, the groups in <code>production_cost_groups</code> over all made parts,
+      both by stock weight. Parts + standard parts + tool level = the tool cost.</p>
+    <p class="downloads"><a class="btn btn-primary small" href="/api/parts/${part.id}/production-data.xlsx">⬇ Production data (Excel)</a></p>
+    ${r.tools.map((t) => `<p><b>Tool ${t.stage}: ${esc(t.name)}</b> · steel ${fmt(t.steel_kg, 1)} kg${t.no_density.length ? ` · <span class="badge missing">no density for ${esc(t.no_density.join(", "))}</span>` : ""}</p>
+      <div class="table-wrap" style="max-height:none"><table class="cost-table"><thead><tr><th>Item</th><th>Part</th><th>Qty</th><th>Material · hardness</th>
+        <th>Finished (mm)</th><th>Stock (mm)</th><th>kg</th><th>Operations</th><th>Steel</th><th>Machining</th><th>Total</th><th>3D</th></tr></thead><tbody>
+        ${t.parts.map((p) => `<tr><td>${esc(p.item)}</td><td>${esc(p.name)}</td><td class="num">${p.qty}</td><td>${esc(p.material)} · ${esc(p.hardness)}</td>
+          <td>${p.finished_mm.map((v) => fmt(v, 1)).join(" × ")}</td><td>${p.stock_mm.map((v) => fmt(v, 0)).join(" × ")}</td><td class="num">${p.kg_total == null ? "—" : fmt(p.kg_total, 2)}</td>
+          <td><details><summary>${p.operations.length} operations</summary><ol>${p.operations.map((o) => `<li>${esc(o)}</li>`).join("")}</ol></details></td>
+          <td class="num">${inr(p.steel_inr)}</td><td class="num">${inr(p.process_inr)}</td><td class="num"><b>${inr(p.total_inr)}</b></td>
+          <td>${["step", "stl", "png"].map((k) => `<a class="link" href="/api/parts/${part.id}/tool-design/parts/${encodeURIComponent(p.item)}.${k}?die=${encodeURIComponent(t.key)}"${k === "png" ? ' target="_blank"' : ""}>${k === "png" ? "picture" : k.toUpperCase()}</a>`).join(" · ")}</td></tr>`).join("")}
+        <tr class="subtotal"><td></td><td colspan="9">Made parts</td><td class="num">${inr(t.sums.parts_inr)}</td><td></td></tr>
+        ${t.standard.map((x) => `<tr><td></td><td colspan="9">Standard / bought-out: ${esc(x.element)}</td><td class="num">${inr(x.inr)}</td><td></td></tr>`).join("")}
+        ${t.tool_level.map((x) => `<tr><td></td><td colspan="9">Tool level: ${esc(x.element)}</td><td class="num">${inr(x.inr)}</td><td></td></tr>`).join("")}
+        <tr class="subtotal"><td></td><td colspan="9">Tool cost</td><td class="num"><b>${inr(t.sums.tool_cost_inr)}</b></td><td></td></tr>
+      </tbody></table></div>`).join("")}`;
+}
+
+// structural check (FEA) of the load-carrying tool parts with Gmsh + CalculiX (stage 45)
+async function feaLoad() {
+  const box = $("feBox");
+  if (!box) return;
+  let r;
+  try { r = await api(`/api/parts/${part.id}/fea`); } catch (err) { box.innerHTML = `<h4>Strength check (FEA)</h4><p class="status error">${esc(err.message)}</p>`; return; }
+  const pr = r.programs;
+  box.innerHTML = `<h4>Strength check (FEA) of the load-carrying parts</h4>
+    <p class="note">Real FEA: Gmsh meshes each part, CalculiX solves it. Load = clamp / press force of the tool cost on the part's outline; limits, steel data,
+      mesh size and the parts checked are in Mould &amp; die database → Design rules (<code>fea_*</code>)${r.tools.some((t) => t.is_example) ? ' <span class="badge example">EXAMPLE</span>' : ""}.</p>
+    ${pr.available ? `<p><button type="button" class="btn btn-primary small" id="feRun">Run strength check (rev ${esc(r.rev)})</button></p><div id="feJob"></div>`
+      : `<p><span class="badge missing">Not available</span> <span class="note">${esc(pr.message)}</span></p>`}
+    ${r.tools.map((t) => `<p><b>${esc(t.name)}</b> · limits: deflection ≤ ${fmt(t.rules.fea_max_deflection_mm, 3)} mm, von Mises ≤ ${fmt(t.rules.fea_allow_stress_mpa, 0)} MPa</p>
+      <div class="table-wrap" style="max-height:none"><table class="cost-table"><thead><tr><th>Item</th><th>Part</th><th>Load</th><th>Support</th><th>Deflection (mm)</th><th>Von Mises (MPa)</th><th>Result</th><th>Picture</th></tr></thead><tbody>
+      ${t.parts.map((p) => { const x = p.run; return `<tr><td>${esc(p.item)}</td><td>${esc(p.name)}</td>
+        ${x ? `<td>${fmt(x.force_n / 1000, 1)} kN<br/><span class="note">${esc(x.load_source || "")}</span></td><td>${esc(x.support)}</td>
+          <td class="num">${fmt(x.max_deflection_mm, 4)}</td><td class="num">${fmt(x.max_von_mises_mpa, 1)}</td>
+          <td>${x.ok ? '<span class="badge status">OK</span>' : '<span class="badge missing">OVER LIMIT</span>'}<br/><span class="note">${esc(x.by)} · ${esc((x.at || "").replace("T", " "))}</span></td>
+          <td><a class="link" href="/api/parts/${part.id}/fea/${x.id}.png" target="_blank">picture</a></td>`
+          : `<td colspan="6"><span class="note">not checked on this revision</span></td>`}</tr>`; }).join("")}
+      </tbody></table></div>`).join("")}`;
+  $("feRun")?.addEventListener("click", () => {
+    $("feRun").disabled = true;
+    runJob(`/api/parts/${part.id}/fea`, $("feJob"), () => { feaLoad(); toolReviewLoad(); });
+  });
 }
 
 // toolmaker review of the tool design: automatic checks and sign-offs, blocks freezing the design (stage 43)
@@ -1788,7 +1850,7 @@ async function runJob(url, box, onDone, body) {
   }
 }
 
-const kindName = { flow: "Flow simulation", analysis_video: "Analysis video", external: "Attached report" };
+const kindName = { flow: "Flow simulation", analysis_video: "Analysis video", external: "Attached report", fea: "Strength check (FEA)" };
 async function loadRuns() {
   const el = $("simRuns");
   if (!el || !part) return;

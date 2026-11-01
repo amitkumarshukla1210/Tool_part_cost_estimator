@@ -144,10 +144,11 @@ def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -
     # cooling channels in the inserts, kept clear of the part
     cd = rules("cooling_d_mm")
     depth = rules("cooling_depth_factor") * cd
-    chans = []
+    chans, tried = [], 0
     for z, half in ((bb.zmax + depth, "cavity"), (pl - depth if pl - depth > pl - hb + cd else pl - hb / 2, "core")):
         for y in (-iw / 4, iw / 4):
             cyl = cq.Solid.makeCylinder(cd / 2, il + 2, cq.Vector(-il / 2 - 1, y, z), cq.Vector(1, 0, 0))
+            tried += 1
             if cyl.intersect(s).Volume() > 1e-6:
                 continue
             chans.append((half, y, z, cyl))
@@ -348,7 +349,11 @@ def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -
     # the moulded part (reference)
     comps.append(Comp("Moulded part (reference)", s, [(x, y, 0.0) for x, y in cells], kind="ref", size=(bb.xlen, bb.ylen, bb.zlen),
                       color="ref", drawing="none"))
-    return _finish(comps, notes, chans, cd, depth, ctx["stack"], cells, H, b, L, W, rules, part_type)
+    des = _finish(comps, notes, chans, cd, depth, ctx["stack"], cells, H, b, L, W, rules, part_type)
+    # stage 45: what the rules wanted and what fitted (per cavity): ejector pin grid points vs pins under the part,
+    # cooling lines tried (2 per insert half) vs lines placed clear of the part
+    des["internals"] = {"pins_wanted": (nx * ny) if ejection else 0, "pins_placed": len(pins), "cool_wanted": tried, "cool_placed": len(chans)}
+    return des
 
 
 def _sprue_parts(comps, lines, sprue_d, ring_d, ta, tc, ha, z_tc):

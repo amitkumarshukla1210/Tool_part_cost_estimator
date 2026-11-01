@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
-from sqlalchemy import (JSON, Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, MetaData, String, Table,
+from sqlalchemy import (JSON, Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, MetaData, String, Table,
                         Text, UniqueConstraint, create_engine, event)
 from sqlalchemy.engine import Engine
 
@@ -408,6 +408,22 @@ design_skill_status = Table(
     Column("active", Boolean, nullable=False),
     Column("by", String(100), default=""),
     Column("at", DateTime, default=now),
+)
+
+# Structural check (FEA) of the load-carrying tool parts (roadmap stage 45): append only, the latest run of a revision counts.
+tool_fea_runs = Table(
+    "tool_fea_runs", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),
+    Column("rev", String(20), nullable=False),
+    Column("tool_key", String(80), nullable=False),
+    Column("item", String(20), nullable=False),
+    Column("name", String(200), default=""),
+    Column("result", JSON),
+    Column("png", LargeBinary),
+    Column("by", String(100), default=""),
+    Column("at", DateTime, default=now),
+    Index("ix_tool_fea_runs_part", "part_id"),
 )
 
 # Simulation runs saved with their reports (roadmap stage 39): flow simulation, analysis video, attached reports of other programs.

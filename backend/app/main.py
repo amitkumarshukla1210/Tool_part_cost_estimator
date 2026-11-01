@@ -1058,10 +1058,10 @@ def parts_tool_design(part_id: int):
 def parts_tool_design_file(part_id: int, kind: str, die: Optional[str] = None):
     """zip = release pack (3D STEP of the assembly and every part, PDF and DXF drawings, BOM) of all tools or one (?die=key);
     step = assembly of one tool; pdf = its drawing set; png = its iso picture."""
-    if kind not in ("zip", "step", "pdf", "png"):
-        raise HTTPException(404, "zip, step, pdf or png")
+    if kind not in ("zip", "step", "pdf", "png", "stl", "html"):
+        raise HTTPException(404, "zip, step, pdf, png, stl or html")
     data, media, name = _design_error(lambda: register.tool_design_file(part_id, kind, die))
-    disp = "inline" if kind == "png" else "attachment"
+    disp = "inline" if kind in ("png", "html") else "attachment"
     return Response(data, media_type=media, headers={"Content-Disposition": f'{disp}; filename="{name}"'})
 
 
@@ -1082,6 +1082,60 @@ def parts_tool_review_sign(part_id: int, data: dict):
                                                   str(data.get("status") or ""), data.get("comment") or ""))
 
 
+# ---------- supplier production data of the tool parts (roadmap stage 45) ----------
+
+@app.get("/api/parts/{part_id}/production-data")
+def parts_production_data(part_id: int):
+    """Per made tool part: stock size, steel weight, operations and its share of the tool cost (INR); standard parts; tool level."""
+    from . import production_data
+    return _design_error(lambda: production_data.part(part_id))
+
+
+@app.get("/api/parts/{part_id}/production-data.xlsx")
+def parts_production_data_xlsx(part_id: int):
+    from . import production_data
+    data, name = _design_error(lambda: production_data.xlsx(part_id))
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+# ---------- structural check (FEA) of the load-carrying tool parts (roadmap stage 45) ----------
+
+def _fea(fn):
+    from . import fea
+    try:
+        return fn(fea)
+    except fea.FeaError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/fea")
+def parts_fea(part_id: int):
+    """Programs found (Gmsh, CalculiX), the parts to check per tool, their latest FEA on the current revision."""
+    return _design_error(lambda: _fea(lambda m: m.summary(part_id)))
+
+
+@app.post("/api/parts/{part_id}/fea")
+def parts_fea_run(part_id: int):
+    """Start the FEA of every load-carrying part (Gmsh + CalculiX) as a background job with progress (GET .../sim-jobs/{id});
+    each part's run is stored with its picture."""
+    from . import fea, sim_jobs
+    register.part_detail(part_id, with_rm=False)
+    av = fea.available()
+    if not av["available"]:
+        raise HTTPException(400, av["message"])
+
+    def work(progress):
+        runs = fea.run(part_id, progress)["runs"]
+        return runs[-1]["id"] if runs else None
+    return sim_jobs.start(part_id, "fea", work, register.user())
+
+
+@app.get("/api/parts/{part_id}/fea/{run_id}.png")
+def parts_fea_png(part_id: int, run_id: int):
+    return Response(_fea(lambda m: m.picture(part_id, run_id)), media_type="image/png")
+
+
 # ---------- design skills: learned from drawing-data corrections (roadmap stage 44) ----------
 
 @app.get("/api/design-skills")
@@ -1100,6 +1154,16 @@ def design_skills_status(data: dict):
                                         str(data.get("value") or ""), bool(data.get("active")))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/tool-design/parts/{item}.{kind}")
+def parts_tool_part_file(part_id: int, item: str, kind: str, die: Optional[str] = None):
+    """One tool part (stage 45): step, stl or png (iso picture)."""
+    if kind not in ("step", "stl", "png"):
+        raise HTTPException(404, "step, stl or png")
+    data, media, name = _design_error(lambda: register.tool_part_file(part_id, item, kind, die))
+    disp = "inline" if kind == "png" else "attachment"
+    return Response(data, media_type=media, headers={"Content-Disposition": f'{disp}; filename="{name}"'})
 
 
 # ---------- process parameters for the best part quality (roadmap stage 34) ----------
