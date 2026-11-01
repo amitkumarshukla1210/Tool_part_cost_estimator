@@ -108,8 +108,12 @@ def defaults(comp, part_type: str) -> dict:
             "finish_ra": _ra(rules.get("finish_general", "Ra 3.2")), "tolerance_unit": "mm"}
 
 
-def effective(comp, part_type: str, over: dict | None) -> dict:
-    f = defaults(comp, part_type) | {k: v for k, v in ((over or {}).get("fields") or {}).items() if k in FIELDS and v not in (None, "")}
+def effective(comp, part_type: str, over: dict | None, skill: dict | None = None) -> dict:
+    """Defaults, then the applied design skills (stage 44), then what was typed for this part (always wins)."""
+    typed = {k: v for k, v in ((over or {}).get("fields") or {}).items() if k in FIELDS and v not in (None, "")}
+    learned = {k: v for k, v in (skill or {}).items() if k in FIELDS and k not in typed}
+    f = defaults(comp, part_type) | learned | typed
+    f["from_skill"] = sorted(learned)
     f["tolerance_class"] = tolerance_class("", f["tolerance_class"])
     f["finish_ra"] = float(f["finish_ra"])
     f["material"], f["hardness"] = comp.material or "-", comp.hardness or "-"
@@ -177,11 +181,14 @@ def _summary(old: dict, fields: dict, notes: list) -> str:
     return "Technical data changed: " + "; ".join(bits)
 
 
-def save(conn, part_id: int, tool_key: str, item_no: str, fields: dict | None, notes) -> dict | None:
+def save(conn, part_id: int, tool_key: str, item_no: str, fields: dict | None, notes, learn_as: tuple | None = None) -> dict | None:
     fields, notes = clean(fields, notes)
     cur = stored(conn, part_id).get((tool_key, item_no), {"fields": {}, "notes": []})
     if (cur["fields"], cur["notes"]) == (fields, notes):
         return None
+    if learn_as:                                    # stage 44: the correction teaches the design skills
+        from . import design_skills
+        design_skills.learn(conn, part_id, learn_as[0], learn_as[1], cur["fields"], fields)
     summary = _summary(cur, fields, notes)
     who = auth.username() or "local user"
     t = db.tool_drawing_data
@@ -198,15 +205,20 @@ def save(conn, part_id: int, tool_key: str, item_no: str, fields: dict | None, n
 
 def attach(part_id: int, designs: list) -> list:
     """Give every made part of the designs its technical data (comp.tech) and its note points (on the drawing)."""
+    from . import design_skills
     with db.engine().connect() as conn:
         over = stored(conn, part_id)
+    released = release(part_id)["released"]         # a released drawing keeps what it showed (skills were written in at release)
+    tables = {}
     for _, des in designs:
         pt = des.get("part_type", "")
+        if pt not in tables:
+            tables[pt] = {} if released else design_skills.applied(pt)
         for c in des["components"]:
             if c.kind != "made":
                 continue
             o = over.get((des["key"], c.no))
-            c.tech = effective(c, pt, o)
+            c.tech = effective(c, pt, o, design_skills.for_component(tables[pt], c.name))
             c.dims = c.tech["dims"]
             if o and o.get("notes"):
                 c.notes = list(c.notes) + [n for n in o["notes"] if n not in c.notes]
@@ -386,11 +398,14 @@ def part_data(part_id: int) -> dict:
             o = over.get((des["key"], c.no)) or {}
             eff = getattr(c, "tech", None) or effective(c, des.get("part_type", ""), o)
             from . import dim_tolerances
-            items.append({"item": c.no, "name": c.name, "qty": c.qty, "defaults": defaults(c, des.get("part_type", "")),
+            base = defaults(c, des.get("part_type", ""))
+            start = base | {k2: eff[k2] for k2 in eff.get("from_skill", [])}      # what the form starts from: default or skill
+            items.append({"item": c.no, "name": c.name, "qty": c.qty, "defaults": start, "base_defaults": base,
+                          "from_skill": eff.get("from_skill", []),
                           "effective": {k2: eff[k2] for k2 in (*FIELDS, "material", "hardness", "notes", "dim_overrides")}, "changed": eff["changed"],
                           "dimensions": dim_tolerances.rows(eff["dims"], c),
                           "edited_by": o.get("edited_by"), "edited_at": o.get("edited_at")})
-        tools.append({"stage": k, "key": des["key"], "name": des["name"], "items": items})
+        tools.append({"stage": k, "key": des["key"], "name": des["name"], "part_type": des.get("part_type", ""), "items": items})
     return {"part_id": part_id, "part_code": d["part_code"], "rev": rev["rev"], "release": rel, "editable": not rel["released"],
             "fields": LABELS, "tools": tools, "history": history(part_id)}
 
@@ -401,7 +416,7 @@ def part_save(part_id: int, items: list[dict]) -> dict:
     if rel["released"]:
         raise auth.AuthError(f"The tool design is released (design loop: {rel['status']}, {rel['date']}): step the design loop back to change "
                              "the drawing data; the change is then printed in the revision history.", 400)
-    known = {(t["key"], i["item"]) for t in part_data(part_id)["tools"] for i in t["items"]}
+    known = {(t["key"], i["item"]): (t["part_type"], i["name"]) for t in part_data(part_id)["tools"] for i in t["items"]}
     changed = []
     with db.engine().begin() as conn:
         for it in items:
@@ -409,7 +424,7 @@ def part_save(part_id: int, items: list[dict]) -> dict:
             if key not in known:
                 raise auth.AuthError(f"Tool {key[0]} item {key[1]} is not a made part of this part's tool design.", 400)
             try:
-                r = save(conn, part_id, key[0], key[1], it.get("fields"), it.get("notes"))
+                r = save(conn, part_id, key[0], key[1], it.get("fields"), it.get("notes"), learn_as=known[key])
             except auth.AuthError as exc:
                 raise auth.AuthError(f"Tool {key[0]} item {key[1]}: {exc}", 400) from None
             if r:

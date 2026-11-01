@@ -1360,6 +1360,21 @@ On the part panel, under **Tool design**, the **Toolmaker review** lists what mu
   until they are ok, not applicable or waived. The error names the open points.
 - API: `GET /api/parts/{id}/tool-review`, `POST /api/parts/{id}/tool-review` with `tool`, `item`, `status`, `comment`.
 
+## Design skills: the tool design learns from your corrections (stage 44)
+
+Every change you save in **Tool design → Drawing data** (heat treatment, surface treatment, general tolerance class, Ra, tolerance unit)
+is remembered with the tool part's name (e.g. *Cavity insert*), the part type, who and when.
+
+- **When it becomes a skill.** The same value for the same field of the same tool part, set on at least **`skill_min_parts`** different parts
+  (Master data → Mould & die database → Design rules, one row per part type, EXAMPLE value 2), becomes a skill. Without that row nothing is applied.
+- **What a skill does.** On the next tool designs that field starts with the learned value, marked **skill** on the drawing data and printed on
+  the detail drawings (PDF / DXF) and the BOM. When two values compete, the one set on more parts wins.
+- **You stay in control.** A value typed on the part always wins over a skill. Under *Design skills learned by the team* every learned value shows
+  the parts, who taught it and its state (applied, needs more parts, another value wins, switched off), with **Switch off / Switch on** (kept as history).
+- **Released drawings never change.** When the design moves to *Tool design frozen*, the skill values it shows are written into its own drawing data
+  (revision history: *Design skill values kept at release*).
+- API: `GET /api/design-skills?part_type=…`, `POST /api/design-skills/status` with `part_type`, `component`, `field`, `value`, `active`.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:

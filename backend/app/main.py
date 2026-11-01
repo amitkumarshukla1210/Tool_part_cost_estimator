@@ -1082,6 +1082,26 @@ def parts_tool_review_sign(part_id: int, data: dict):
                                                   str(data.get("status") or ""), data.get("comment") or ""))
 
 
+# ---------- design skills: learned from drawing-data corrections (roadmap stage 44) ----------
+
+@app.get("/api/design-skills")
+def design_skills_list(part_type: Optional[str] = None):
+    """Every learned drawing-data value: parts that show it, whether it is a skill, switched on, applied to new designs."""
+    from . import design_skills
+    return {"skills": design_skills.skills(part_type)}
+
+
+@app.post("/api/design-skills/status")
+def design_skills_status(data: dict):
+    """Switch a learned value on or off (kept as history)."""
+    from . import design_skills
+    try:
+        return design_skills.set_active(str(data.get("part_type") or ""), str(data.get("component") or ""), str(data.get("field") or ""),
+                                        str(data.get("value") or ""), bool(data.get("active")))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
 # ---------- process parameters for the best part quality (roadmap stage 34) ----------
 
 @app.get("/api/parts/{part_id}/process-parameters")

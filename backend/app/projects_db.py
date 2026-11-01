@@ -384,6 +384,32 @@ tool_reviews = Table(
     Index("ix_tool_reviews_part", "part_id"),
 )
 
+# Design skills (roadmap stage 44): every drawing-data correction (append only) and the on / off switches of learned values.
+design_skill_events = Table(
+    "design_skill_events", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),
+    Column("part_type", String(40), nullable=False),
+    Column("component", String(200), nullable=False),
+    Column("field", String(40), nullable=False),
+    Column("value", String(200), nullable=False),
+    Column("by", String(100), default=""),
+    Column("at", DateTime, default=now),
+    Index("ix_design_skill_events", "part_type", "component", "field"),
+)
+
+design_skill_status = Table(
+    "design_skill_status", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_type", String(40), nullable=False),
+    Column("component", String(200), nullable=False),
+    Column("field", String(40), nullable=False),
+    Column("value", String(200), nullable=False),
+    Column("active", Boolean, nullable=False),
+    Column("by", String(100), default=""),
+    Column("at", DateTime, default=now),
+)
+
 # Simulation runs saved with their reports (roadmap stage 39): flow simulation, analysis video, attached reports of other programs.
 sim_runs = Table(
     "sim_runs", meta,

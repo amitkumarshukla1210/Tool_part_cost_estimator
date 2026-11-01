@@ -668,6 +668,8 @@ def _check_review_gate(part_id: int, new: str) -> None:
         old = conn.execute(select(db.parts.c.status).where(db.parts.c.id == part_id)).scalar()
     if old != new:
         tool_review.check_release(part_id)
+        from . import design_skills                 # stage 44: the skill values the design shows are kept at release
+        design_skills.freeze(part_id)
 
 
 def update_part(part_id: int, data: dict, refresh: bool = True) -> dict:

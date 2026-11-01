@@ -1559,6 +1559,31 @@ async function toolReviewLoad() {
   }));
 }
 
+// design skills: drawing-data corrections made on enough parts become the starting value of new designs (stage 44)
+async function designSkillsLoad(partType) {
+  const box = $("skList");
+  if (!box) return;
+  let r;
+  try { r = await api(`/api/design-skills?part_type=${encodeURIComponent(partType)}`); } catch (err) { box.innerHTML = `<p class="status error">${esc(err.message)}</p>`; return; }
+  const min = r.skills.length ? r.skills[0].min_parts : null;
+  box.innerHTML = `<p class="note">Every change you save in the drawing data is remembered. The same value for the same field of the same tool part, set on at least
+      <b>${min ?? "—"}</b> different parts (Mould &amp; die database → Design rules → <code>skill_min_parts</code>), becomes the starting value on the next designs.
+      A value typed on a part always wins; a released design keeps the values it showed.</p>
+    ${r.skills.length ? `<div class="table-wrap" style="max-height:none"><table class="cost-table"><thead><tr><th>Tool part</th><th>Field</th><th>Value</th><th>Parts</th>
+      <th>Taught by</th><th>State</th><th></th></tr></thead><tbody>
+      ${r.skills.map((x) => `<tr><td>${esc(x.component)}</td><td>${esc(x.field.replace(/_/g, " "))}</td><td>${esc(x.value)}</td><td class="num">${x.parts}</td>
+        <td>${esc(x.by.join(", "))}</td><td>${!x.active ? '<span class="badge missing">switched off</span>' : x.applied ? '<span class="badge status">applied</span>'
+          : x.qualifies ? '<span class="badge edited">another value wins</span>' : `<span class="note">needs ${fmt((x.min_parts ?? 0) - x.parts, 0)} more part(s)</span>`}</td>
+        <td><button type="button" class="btn btn-outline small" data-sk="${esc(JSON.stringify({ part_type: x.part_type, component: x.component, field: x.field, value: x.value, active: !x.active }))}">${x.active ? "Switch off" : "Switch on"}</button></td></tr>`).join("")}
+      </tbody></table></div>` : `<p class="note">Nothing learned yet for this part type.</p>`}<span class="status" id="skStatus"></span>`;
+  box.querySelectorAll("[data-sk]").forEach((b) => b.addEventListener("click", async () => {
+    try {
+      await api("/api/design-skills/status", { method: "POST", body: JSON.stringify(JSON.parse(b.dataset.sk)) });
+      drawingDataLoad();
+    } catch (err) { status($("skStatus"), err.message, "error"); }
+  }));
+}
+
 // technical data, release and revision history of the tool drawings (stage 31)
 async function drawingDataLoad() {
   const box = $("ddBox");
@@ -1576,7 +1601,8 @@ async function drawingDataLoad() {
       ${d.editable ? ` · <input type="file" id="ddFile" accept=".xlsx" /> <button type="button" class="btn btn-outline small" id="ddUp">Upload changed sheet</button>` : ""}</p>
     ${d.tools.map((t) => `<p><b>Tool ${t.stage}: ${esc(t.name)}</b></p><div class="table-wrap"><table class="cost-table dd" data-tool="${esc(t.key)}"><thead><tr>
       <th>Item</th><th>Part</th><th>Material · hardness</th><th>Heat treatment</th><th>Surface treatment</th><th>Class</th><th>Ra (micron)</th><th>Note points (one per line)</th><th>Dimension tolerances</th></tr></thead><tbody>
-      ${t.items.map((i) => `<tr data-item="${esc(i.item)}"><td>${esc(i.item)}</td><td>${esc(i.name)}${i.changed ? ' <span class="badge edited">changed</span>' : ""}</td>
+      ${t.items.map((i) => `<tr data-item="${esc(i.item)}"><td>${esc(i.item)}</td><td>${esc(i.name)}${i.changed ? ' <span class="badge edited">changed</span>' : ""}${(i.from_skill || []).length
+        ? ` <span class="badge example" title="Design skill (learned from corrections on other parts): ${esc(i.from_skill.join(", "))}">skill: ${esc(i.from_skill.map((k) => k.replace(/_/g, " ")).join(", "))}</span>` : ""}</td>
         <td>${esc(i.effective.material)} · ${esc(i.effective.hardness)}</td>
         <td><input data-k="heat_treatment" value="${esc(i.effective.heat_treatment)}" ${dis} /></td>
         <td><input data-k="surface_treatment" value="${esc(i.effective.surface_treatment)}" ${dis} /></td>
@@ -1590,10 +1616,12 @@ async function drawingDataLoad() {
             <td><input data-f="${esc(x.key)}" value="${esc((i.effective.dim_overrides || {})[x.key] || "")}" placeholder="as drawn" size="10" ${dis} /></td></tr>`).join("")}
           </tbody></table><p class="note">general (ISO 2768), class (fit of the hole label), a fit (H7, g6 …), ±0.02, +0.02/-0.01 or a thread class (6H)</p></details></td></tr>`).join("")}</tbody></table></div>`).join("")}
     ${d.editable ? `<button type="button" class="btn btn-primary small" id="ddSave">Save drawing data</button>` : ""} <span class="status" id="ddStatus"></span>
+    <details id="skBox"><summary>Design skills learned by the team (stage 44)</summary><div id="skList"><p class="note">Loading…</p></div></details>
     <details><summary>Revision history (${d.history.length})</summary><table class="cost-table"><thead><tr><th>Rev</th><th>Date</th><th>Change</th><th>By</th></tr></thead>
       <tbody>${d.history.map((h) => `<tr><td>${esc(h.rev)}</td><td>${esc(h.date)}</td><td>${esc(h.text)}</td><td>${esc(h.by)}</td></tr>`).join("")}</tbody></table></details>`;
   const defaults = {};
   d.tools.forEach((t) => t.items.forEach((i) => (defaults[`${t.key}|${i.item}`] = i.defaults)));
+  designSkillsLoad(d.tools.length ? d.tools[0].part_type : "");
   $("ddSave")?.addEventListener("click", async () => {
     const items = [];
     box.querySelectorAll("table.dd").forEach((tb) => tb.querySelectorAll("tr[data-item]").forEach((tr) => {
