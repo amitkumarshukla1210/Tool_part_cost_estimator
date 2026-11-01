@@ -1065,6 +1065,23 @@ def parts_tool_design_file(part_id: int, kind: str, die: Optional[str] = None):
     return Response(data, media_type=media, headers={"Content-Disposition": f'{disp}; filename="{name}"'})
 
 
+# ---------- toolmaker review of the tool design (roadmap stage 43) ----------
+
+@app.get("/api/parts/{part_id}/tool-review")
+def parts_tool_review(part_id: int):
+    """The review checklist per tool: automatic checks, the toolmaker's sign-offs, and what still blocks freezing the design."""
+    from . import tool_review
+    return _design_error(lambda: tool_review.review(part_id))
+
+
+@app.post("/api/parts/{part_id}/tool-review")
+def parts_tool_review_sign(part_id: int, data: dict):
+    """Sign one checklist point of one tool: status ok / issue / na / waived (issue and waived need a comment). Kept as history."""
+    from . import tool_review
+    return _design_error(lambda: tool_review.sign(part_id, str(data.get("tool") or ""), str(data.get("item") or ""),
+                                                  str(data.get("status") or ""), data.get("comment") or ""))
+
+
 # ---------- process parameters for the best part quality (roadmap stage 34) ----------
 
 @app.get("/api/parts/{part_id}/process-parameters")

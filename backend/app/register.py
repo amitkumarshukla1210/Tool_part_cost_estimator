@@ -659,8 +659,21 @@ def design_loop(part_id: int) -> dict:
             "timeline": timeline}
 
 
+def _check_review_gate(part_id: int, new: str) -> None:
+    """Stage 43: a part moves to the last status of the design loop (Tool design frozen) only when the toolmaker review has no open blocking point."""
+    from . import tool_review
+    if new != tool_review.final_status():
+        return
+    with db.engine().connect() as conn:
+        old = conn.execute(select(db.parts.c.status).where(db.parts.c.id == part_id)).scalar()
+    if old != new:
+        tool_review.check_release(part_id)
+
+
 def update_part(part_id: int, data: dict, refresh: bool = True) -> dict:
     vals = _part_values(data)
+    if vals.get("status"):
+        _check_review_gate(part_id, vals["status"])
     with db.engine().begin() as conn:
         old = conn.execute(select(db.parts).where(db.parts.c.id == part_id)).mappings().first()
         if not old:

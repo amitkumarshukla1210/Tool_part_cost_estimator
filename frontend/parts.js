@@ -1517,12 +1517,46 @@ async function toolDesignLoad() {
             <td>${esc(c.hardness || "—")}</td><td>${esc(c.std || "—")}</td><td>${c.size.map((v) => fmt(v, 1)).join(" × ")}</td></tr>`).join("")}
           </tbody></table></div></div>`;
     }).join("") + (r.tools.length > 1 ? `<p><a class="btn btn-primary" href="/api/parts/${part.id}/tool-design.zip">⬇ Release pack of all ${r.tools.length} tools</a></p>` : "")
-      + `<div id="ddBox" class="card"></div>`;
+      + `<div id="ddBox" class="card"></div><div id="rvBox" class="card"></div>`;
     drawingDataLoad();
+    toolReviewLoad();
     machineCheck();
   } catch (err) {
     status($("tdStatus"), err.message, "error");
   }
+}
+
+// toolmaker review of the tool design: automatic checks and sign-offs, blocks freezing the design (stage 43)
+async function toolReviewLoad() {
+  const box = $("rvBox");
+  if (!box) return;
+  let r;
+  try { r = await api(`/api/parts/${part.id}/tool-review`); } catch (err) { box.innerHTML = `<p class="status error">${esc(err.message)}</p>`; return; }
+  const badge = { ok: "status", issue: "missing", na: "edited", waived: "edited", open: "missing" };
+  const label = { ok: "OK", issue: "ISSUE", na: "Not applicable", waived: "Waived", open: "OPEN" };
+  box.innerHTML = `<h4>Toolmaker review</h4>
+    <p>${r.can_release ? '<span class="badge status">No blocking point open: the design can be frozen</span>'
+      : `<span class="badge missing">${r.blocking_open} blocking point(s) open</span> <span class="note">the design loop cannot move to the last status (Tool design frozen) until they are ok, not applicable or waived</span>`}</p>
+    <p class="note">Checklist and check formulas: Master data → Mould &amp; die database → Review checklist (EXAMPLE rows until you replace them).</p>
+    ${r.tools.map((t) => `<p><b>${esc(t.name)}</b></p><div class="table-wrap" style="max-height:none"><table class="cost-table rv" data-tool="${esc(t.key)}"><thead><tr>
+      <th>Point</th><th>Check</th><th>Status</th><th>Blocks</th><th>Comment</th><th>By</th><th>Sign</th></tr></thead><tbody>
+      ${t.rows.map((x) => `<tr data-item="${esc(x.item)}"><td>${esc(x.item)}${x.is_example ? ' <span class="badge example">EXAMPLE</span>' : ""}</td>
+        <td>${x.auto ? `<code>${esc(x.rule)}</code>${x.message ? `<br/><span class="note">${esc(x.message)}</span>` : ""}` : "signed by the toolmaker"}</td>
+        <td><span class="badge ${badge[x.status]}">${label[x.status]}</span></td><td>${x.blocking ? "yes" : "no"}</td>
+        <td><input data-c value="${esc(x.comment)}" placeholder="needed for issue / waived" /></td><td>${esc(x.by)}${x.at ? `<br/><span class="note">${esc(x.at.replace("T", " "))}</span>` : ""}</td>
+        <td><select data-s><option value="">—</option><option value="ok">ok</option><option value="issue">issue</option><option value="na">not applicable</option><option value="waived">waived</option></select>
+          <button type="button" class="btn btn-outline small" data-sign>Save</button></td></tr>`).join("")}</tbody></table></div>`).join("")}
+    <span class="status" id="rvStatus"></span>
+    <details><summary>Review history (${r.history.length})</summary><table class="cost-table"><thead><tr><th>When</th><th>Tool</th><th>Point</th><th>Status</th><th>Comment</th><th>By</th></tr></thead>
+      <tbody>${r.history.map((h) => `<tr><td>${esc((h.at || "").replace("T", " "))}</td><td>${esc(h.tool_key)}</td><td>${esc(h.item)}</td><td>${esc(h.status)}</td><td>${esc(h.comment)}</td><td>${esc(h.by)}</td></tr>`).join("")}</tbody></table></details>`;
+  box.querySelectorAll("[data-sign]").forEach((b) => b.addEventListener("click", async () => {
+    const tr = b.closest("tr"), tool = tr.closest("table").dataset.tool, st = tr.querySelector("[data-s]").value;
+    if (!st) return status($("rvStatus"), "Choose ok, issue, not applicable or waived.", "error");
+    try {
+      await api(`/api/parts/${part.id}/tool-review`, { method: "POST", body: JSON.stringify({ tool, item: tr.dataset.item, status: st, comment: tr.querySelector("[data-c]").value }) });
+      toolReviewLoad();
+    } catch (err) { status($("rvStatus"), err.message, "error"); }
+  }));
 }
 
 // technical data, release and revision history of the tool drawings (stage 31)

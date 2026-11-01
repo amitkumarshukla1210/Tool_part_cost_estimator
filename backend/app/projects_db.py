@@ -370,6 +370,20 @@ tool_drawing_edits = Table(
     Column("at", DateTime, default=now),
 )
 
+# Toolmaker review of the tool design (roadmap stage 43): append only, the latest row of a tool and checklist item counts.
+tool_reviews = Table(
+    "tool_reviews", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),
+    Column("tool_key", String(80), nullable=False),
+    Column("item", String(300), nullable=False),
+    Column("status", String(20), nullable=False),
+    Column("comment", String(500), default=""),
+    Column("by", String(100), default=""),
+    Column("at", DateTime, default=now),
+    Index("ix_tool_reviews_part", "part_id"),
+)
+
 # Simulation runs saved with their reports (roadmap stage 39): flow simulation, analysis video, attached reports of other programs.
 sim_runs = Table(
     "sim_runs", meta,
