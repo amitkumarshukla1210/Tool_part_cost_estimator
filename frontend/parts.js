@@ -1520,8 +1520,9 @@ async function toolDesignLoad() {
             <td>${esc(c.hardness || "—")}</td><td>${esc(c.std || "—")}</td><td>${c.size.map((v) => fmt(v, 1)).join(" × ")}</td></tr>`).join("")}
           </tbody></table></div></div>`;
     }).join("") + (r.tools.length > 1 ? `<p><a class="btn btn-primary" href="/api/parts/${part.id}/tool-design.zip">⬇ Release pack of all ${r.tools.length} tools</a></p>` : "")
-      + `<div id="pdBox" class="card"></div><div id="ddBox" class="card"></div><div id="rvBox" class="card"></div>`;
+      + `<div id="pdBox" class="card"></div><div id="feBox" class="card"></div><div id="ddBox" class="card"></div><div id="rvBox" class="card"></div>`;
     productionDataLoad();
+    feaLoad();
     drawingDataLoad();
     toolReviewLoad();
     machineCheck();
@@ -1555,6 +1556,33 @@ async function productionDataLoad() {
         ${t.tool_level.map((x) => `<tr><td></td><td colspan="9">Tool level: ${esc(x.element)}</td><td class="num">${inr(x.inr)}</td></tr>`).join("")}
         <tr class="subtotal"><td></td><td colspan="9">Tool cost</td><td class="num"><b>${inr(t.sums.tool_cost_inr)}</b></td></tr>
       </tbody></table></div>`).join("")}`;
+}
+
+// structural check (FEA) of the load-carrying tool parts with Gmsh + CalculiX (stage 45)
+async function feaLoad() {
+  const box = $("feBox");
+  if (!box) return;
+  let r;
+  try { r = await api(`/api/parts/${part.id}/fea`); } catch (err) { box.innerHTML = `<h4>Strength check (FEA)</h4><p class="status error">${esc(err.message)}</p>`; return; }
+  const pr = r.programs;
+  box.innerHTML = `<h4>Strength check (FEA) of the load-carrying parts</h4>
+    <p class="note">Real FEA: Gmsh meshes each part, CalculiX solves it. Load = clamp / press force of the tool cost on the part's outline; limits, steel data,
+      mesh size and the parts checked are in Mould &amp; die database → Design rules (<code>fea_*</code>)${r.tools.some((t) => t.is_example) ? ' <span class="badge example">EXAMPLE</span>' : ""}.</p>
+    ${pr.available ? `<p><button type="button" class="btn btn-primary small" id="feRun">Run strength check (rev ${esc(r.rev)})</button></p><div id="feJob"></div>`
+      : `<p><span class="badge missing">Not available</span> <span class="note">${esc(pr.message)}</span></p>`}
+    ${r.tools.map((t) => `<p><b>${esc(t.name)}</b> · limits: deflection ≤ ${fmt(t.rules.fea_max_deflection_mm, 3)} mm, von Mises ≤ ${fmt(t.rules.fea_allow_stress_mpa, 0)} MPa</p>
+      <div class="table-wrap" style="max-height:none"><table class="cost-table"><thead><tr><th>Item</th><th>Part</th><th>Load</th><th>Support</th><th>Deflection (mm)</th><th>Von Mises (MPa)</th><th>Result</th><th>Picture</th></tr></thead><tbody>
+      ${t.parts.map((p) => { const x = p.run; return `<tr><td>${esc(p.item)}</td><td>${esc(p.name)}</td>
+        ${x ? `<td>${fmt(x.force_n / 1000, 1)} kN<br/><span class="note">${esc(x.load_source || "")}</span></td><td>${esc(x.support)}</td>
+          <td class="num">${fmt(x.max_deflection_mm, 4)}</td><td class="num">${fmt(x.max_von_mises_mpa, 1)}</td>
+          <td>${x.ok ? '<span class="badge status">OK</span>' : '<span class="badge missing">OVER LIMIT</span>'}<br/><span class="note">${esc(x.by)} · ${esc((x.at || "").replace("T", " "))}</span></td>
+          <td><a class="link" href="/api/parts/${part.id}/fea/${x.id}.png" target="_blank">picture</a></td>`
+          : `<td colspan="6"><span class="note">not checked on this revision</span></td>`}</tr>`; }).join("")}
+      </tbody></table></div>`).join("")}`;
+  $("feRun")?.addEventListener("click", () => {
+    $("feRun").disabled = true;
+    runJob(`/api/parts/${part.id}/fea`, $("feJob"), () => { feaLoad(); toolReviewLoad(); });
+  });
 }
 
 // toolmaker review of the tool design: automatic checks and sign-offs, blocks freezing the design (stage 43)
@@ -1819,7 +1847,7 @@ async function runJob(url, box, onDone, body) {
   }
 }
 
-const kindName = { flow: "Flow simulation", analysis_video: "Analysis video", external: "Attached report" };
+const kindName = { flow: "Flow simulation", analysis_video: "Analysis video", external: "Attached report", fea: "Strength check (FEA)" };
 async function loadRuns() {
   const el = $("simRuns");
   if (!el || !part) return;

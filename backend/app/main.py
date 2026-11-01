@@ -1099,6 +1099,43 @@ def parts_production_data_xlsx(part_id: int):
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
+# ---------- structural check (FEA) of the load-carrying tool parts (roadmap stage 45) ----------
+
+def _fea(fn):
+    from . import fea
+    try:
+        return fn(fea)
+    except fea.FeaError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/fea")
+def parts_fea(part_id: int):
+    """Programs found (Gmsh, CalculiX), the parts to check per tool, their latest FEA on the current revision."""
+    return _design_error(lambda: _fea(lambda m: m.summary(part_id)))
+
+
+@app.post("/api/parts/{part_id}/fea")
+def parts_fea_run(part_id: int):
+    """Start the FEA of every load-carrying part (Gmsh + CalculiX) as a background job with progress (GET .../sim-jobs/{id});
+    each part's run is stored with its picture."""
+    from . import fea, sim_jobs
+    register.part_detail(part_id, with_rm=False)
+    av = fea.available()
+    if not av["available"]:
+        raise HTTPException(400, av["message"])
+
+    def work(progress):
+        runs = fea.run(part_id, progress)["runs"]
+        return runs[-1]["id"] if runs else None
+    return sim_jobs.start(part_id, "fea", work, register.user())
+
+
+@app.get("/api/parts/{part_id}/fea/{run_id}.png")
+def parts_fea_png(part_id: int, run_id: int):
+    return Response(_fea(lambda m: m.picture(part_id, run_id)), media_type="image/png")
+
+
 # ---------- design skills: learned from drawing-data corrections (roadmap stage 44) ----------
 
 @app.get("/api/design-skills")

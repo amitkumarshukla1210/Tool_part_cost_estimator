@@ -19,6 +19,7 @@ This file and the DTC_*.bat files live in the folder ABOVE the app (the "base fo
     python dtc_manager.py rollback   back to the version before the last update, with the data of that moment
     python dtc_manager.py reset-password [user]   new password for a user (e.g. a forgotten admin password), from this PC only
     python dtc_manager.py status     where everything is, installed version, last backup
+    python dtc_manager.py fea        strength check: install Gmsh, show where CalculiX (ccx.exe) goes
 """
 
 from __future__ import annotations
@@ -52,7 +53,7 @@ VERSION = DATA / "version.json"
 MANAGED = {DATA.name, BACKUPS.name, DOWNLOADS.name, OLD.name, VENV.name, STAGING.name}
 PARTS = ("master_data", "data", "storage")
 KIT_FILES = ("dtc_manager.py", "DTC_Start.bat", "DTC_Update.bat", "DTC_Backup.bat", "DTC_Restore.bat", "DTC_Rollback.bat",
-             "DTC_ResetPassword.bat")
+             "DTC_ResetPassword.bat", "DTC_Install_FEA.bat")
 
 DEFAULT_SETTINGS = """\
 ; Design to Cost: settings of the Windows kit (dtc_manager.py). Lines starting with ; are notes.
@@ -706,7 +707,28 @@ def cmd_reset_password(args) -> None:
         raise KitError("The password was not changed.")
 
 
-COMMANDS = {"reset-password": cmd_reset_password, "start": cmd_start, "update": cmd_update, "update-wait": cmd_update_wait,
+def cmd_fea(_args) -> None:
+    """Strength check (stage 45): Gmsh into the app's Python environment; CalculiX (ccx.exe) is placed by you in DTC_Data\\tools\\calculix."""
+    ensure_venv()
+    app = app_dir()
+    req = app / "requirements-fea.txt"
+    say("Installing Gmsh into the app's Python environment ...")
+    what = ["-r", str(req)] if req.exists() else ["gmsh"]
+    r = subprocess.run([str(venv_python()), "-m", "pip", "install", "--disable-pip-version-check", *what], cwd=app)
+    if r.returncode != 0:
+        raise KitError("Installing Gmsh failed (see the messages above): check the internet / proxy and run DTC_Install_FEA.bat again.")
+    folder = DATA / "tools" / "calculix"
+    folder.mkdir(parents=True, exist_ok=True)
+    hits = sorted(folder.rglob("ccx*.exe"))
+    if hits:
+        say(f"CalculiX found: {hits[0]}")
+        say("The strength check is ready: restart the app (DTC_Start.bat) and open Tool design → Strength check.")
+    else:
+        say(f"Gmsh is installed. CalculiX is still missing: download the Windows build of CalculiX (ccx) from the official CalculiX")
+        say(f"site and copy ccx.exe (with the .dll files next to it) into {folder} - then restart the app.")
+
+
+COMMANDS = {"fea": cmd_fea, "reset-password": cmd_reset_password, "start": cmd_start, "update": cmd_update, "update-wait": cmd_update_wait,
             "backup": cmd_backup, "restore": cmd_restore, "rollback": cmd_rollback, "status": cmd_status}
 
 
