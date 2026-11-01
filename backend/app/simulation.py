@@ -93,7 +93,7 @@ def _ray_box(origin: np.ndarray, direction: np.ndarray, lo: np.ndarray, hi: np.n
     return near, far
 
 
-def _ray_triangles(origin: np.ndarray, direction: np.ndarray, tri: np.ndarray) -> float:
+def _ray_triangles(origin: np.ndarray, direction: np.ndarray, tri: np.ndarray) -> tuple[float, int]:
     p0 = tri[:, 0]
     e1 = tri[:, 1] - p0
     e2 = tri[:, 2] - p0
@@ -107,19 +107,54 @@ def _ray_triangles(origin: np.ndarray, direction: np.ndarray, tri: np.ndarray) -
     v = inv_det * np.einsum("j,ij->i", direction, q)
     distance = inv_det * np.einsum("ij,ij->i", e2, q)
     hit = valid & (u >= 0) & (v >= 0) & (u + v <= 1) & (distance > 1e-6)
-    return float(distance[hit].min()) if np.any(hit) else math.inf
+    if not np.any(hit):
+        return math.inf, -1
+    k = int(np.argmin(np.where(hit, distance, math.inf)))
+    return float(distance[k]), k
 
 
 def thickness(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, offset: float) -> np.ndarray:
     """Distance from sampled face centroids along inward normals to the next mesh face."""
+    return thickness_hits(tri, n, idx, offset)[0]
+
+
+def rim_corrected(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, th: np.ndarray, offset: float, typical: float) -> np.ndarray:
+    """Thickness with rims told from thick sections (stage 39 flow simulation, also the simulation report).
+
+    A long ray may run along a wall (from a rim, an edge, through an opening) instead of across it: 4 more rays tilted by 40°
+    tell a rim (thin sideways) from a thick section (thick every way). Two opposite tilted rays leaving a section of width W
+    through its sides run d1 + d2 = W / sin 40° wherever the face is: the width is the smaller pair, never more than the
+    straight ray. Only rays longer than 1.5 × `typical` (or that hit nothing) are checked."""
+    sus = np.nonzero(~np.isfinite(th) | (th > 1.5 * typical))[0]
+    tmin = th.copy()
+    if len(sus):
+        nn = n[idx[sus]]
+        helper = np.where(np.abs(nn[:, [0]]) < 0.9, [[1.0, 0, 0]], [[0, 1.0, 0]])
+        u = np.cross(nn, helper)
+        u /= np.linalg.norm(u, axis=1)[:, None]
+        w = np.cross(nn, u)
+        c, sn = math.cos(math.radians(40)), math.sin(math.radians(40))
+        tilted = np.stack([thickness_hits(tri, n, idx[sus], offset, -nn * c + side * sn)[0] for side in (u, -u, w, -w)], 1)
+        tilted = np.where(np.isfinite(tilted), tilted, np.inf)
+        width = np.minimum(tilted[:, 0] + tilted[:, 1], tilted[:, 2] + tilted[:, 3]) * sn
+        tmin[sus] = np.fmin(np.where(np.isfinite(th[sus]), th[sus], np.inf), width)
+        tmin[sus] = np.where(np.isfinite(tmin[sus]), tmin[sus], np.nan)
+    return tmin
+
+
+def thickness_hits(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, offset: float,
+                   dirs: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """thickness() and the face each ray hits (-1 = none): the opposite skin of the wall. dirs: other ray directions
+    (one per face of idx) instead of the inward normal."""
     if not len(idx):
-        return np.empty(0)
+        return np.empty(0), np.empty(0, int)
     grid = _triangle_grid(tri)
     lo, hi, cell, dims = grid["lo"], grid["hi"], grid["cell"], grid["dims"]
     out = np.full(len(idx), np.nan)
+    opp = np.full(len(idx), -1)
     for out_i, face_i in enumerate(idx):
         origin = tri[face_i].mean(axis=0) - n[face_i] * offset
-        direction = -n[face_i]
+        direction = -n[face_i] if dirs is None else dirs[out_i]
         interval = _ray_box(origin, direction, lo, hi)
         if interval is None:
             continue
@@ -134,11 +169,12 @@ def thickness(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, offset: float) ->
                           out=np.full(3, math.inf), where=np.abs(direction) > 1e-15)
         t_delta = np.divide(cell, np.abs(direction),
                             out=np.full(3, math.inf), where=np.abs(direction) > 1e-15)
-        best = math.inf
+        best, best_face = math.inf, -1
         seen = set()
         oversized = grid["oversized"]
         if len(oversized):
-            best = _ray_triangles(origin, direction, tri[oversized])
+            best, k = _ray_triangles(origin, direction, tri[oversized])
+            best_face = int(oversized[k]) if k >= 0 else -1
             seen.update(oversized.tolist())
         while np.all((cell_pos >= 0) & (cell_pos < dims)) and current <= exit_t and current < best:
             key = (cell_pos[0] * dims[1] + cell_pos[1]) * dims[2] + cell_pos[2]
@@ -147,7 +183,9 @@ def thickness(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, offset: float) ->
                 new_faces = [int(face) for face in faces if int(face) not in seen]
                 if new_faces:
                     seen.update(new_faces)
-                    best = min(best, _ray_triangles(origin, direction, tri[new_faces]))
+                    d, k = _ray_triangles(origin, direction, tri[new_faces])
+                    if d < best:
+                        best, best_face = d, new_faces[k]
             axis = int(np.argmin(t_max))
             current = t_max[axis]
             if current >= best:
@@ -156,7 +194,8 @@ def thickness(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, offset: float) ->
             t_max[axis] += t_delta[axis]
         if math.isfinite(best):
             out[out_i] = best + offset
-    return out
+            opp[out_i] = best_face
+    return out, opp
 
 
 def _machine(part_type: str, force_t: float) -> dict:
@@ -186,7 +225,15 @@ def run(vertices, triangles, part_type: str, facts: dict, projected_area_mm2: di
     step = max(1, math.ceil(len(tri) / p["undercut_max_faces"]))
     idx = np.arange(0, len(tri), step)
     th = np.full(len(tri), np.nan)
-    th[idx] = thickness(tri, n, idx, p["undercut_offset_mm"])
+    raw = thickness(tri, n, idx, p["undercut_offset_mm"])
+    fin = np.isfinite(raw)
+    typical = 0.0
+    if fin.any():   # area-weighted median: a coarse CAD mesh has as many rim triangles as wall triangles
+        o = np.argsort(raw[fin])
+        cum = np.cumsum(area[idx][fin][o])
+        typical = float(raw[fin][o][min(np.searchsorted(cum, cum[-1] / 2), len(o) - 1)])
+    # a ray from a rim or a side face runs along the wall: measured as the section width instead (no false sink / thick wall)
+    th[idx] = rim_corrected(tri, n, idx, raw, p["undercut_offset_mm"], max(typical, facts.get("wall_mm") or 0)) if typical else raw
     ok = ~np.isnan(th)
     meas = th[ok]
     w_area = area[ok]

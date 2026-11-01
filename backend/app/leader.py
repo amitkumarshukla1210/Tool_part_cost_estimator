@@ -33,9 +33,12 @@ def _fx(cur: str, as_of: str) -> float:
 
 
 def _part_costs(project_id: int) -> dict:
-    """{part_id: row with the latest stored piece cost trace (or None)}."""
+    """{part_id: row with the latest stored piece cost trace (or None)}: the parts the logged-in user may see (stage 40)."""
+    from . import scope
     with db.engine().connect() as conn:
-        parts = {r["id"]: dict(r) for r in conn.execute(select(db.parts).where(db.parts.c.project_id == project_id)).mappings()}
+        sv = scope.project_view(conn, project_id)
+        parts = {r["id"]: dict(r) for r in conn.execute(select(db.parts).where(db.parts.c.project_id == project_id)).mappings()
+                 if sv["visible"] is None or r["id"] in sv["visible"]}
         for pid in parts:
             last = conn.execute(select(db.piece_costs.c.trace, db.piece_costs.c.country, db.piece_costs.c.as_of, db.piece_costs.c.version)
                                 .where(db.piece_costs.c.part_id == pid).order_by(db.piece_costs.c.version.desc()).limit(1)).mappings().first()
@@ -43,10 +46,13 @@ def _part_costs(project_id: int) -> dict:
     return parts
 
 
-def variant_costs(variant: dict, parts: dict) -> dict:
+def variant_costs(variant: dict, parts: dict, visible: set | None = None) -> dict:
+    """visible: the part ids the user may see (None = all); lines of other tool groups are left out (stage 40)."""
     lines, total, missing, example = [], 0.0, 0, False
     for b in register.variant_bom(variant["id"]):
         if b["kind"] != "bom" or b["is_assembly"]:
+            continue
+        if visible is not None and b["child_part_id"] not in visible:
             continue
         p = parts.get(b["child_part_id"], {})
         unit, basis, ex = None, "", False
@@ -120,11 +126,14 @@ def _items(project_id: int) -> list[dict]:
                                                           .order_by(db.capex_items.c.kind, db.capex_items.c.id)).mappings()]
 
 
-def plan(project: dict) -> dict:
+def plan(project: dict, keep=None) -> dict:
+    """keep(item) -> bool: the CAPEX lines the user may see (stage 40); None = all."""
     ms = register_setup.capex_milestones()
     sop = project.get("sop_date") or ""
     items, by_month, by_supplier, by_country = [], defaultdict(float), defaultdict(float), defaultdict(float)
     for it in _items(project["id"]):
+        if keep is not None and not keep(it):
+            continue
         need = it["need_by"] or sop
         rows = []
         for m in ms:
@@ -253,11 +262,19 @@ def build_plan(project_id: int) -> dict:
 # ---------- the view ----------
 
 def view(project_id: int) -> dict:
+    from . import scope
     project = register.get_project(project_id)
+    with db.engine().connect() as conn:
+        sv = scope.project_view(conn, project_id)
     parts = _part_costs(project_id)
-    variants = [variant_costs(v, parts) for v in project["variants"]]
+    variants = [variant_costs(v, parts, sv["visible"]) for v in project["variants"]]
     machines = machine_need(parts)
-    pl = plan(project)
+    keep = None
+    if sv["limited"]:                       # CAPEX plan: tool lines of the user's parts, machine lines of the machines they need
+        need = {m["machine_id"] for m in machines["rows"]}
+        keep = lambda i: (i["kind"] == "tool" and i.get("part_id") in parts) \
+            or (i["kind"] == "machine" and str(i.get("source_key") or "").removeprefix("machine:") in need) or i["kind"] not in ("tool", "machine")
+    pl = plan(project, keep)
     tool_capex = sum(p["tool_capex_inr"] for p in parts.values() if p["tool_capex_inr"] is not None and not p["is_assembly"]) \
         if any(p["tool_capex_inr"] is not None for p in parts.values()) else None
     other = sum(i["amount_inr"] for i in pl["items"] if i["kind"] == "other")
@@ -270,14 +287,18 @@ def view(project_id: int) -> dict:
     corrections = [{"part_id": p["id"], "part_code": p["part_code"], "name": p["name"], "status": open_codes[p["status"]]}
                    for p in parts.values() if p["status"] in open_codes]
     return {"project": project, "variants": variants, "capex": capex, "machines": machines, "plan": pl, "corrections": corrections,
+            "scope": {"limited": sv["limited"], "hidden_parts": sv["hidden"], "note": sv["note"]},
             "parts_without_piece_cost": sum(1 for p in parts.values() if not p["is_assembly"] and p["piece_cost_inr"] is None
                                             and register_setup.sourcing().get(p["sourcing"], {}).get("is_costed")),
             "is_example": any(v["is_example"] for v in variants) or machines["is_example"]}
 
 
 def recalculate_pieces(project_id: int) -> dict:
+    from . import scope
     with db.engine().connect() as conn:
-        ids = [r for (r,) in conn.execute(select(db.parts.c.id).where(and_(db.parts.c.project_id == project_id, db.parts.c.is_assembly.is_(False))))]
+        sv = scope.project_view(conn, project_id)
+        ids = [r for (r,) in conn.execute(select(db.parts.c.id).where(and_(db.parts.c.project_id == project_id, db.parts.c.is_assembly.is_(False))))
+               if sv["visible"] is None or r in sv["visible"]]
     done = same = 0
     skipped = []
     for pid in ids:
@@ -297,7 +318,8 @@ def to_excel(project_id: int) -> bytes:
     p, cap = v["project"], v["capex"]
     wb = Workbook()
     sheets = [
-        ("Summary", ["Item", "Value"], [["Project", f"{p['code']} · {p['name']}"], ["Customer", p["customer"]], ["SOP date", p.get("sop_date") or ""],
+        ("Summary", ["Item", "Value"], [["Project", f"{p['code']} · {p['name']}"]] + ([["Covers", v["scope"]["note"]]] if v["scope"]["limited"] else [])
+         + [["Customer", p["customer"]], ["SOP date", p.get("sop_date") or ""],
                                           ["CAPEX budget (INR)", cap["budget_inr"]], ["Tool & mould CAPEX (INR)", cap["tool_inr"]],
                                           ["Machine CAPEX (INR)", cap["machine_inr"]], ["Other CAPEX (INR)", cap["other_inr"]],
                                           ["Total CAPEX (INR)", cap["total_inr"]], ["Budget left (INR)", cap["left_inr"]],
@@ -350,6 +372,8 @@ def to_pdf(project_id: int) -> bytes:
     story = [Paragraph("PROJECT LEADER VIEW", ParagraphStyle("k", parent=ss["Normal"], textColor=theme["brand"], fontSize=8)),
              Paragraph(f"{p['code']} · {p['name']}", h1),
              Paragraph(f"{p['customer'] or ''} · SOP {p.get('sop_date') or 'not set'} · {date.today().isoformat()}", note)]
+    if v["scope"]["limited"]:                                     # stage 40: only the user's tool groups
+        story.append(Paragraph(f"<b>{v['scope']['note']}</b>", note))
     if v["is_example"]:
         story += [Spacer(1, 2 * mm), _example_banner(ss)]
     story += [Paragraph("BOM cost vs target (INR per vehicle / unit)", h2),

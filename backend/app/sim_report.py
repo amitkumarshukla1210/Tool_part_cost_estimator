@@ -342,53 +342,54 @@ def _encode(frames: list, fps: int) -> tuple[bytes, str]:
     return buf.getvalue(), "gif"
 
 
-def moulding_video(res: dict, part: dict, fps: int = 12, size=(960, 540)) -> tuple[bytes, str]:
-    """Turntable of the wall-thickness, draft and risk maps of the simulation & analysis (simulation.py), with captions."""
+def turntable(tri: np.ndarray, n: int, size=(960, 540), el: float = 25, progress=None) -> list[dict]:
+    """n views of the mesh around the vertical axis (render3d.face_view), drawn once and painted for every map."""
+    sph = render3d.sphere_of([(tri.reshape(-1, 3), np.arange(len(tri) * 3).reshape(-1, 3), (0, 0, 0))])
+    views = []
+    for i in range(n):
+        views.append(render3d.face_view(tri, size=(size[0], size[1] + 64), az=-60 + 360 * i / n, el=el, sphere=sph, margin=0.04))
+        if progress:
+            progress(i + 1, n)
+    return views
+
+
+def moulding_maps(res: dict) -> list[tuple[np.ndarray, np.ndarray, str]]:
+    """(face colours m × 3, outline key per face, caption) of the wall-thickness, draft and risk maps."""
     f = res["_faces"]
-    tri = f["tri"]
-    v = tri.reshape(-1, 3)
-    idx = np.arange(len(v)).reshape(-1, 3)
     th = f["thickness"]
     lo, hi = (np.nanmin(th), np.nanmax(th)) if np.isfinite(th).any() else (0, 1)
-
-    def groups(colors):
-        out = {}
-        for k, c in enumerate(colors):
-            out.setdefault(c, []).append(k)
-        return [(v, idx[ks], c) for c, ks in out.items()]
-    wall_bins = np.where(np.isnan(th), -1, np.clip(((th - lo) / max(hi - lo, 1e-9) * 5).astype(int), 0, 5))
-    ramp = [(0.27, 0.0, 0.33), (0.23, 0.32, 0.55), (0.13, 0.57, 0.55), (0.37, 0.79, 0.38), (0.75, 0.87, 0.15), (0.99, 0.91, 0.14)]
-    wall = groups([GREY if b < 0 else ramp[b] for b in wall_bins])
+    ramp = np.array([(0.27, 0.0, 0.33), (0.23, 0.32, 0.55), (0.13, 0.57, 0.55), (0.37, 0.79, 0.38), (0.75, 0.87, 0.15), (0.99, 0.91, 0.14)])
+    bins = np.clip(np.nan_to_num((th - lo) / max(hi - lo, 1e-9) * 5).astype(int), 0, 5)
+    wall_key = np.where(np.isnan(th), -1, bins)
+    wall = np.where(np.isnan(th)[:, None], GREY, ramp[bins])
     lim = res["results"]["min_draft_deg"]
-    draft = groups([RED if d < lim else ((0.95, 0.65, 0.1) if d < 2 * lim else GREEN) for d in f["draft"]])
-    risk_c = []
-    for k in range(len(tri)):
-        c = GREY
-        if f["thin"][k]:
-            c = (0.15, 0.45, 0.85)
-        if f["low"][k]:
-            c = (0.95, 0.65, 0.1)
-        if f["thick"][k]:
-            c = RED
-        if f["undercut"][k]:
-            c = (0.55, 0.2, 0.7)
-        risk_c.append(c)
-    risk = groups(risk_c)
-    sph = render3d.sphere_of(wall)
+    dk = np.where(f["draft"] < lim, 0, np.where(f["draft"] < 2 * lim, 1, 2))
+    draft = np.array([RED, (0.95, 0.65, 0.1), GREEN])[dk]
+    rk = np.zeros(len(th), int)
+    for k, m in enumerate(("thin", "low", "thick", "undercut"), start=1):
+        rk[f[m]] = k
+    risk = np.array([GREY, (0.15, 0.45, 0.85), (0.95, 0.65, 0.1), RED, (0.55, 0.2, 0.7)])[rk]
+    return [(wall, wall_key, f"Wall thickness {lo:.2f} – {hi:.2f} mm (yellow = thick, sink risk)"),
+            (draft, dk, f"Draft to {res['opening_axis'].upper()}: red below {lim:g}°, orange below {2 * lim:g}°"),
+            (risk, rk, "Risk: red sink, blue thin, orange low draft, purple undercut")]
+
+
+def moulding_video(res: dict, part: dict, fps: int = 12, size=(960, 540), progress=None) -> tuple[bytes, str]:
+    """Turntable of the wall-thickness, draft and risk maps of the simulation & analysis (simulation.py), with captions.
+    Each view is drawn once (render3d.face_view) and painted for the three maps, so a detailed model takes minutes, not hours."""
+    tri = res["_faces"]["tri"]
+    n = fps * 3
+    views = turntable(tri, n, size, progress=progress)
     head = f"{part['part_code']} · {part['name']} · opening {res['opening_axis'].upper()}"
     r = res["results"]
     corr = res.get("corrections") or []
     frames = []
-    seq = [(wall, f"Wall thickness {lo:.2f} – {hi:.2f} mm (yellow = thick, sink risk)", False),
-           (draft, f"Draft to {res['opening_axis'].upper()}: red below {lim:g}°, orange below {2 * lim:g}°", False),
-           (risk, "Risk: red sink, blue thin, orange low draft, purple undercut", bool(corr))]
-    n = fps * 3
-    for items, line, bad in seq:
-        for i in range(n):
-            img = render3d.render(items, size=(size[0], size[1] + 64), az=-60 + 360 * i / n, el=25, sphere=sph, margin=0.04)
-            frames.append(_caption(img, head, line, bad))
+    maps = moulding_maps(res)
+    for k, (col, key, line) in enumerate(maps):
+        bad = k == len(maps) - 1 and bool(corr)
+        frames += [_caption(render3d.paint(v, col, edge_key=key), head, line, bad) for v in views]
     final = (f"Result: {len(corr)} correction(s) - {corr[0][:90]}" if corr else "Result: no corrections required") + \
             f" · cycle {r.get('cycle_s', 0):.1f} s · clamp {r.get('clamp_t', 0):.0f} t"
-    img = _caption(render3d.render(risk, size=(size[0], size[1] + 64), az=-60, el=25, sphere=sph, margin=0.04), head, final, bool(corr))
+    img = _caption(render3d.paint(views[0], maps[-1][0], edge_key=maps[-1][1]), head, final, bool(corr))
     frames += [img] * (fps * 3)
     return _encode(frames, fps)

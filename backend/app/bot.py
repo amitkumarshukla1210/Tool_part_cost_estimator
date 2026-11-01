@@ -137,6 +137,7 @@ TOOLS: dict[str, tuple[str, str, dict, list]] = {
     "part_geometry_trace": ("/api/parts/{part_id}/trace", "How volume, net and gross weight of the part were worked out (traced).", PART, ["part_id"]),
     "rm_cost": ("/api/parts/{part_id}/rm-cost", "Raw-material cost versions of the part (gross weight, yield, rate, scrap credit).", PART, ["part_id"]),
     "part_cost": ("/api/parts/{part_id}/piece-cost", "Part (piece) cost: latest stored version, all versions, outdated flag and the live traced result (RM, process, MHR, labour, overhead, profit, packing, tool amortisation, logistics).", PART, ["part_id"]),
+    "sheet_compare": ("/api/parts/{part_id}/sheet-compare", "Sheet-metal part: progressive die vs stage dies, live: part cost per piece, die set cost, die life, die sets, tool CAPEX, amortisation, cheaper die type and saving, break-even volume.", PART, ["part_id"]),
     "part_cost_trace": ("/api/parts/{part_id}/piece-cost/trace", "Full traceability of the part cost: every value with formula and source (rate, master data).", PART, ["part_id"]),
     "tool_cost": ("/api/parts/{part_id}/tool-cost", "Tool (mould / die) cost versions: cavities, tool size, BOM, machining, total, tool country.", PART, ["part_id"]),
     "tool_cost_trace": ("/api/parts/{part_id}/tool-cost/trace", "Full traceability of the tool cost (one version, default latest): BOM, steel grades, rates, hours.", {**PART, "version": _int("Tool cost version (optional)")}, ["part_id"]),

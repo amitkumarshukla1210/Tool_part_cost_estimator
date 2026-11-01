@@ -214,7 +214,8 @@ def run(inp: ToolInput, sheet: dict, layout: dict | None, sources: dict | None =
         try:
             results.append(_DieRun(die_inp, sources, die, sheet).run())
         except ToolCostError as exc:
-            raise ToolCostError(f"{die['name']}: {exc}") from None
+            msg = str(exc)
+            raise ToolCostError(msg if msg.startswith(f"{die['name']}:") else f"{die['name']}: {msg}") from None
     cur, as_of = results[0]["currency"], results[0]["as_of"]
     t = Trace(cur)
     lines, out_dies, missing = [], [], []

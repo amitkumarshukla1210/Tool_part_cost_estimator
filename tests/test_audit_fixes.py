@@ -48,3 +48,19 @@ def test_part_cost_explains_a_material_without_density():
     client.put(f"/api/parts/{pid}", json={"material": "NO SUCH MATERIAL"})
     r = client.post(f"/api/parts/{pid}/piece-cost", json={})
     assert r.status_code == 400 and "density" in r.json()["detail"]
+
+
+def test_master_data_change_marks_the_part_cost_outdated_and_recalculates():
+    """A changed Parameters row or piece formula used to leave the stored part cost 'up to date' with the old value."""
+    from backend.app import master_data
+    from tests.test_rm_cost import add_part, client, project
+    pid = add_part(project(), code="PC-MD")
+    assert client.post(f"/api/parts/{pid}/tool-cost", json={}).status_code == 200
+    assert client.post(f"/api/parts/{pid}/piece-cost", json={}).json()["stored"]
+    sheets = {k: [dict(r) for r in v] for k, v in master_data.tables().items()}
+    next(r for r in sheets["Parameters"] if r["part_type"] == "all" and r["parameter"] == "rejection_pct")["value"] = 10
+    master_data.write(sheets)
+    s = client.get(f"/api/parts/{pid}/piece-cost").json()
+    assert "master data" in s["outdated"] and s["live"]["value_inr"] > s["latest"]["piece_cost_inr"]
+    r = client.post(f"/api/parts/{pid}/piece-cost", json={}).json()
+    assert r["stored"] and r["version"] == 2

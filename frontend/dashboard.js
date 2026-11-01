@@ -55,6 +55,7 @@ function renderLeader() {
   $("leader").innerHTML = `
     ${l.is_example ? window.exampleBanner("The BOM cost or machine prices use EXAMPLE values.") : ""}
     <h3 class="block-title">Project leader view · BOM cost vs target</h3>
+    ${l.scope?.limited ? `<p class="note"><b>${esc(l.scope.note)}</b></p>` : ""}
     <div class="table-wrap"><table class="cost-table"><thead><tr><th>Variant</th><th class="num">Target</th><th class="num">BOM cost</th><th class="num">Difference</th><th class="num">%</th><th>State</th><th class="num">Parts without cost</th></tr></thead><tbody>
       ${l.variants.map((v) => `<tr><td>${esc(v.code)} · ${esc(v.name)}</td><td class="calc num">${inr(v.target_inr)}</td><td class="calc num">${inr(v.bom_cost_inr)}${v.is_example ? " •" : ""}</td>
         <td class="calc num">${v.delta_inr != null ? (v.delta_inr > 0 ? "+" : "") + fmt(v.delta_inr, 2) : "—"}</td><td class="calc num">${v.delta_pct != null ? fmt(v.delta_pct, 1) + " %" : "—"}</td>
@@ -170,7 +171,7 @@ function render() {
       d.capex.tool_share_of_budget_pct > 100 || d.capex.tool_parts_missing > 0) +
     tile("Parts with RM cost", fmt(d.parts_rm_costed), "raw material only") +
     tile("Parts with target", fmt(d.parts_with_target), d.target_piece_cost_sum_inr != null ? `sum of targets ${inr(d.target_piece_cost_sum_inr)}` : "");
-  $("notCosted").textContent = d.not_costed_note;
+  $("notCosted").textContent = d.not_costed_note + (d.scope?.limited ? ` ${d.scope.note}` : "");
   const examples = [d.rm_is_example && "the RM cost of at least one variant", d.tool_is_example && "the tool & mould CAPEX"].filter(Boolean);
   $("exampleBanner").innerHTML = examples.length
     ? window.exampleBanner(`${examples.join(" and ").replace(/^./, (c) => c.toUpperCase())} uses EXAMPLE values (marked •).`) : "";

@@ -83,6 +83,7 @@ $("panelClose").addEventListener("click", () => {
 async function openPart(id) {
   sheetOps = null;
   sheetOpsReset = false;
+  sheetCompare = null;      // a saved change (die type, operations, volume) makes the comparison stale
   try {
     part = await api(`/api/parts/${id}`);
   } catch (err) {
@@ -393,11 +394,14 @@ function toolBlock(p) {
       <button type="button" class="btn btn-outline small" id="conceptRun">Analyse</button> <span class="status" id="conceptStatus"></span>
       <div id="conceptOut"></div></details>
       <details class="card add-insert"><summary class="btn btn-outline small">Simulation &amp; analysis (wall, draft, sink, cycle, clamp)</summary>
-      <p class="note">Analytical estimate from the 3D model and the Simulation rules in Master data, not a flow simulation.</p>
+      <p class="note">Quick analytical check from the 3D model and the Simulation rules in Master data. For the filling, pressure and the defects
+        (weld lines, air traps / blow holes, porosity, stress) use <b>Flow simulation</b> below.</p>
       <button type="button" class="btn btn-outline small" id="simRun">Analyse</button>
       <a class="link" href="/api/parts/${p.id}/simulation/report.pdf">PDF report with maps</a> ·
-      <a class="link" href="/api/parts/${p.id}/simulation/video" title="Takes about 30 s to make">▶ Video (MP4)</a> <span class="status" id="simStatus"></span>
+      <button type="button" class="btn btn-outline small" id="simVideo">▶ Make the video</button> <span class="status" id="simStatus"></span>
+      <div id="simVideoJob"></div>
       <div id="simOut"></div></details>
+      ${flowBox(p)}
       ${processBox(p)}`;
   }
   if (t.versions) {
@@ -907,6 +911,10 @@ function sheetBlock(p) {
         <td class="num">${fmt(o.length, 1)} × ${fmt(o.width, 1)}</td><td class="num">${fmt(o.yield_pct, 1)} %</td><td>${esc(o.note)}</td></tr>`).join("")}</tbody></table></div>
       <p class="note">The chosen blank is used for the gross weight, the RM cost, the nesting and the dies. Type other blank sizes under RM inputs if needed.</p>` : ""}
     ${s.problems.length ? `<h4>Formability</h4><ul>${s.problems.map((x) => `<li>${esc(x.message)}</li>`).join("")}</ul>` : '<p class="note">Formability checks passed.</p>'}
+    <h4>Progressive die vs stage dies</h4>
+    <div id="cmpBox">${sheetCompare && sheetCompare.part_id === p.id ? compareHtml(sheetCompare) : `<p class="note">Part cost, tool CAPEX, die life,
+      amortisation and break-even of both die types, worked out live (nothing is stored).</p>
+      <button type="button" class="btn btn-outline small" data-cmp="1">Compare progressive vs stage dies</button>`}</div>
     ${layoutBlock(p)}
     <form id="sheetForm" class="card grid2">
       <label>Die type <select name="mode"><option value="">Follow the part's process</option>
@@ -921,6 +929,67 @@ function sheetBlock(p) {
       <p class="status span2" id="sheetStatus"></p></form>`;
   return html;
 }
+
+// progressive die vs stage dies (stage 41): live, traced, INR first
+let sheetCompare = null;
+const rs = (v, d = 2) => (v == null ? "—" : `₹${Number(v).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d })}`);
+function compareHtml(c) {
+  const modes = ["progressive", "multi_stage"].filter((m) => c.modes[m]);
+  const errs = Object.entries(c.errors).map(([m, e]) => `<p class="note">${m === "progressive" ? "Progressive die" : "Stage dies"}: ${esc(e)}</p>`).join("");
+  if (!modes.length) return errs;
+  const fx = (m) => (c.modes[m].value ? c.modes[m].value_inr / c.modes[m].value : 1);
+  const cell = (m, name, kind) => {
+    const x = c.modes[m], v = x.named[name];
+    const txt = kind === "inr" ? rs(v * fx(m)) : kind === "lakh" ? rs(v * fx(m), 0) : fmt(v, kind === "int" ? 0 : 2);
+    return `<td class="calc num"><button type="button" class="tv" data-cmptrace="${m}" data-node="calc:${name}">${txt}</button></td>`;
+  };
+  const row = (label, name, kind) => `<tr><td>${label}</td>${modes.map((m) => cell(m, name, kind)).join("")}</tr>`;
+  const head = modes.map((m) => `<th class="num">${esc(c.modes[m].label)}${c.current_mode === m ? " (part's die type)" : ""}</th>`).join("");
+  const name = (m) => (m === "progressive" ? "Progressive die" : "Stage dies");
+  let summary = "";
+  if (c.cheaper) {
+    summary = `<p>At ${Number(c.annual_volume).toLocaleString("en-IN")} parts/yr the <b>${name(c.cheaper)}</b> is cheaper by
+      <b>${rs(c.saving_per_piece_inr)}</b> per part = <b>${rs(c.saving_per_year_inr, 0)}</b> per year.</p>`;
+    summary += c.break_even.length
+      ? c.break_even.map((b) => `<p>Break-even at <b>${Number(b.annual_volume).toLocaleString("en-IN")} parts/yr</b> (${rs(b.piece_inr)} per part):
+          the progressive die is cheaper ${b.progressive_cheaper_above ? "above" : "below"} it.</p>`).join("")
+      : `<p class="note">No break-even between ${Number(c.sweep[0].annual_volume).toLocaleString("en-IN")} and
+          ${Number(c.sweep[c.sweep.length - 1].annual_volume).toLocaleString("en-IN")} parts/yr: the cheaper die type stays the same.</p>`;
+  }
+  const sweep = c.sweep.length ? `<div class="table-wrap"><table class="cost-table" data-nofilter><thead><tr><th class="num">Parts per year</th>
+      <th class="num">Progressive die ₹/part</th><th class="num">Stage dies ₹/part</th><th>Cheaper</th></tr></thead><tbody>
+      ${c.sweep.map((r) => `<tr class="${r.is_part_volume ? "total" : ""}"><td class="num">${Number(r.annual_volume).toLocaleString("en-IN")}${r.is_part_volume ? " (part)" : ""}</td>
+        <td class="num">${rs(r.progressive_inr)}</td><td class="num">${rs(r.multi_stage_inr)}</td>
+        <td>${r.progressive_inr <= r.multi_stage_inr ? "Progressive" : "Stage dies"}</td></tr>`).join("")}</tbody></table></div>
+      <p class="note">${esc(c.break_even_method)}.</p>` : "";
+  return `${c.is_example ? '<p class="note"><span class="badge badge-example">EXAMPLE</span> Uses example rates or parameters – not for negotiation.</p>' : ""}
+    ${errs}${summary}
+    <div class="table-wrap"><table class="cost-table" data-nofilter><thead><tr><th>INR first · click a value for its trace</th>${head}</tr></thead><tbody>
+      <tr><td>Dies and presses</td>${modes.map((m) => `<td>${c.modes[m].dies.map((d) => `${esc(d.name)} · ${esc(d.press)}`).join("<br>")}</td>`).join("")}</tr>
+      ${row("Time per part (s)", "hit_s")}${row("Operators", "operators")}
+      ${row("Process cost per part", "process_cost", "inr")}${row("Ex-works part cost without tool", "ex_works", "inr")}
+      <tr><td>Die set cost (one set)</td>${modes.map((m) => `<td class="calc num"><button type="button" class="tv" data-cmptrace="${m}" data-node="in:tool_cost">${rs(c.modes[m].nodes["in:tool_cost"].value * fx(m), 0)}</button></td>`).join("")}</tr>
+      ${row("Die life (parts)", "tool_life", "int")}${row("Press lines needed", "lines_needed", "int")}
+      ${row("Die sets over the programme", "tools_needed", "int")}${row("Tool CAPEX", "tool_capex", "lakh")}
+      ${row("Parts per die set", "parts_per_tool", "int")}${row("Tool amortisation per part", "amortisation", "inr")}
+      <tr class="total"><td>Part cost per piece</td>${modes.map((m) => cell(m, "piece_cost", "inr")).join("")}</tr>
+      ${row("Cost over the programme", "programme_cost", "lakh")}</tbody></table></div>
+    ${c.formability.length ? `<p class="note">Formability (part's die type): ${c.formability.map(esc).join(" · ")}</p>` : ""}
+    ${sweep}
+    <button type="button" class="btn btn-outline small" data-cmp="1">Recalculate the comparison</button>`;
+}
+$("panelBody").addEventListener("click", async (e) => {
+  const t = e.target.closest("[data-cmptrace]");
+  if (t && sheetCompare) return window.TracePanel.open(sheetCompare.modes[t.dataset.cmptrace], t.dataset.node);
+  if (!e.target.closest("[data-cmp]")) return;
+  $("cmpBox").innerHTML = '<p class="note">Working out both die types…</p>';
+  try {
+    sheetCompare = await api(`/api/parts/${part.id}/sheet-compare`);
+    $("cmpBox").innerHTML = compareHtml(sheetCompare);
+  } catch (err) {
+    $("cmpBox").innerHTML = `<p class="note">${esc(err.message)}</p>`;
+  }
+});
 
 // operation order editor: the current sequence (yours or the suggested one), move up / down, remove, add, reset
 let sheetOps = null;        // codes in order while editing; null = untouched
@@ -1604,3 +1673,151 @@ $("panelBody").addEventListener("change", (e) => {
 });
 
 init();
+
+// ---------- flow simulation, background jobs with progress, saved simulation runs (stage 39) ----------
+function flowBox(p) {
+  return `<details class="card add-insert" id="flowBox"><summary class="btn btn-outline small">Flow simulation (fill, pressure, weld lines, air traps / blow holes, porosity, cooling, stress, machine)</summary>
+    <p class="note">Physics solver on the 3D model (dual-domain method): fill pattern from the gate, injection / metal pressure, clamp force,
+      flow-front temperature, cooling or solidification time, and where the defects are: short shot / misrun, weld lines / cold shuts,
+      air traps / gas porosity and blow holes, sinks / shrinkage porosity (feeding of hot spots), stress at sharp corners and uneven cooling.
+      Material data and rules: Mould &amp; die database → Flow materials, Flow rules (EXAMPLE until replaced). Runs in the background with a progress bar;
+      every run is saved with its PDF report and video. For the tool release of a critical part, also attach the report of Moldflow / MAGMA / ProCAST.</p>
+    <form id="flowForm" class="toolbar">
+      <label>Gates <input type="number" name="gates" min="1" max="8" value="1" style="width:4em" /></label>
+      <label>Gate point x, y, z (mm) <input name="gate_point" placeholder="empty = found by the solver" size="22" /></label>
+      <label class="check"><input type="checkbox" name="video" checked /> Video</label>
+      <button type="submit" class="btn btn-primary small">Run flow simulation</button>
+    </form>
+    <div id="flowJob"></div><div id="flowOut"></div>
+    <h4>Saved simulation runs</h4><div id="simRuns"><p class="note">Loading…</p></div>
+    <form id="simAttach" class="toolbar">
+      <label>Attach a report of another program <input type="file" name="file" accept=".pdf,.mp4" required /></label>
+      <label>Program <input name="program" placeholder="Moldflow, MAGMA, ProCAST…" size="14" /></label>
+      <label>Note <input name="note" size="16" /></label>
+      <button type="submit" class="btn btn-outline small">Attach</button> <span class="status" id="simAttachStatus"></span>
+    </form></details>`;
+}
+
+const jobBox = (j) => `<div class="card"><progress max="100" value="${j.pct}" style="width:100%"></progress>
+  <p class="note">${j.status === "failed" ? `<b class="error">Failed:</b> ${esc(j.error)}` : `${esc(j.text)} · ${j.pct} % · ${fmt(j.elapsed_s, 0)} s`}</p></div>`;
+
+// start a background job and show its progress until it is done; then onDone(job)
+async function runJob(url, box, onDone, body) {
+  let j;
+  try {
+    j = await api(url, { method: "POST", body: JSON.stringify(body || {}) });
+  } catch (err) {
+    box.innerHTML = `<p class="status error">${esc(err.message)}</p>`;
+    return;
+  }
+  const partId = part.id;
+  while (true) {
+    box.innerHTML = jobBox(j);
+    if (j.status === "done") return onDone(j);
+    if (j.status === "failed") return;
+    await new Promise((r) => setTimeout(r, 2000));
+    if (!part || part.id !== partId) return;          // another part was opened: the job goes on, its run is saved
+    try {
+      j = await api(`/api/parts/${partId}/sim-jobs/${j.id}`);
+    } catch (err) {
+      box.innerHTML = `<p class="status error">${esc(err.message)}</p>`;
+      return;
+    }
+  }
+}
+
+const kindName = { flow: "Flow simulation", analysis_video: "Analysis video", external: "Attached report" };
+async function loadRuns() {
+  const el = $("simRuns");
+  if (!el || !part) return;
+  try {
+    const runs = await api(`/api/parts/${part.id}/sim-runs`);
+    const base = `/api/parts/${part.id}/sim-runs`;
+    el.innerHTML = runs.length ? `<div class="table-wrap"><table class="cost-table"><thead><tr><th>When</th><th>Rev</th><th>Run</th><th>By</th>
+      <th class="num">Clamp t</th><th class="num">Cycle s</th><th>Corrections</th><th>Files</th><th></th></tr></thead><tbody>
+      ${runs.map((r) => `<tr><td>${esc((r.created_at || "").replace("T", " ").slice(0, 16))}</td><td>${esc(r.rev)}</td>
+        <td>${esc(r.title || kindName[r.kind] || r.kind)}${r.is_example ? ' <span class="note">(EXAMPLE data)</span>' : ""}</td><td>${esc(r.created_by)}</td>
+        <td class="num">${r.results.clamp_t == null ? "" : fmt(r.results.clamp_t, 0)}</td><td class="num">${r.results.cycle_s == null ? "" : fmt(r.results.cycle_s, 1)}</td>
+        <td>${r.kind === "external" ? "" : r.corrections.length || "none"}</td>
+        <td>${r.pdf ? `<a class="link" href="${base}/${r.id}/pdf">⬇ PDF</a>` : ""} ${r.video ? `<a class="link" href="${base}/${r.id}/video">▶ Video</a>` : ""}</td>
+        <td><button type="button" class="btn btn-outline small" data-rundel="${r.id}" title="Delete this run">✕</button></td></tr>`).join("")}</tbody></table></div>`
+      : '<p class="note">No saved run yet.</p>';
+  } catch (err) {
+    el.innerHTML = `<p class="status error">${esc(err.message)}</p>`;
+  }
+}
+
+function flowResult(r) {
+  const s = r.summary, x = s.results || {};
+  const row = (label, v, unit, d = 1) => (v == null ? "" : `<tr><td>${label}</td><td class="num">${fmt(v, d)}</td><td>${unit}</td></tr>`);
+  return `${r.is_example ? '<p class="note"><b>Uses EXAMPLE flow data / rules.</b></p>' : ""}
+    <h4>${s.corrections.length ? "Corrections required" : "No corrections required"}</h4>
+    <ul>${s.corrections.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+    <p>Gate ${s.gates.map((g) => `(${g.at_mm.join(", ")})`).join(", ") || "-"} mm · ${esc(s.gate_note)} · machine <b>${esc(s.machine?.machine_id || (x.clamp_t ? "none large enough" : "-"))}</b>
+      ${s.machine?.tonnage_t ? ` (${fmt(s.machine.tonnage_t)} t)` : ""}</p>
+    <div class="table-wrap"><table class="cost-table"><tbody>
+      ${row("Fill time", x.fill_time_s, "s", 3)}${row("Injection pressure", x.injection_bar, "bar", 0)}${row("Hold pressure in the cavity", x.hold_bar, "bar", 0)}
+      ${row("Intensification pressure", x.intensification_bar, "bar", 0)}${row("Coolest flow front", x.front_temp_min_c, "°C", 0)}
+      ${row("Cooling time", x.cooling_s, "s")}${row("Solidification time", x.solidification_s, "s")}${row("Cycle time", x.cycle_s, "s")}
+      ${row("Clamp force", x.clamp_t, "t", 0)}${row("Weight on the cope", x.cope_weight_kg, "kg", 0)}${row("Shot weight", x.shot_weight_g, "g", 0)}
+      ${row("Longest flow path", x.flow_length_mm, "mm", 0)}${row("Highest stretch ratio", x.stretch_max, "", 1)}${row("Thinnest wall after blowing", x.wall_min_mm, "mm", 2)}
+    </tbody></table></div>
+    <p><a class="link" href="/api/parts/${part.id}/sim-runs/${r.id}/pdf">⬇ PDF report with maps</a>
+      ${r.video_file_id ? ` · <a class="link" href="/api/parts/${part.id}/sim-runs/${r.id}/video">▶ Video</a>` : ""}</p>`;
+}
+
+$("panelBody").addEventListener("toggle", (e) => {
+  if (e.target.id === "flowBox" && e.target.open) loadRuns();
+}, true);
+
+$("panelBody").addEventListener("submit", async (e) => {
+  if (e.target.id === "flowForm") {
+    e.preventDefault();
+    const f = e.target.elements;
+    const gp = f.gate_point.value.trim();
+    const body = { gates: Number(f.gates.value || 1), video: f.video.checked,
+                   gate_point: gp ? gp.split(/[,;\s]+/).filter(Boolean).map(Number) : null };
+    if (body.gate_point && (body.gate_point.length !== 3 || body.gate_point.some((v) => !Number.isFinite(v)))) {
+      $("flowJob").innerHTML = '<p class="status error">Gate point: three numbers x, y, z in mm (or leave it empty).</p>';
+      return;
+    }
+    $("flowOut").innerHTML = "";
+    await runJob(`/api/parts/${part.id}/flow-simulation`, $("flowJob"), async (j) => {
+      const r = await api(`/api/parts/${part.id}/sim-runs/${j.run_id}`);
+      $("flowJob").innerHTML = "";
+      $("flowOut").innerHTML = flowResult(r);
+      loadRuns();
+    }, body);
+  }
+  if (e.target.id === "simAttach") {
+    e.preventDefault();
+    try {
+      await api(`/api/parts/${part.id}/sim-runs/external`, { method: "POST", body: new FormData(e.target) });
+      e.target.reset();
+      status($("simAttachStatus"), "Attached.");
+      loadRuns();
+    } catch (err) {
+      status($("simAttachStatus"), err.message, "error");
+    }
+  }
+});
+
+$("panelBody").addEventListener("click", async (e) => {
+  if (e.target.id === "simVideo") {
+    await runJob(`/api/parts/${part.id}/simulation/video-job`, $("simVideoJob"), (j) => {
+      $("simVideoJob").innerHTML = `<p>Video ready: <a class="link" href="/api/parts/${part.id}/sim-runs/${j.run_id}/video">▶ open / download</a>
+        (saved under Flow simulation → Saved simulation runs).</p>`;
+      loadRuns();
+    });
+  }
+  const del = e.target.closest("[data-rundel]");
+  if (del) {
+    if (!confirm("Delete this saved simulation run (its PDF and video stay in the storage folder)?")) return;
+    try {
+      await api(`/api/parts/${part.id}/sim-runs/${del.dataset.rundel}`, { method: "DELETE" });
+      loadRuns();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+});

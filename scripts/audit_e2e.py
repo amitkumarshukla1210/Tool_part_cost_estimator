@@ -45,9 +45,10 @@ CASES = [
     ("sheet_channel_large", "large_sheet_channel.step", "Mild steel CRCA / HR", "sheet_metal_multistage", 30000, "sheet_metal"),
     ("eps", "plastic_cover.step", "EPS bead grade S (20 kg/m3)", "eps_moulding", 100000, "eps"),
     ("blow", "pet_bottle.step", "PET bottle grade (IV 0.80)", "stretch_blow_moulding", 5000000, "blow"),
-    ("machined", "plate_with_hole.step", "Mild steel CRCA / HR", "machined", 5000, ""),
+    ("machined_shaft", "machined_shaft.step", "Carbon steel EN8 (C45) bar", "machined", 20000, "machined"),
+    ("machined_block", "machined_block.step", "Aluminium 6061-T6 bar", "machined", 5000, "machined"),
 ]
-TOOL_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow")
+TOOL_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow")      # moulds and dies (detailed tool design)
 MOULD_TYPES = ("plastic", "die_casting", "eps", "blow", "foundry")
 
 
@@ -194,17 +195,18 @@ def run_case(a: Audit, name, file, material, process, volume, ptype) -> dict:
     out = {"case": name, "part_id": pid, "ok": True}
     d = a.call(name, "get", P)
     a.call(name, "get", f"{P}/trace")
-    rx = "ok" if ptype else "any"              # machined / bought-out: RM comes in a later stage (main says so)
+    rx = "ok" if ptype else "any"              # bought-out / assembly: no RM of their own
     a.call(name, "post", f"{P}/rm-cost", json={}, expect=rx)
     a.call(name, "get", f"{P}/rm-cost/trace", expect=rx)
     a.call(name, "get", f"{P}/rm-cost/export.xlsx", expect=rx, file_kind="xlsx")
     a.call(name, "get", f"{P}/rm-cost/export.pdf", expect=rx, file_kind="pdf")
     a.call(name, "get", f"{P}/concept", expect="ok" if mould else "any")
     a.call(name, "get", f"{P}/design-loop")
-    tc = a.call(name, "post", f"{P}/tool-cost", json={}, expect="ok" if tool else "any")
-    a.call(name, "get", f"{P}/tool-cost/trace", expect="ok" if tool else "any")
-    a.call(name, "get", f"{P}/tool-cost/export.xlsx", expect="ok" if tool else "any", file_kind="xlsx")
-    a.call(name, "get", f"{P}/tool-cost/export.pdf", expect="ok" if tool else "any", file_kind="pdf")
+    costed_tool = tool or ptype == "machined"           # machined: machining & fixture is stored as the tool cost (stage 37)
+    tc = a.call(name, "post", f"{P}/tool-cost", json={}, expect="ok" if costed_tool else "any")
+    a.call(name, "get", f"{P}/tool-cost/trace", expect="ok" if costed_tool else "any")
+    a.call(name, "get", f"{P}/tool-cost/export.xlsx", expect="ok" if costed_tool else "any", file_kind="xlsx")
+    a.call(name, "get", f"{P}/tool-cost/export.pdf", expect="ok" if costed_tool else "any", file_kind="pdf")
     sim = a.call(name, "get", f"{P}/simulation", expect="ok" if mould else "any")
     if mould:
         a.call(name, "get", f"{P}/simulation/report.pdf", file_kind="pdf")
@@ -214,8 +216,25 @@ def run_case(a: Audit, name, file, material, process, volume, ptype) -> dict:
         for k, fk in (("blank.dxf", "dxf"), ("strip.dxf", "dxf"), ("tool-pack.pdf", "pdf")):
             a.call(name, "get", f"{P}/sheet-layout/{k}", file_kind=fk)
         a.call(name, "get", f"{P}/forming-simulation.pdf", file_kind="pdf")
+        cmp = a.call(name, "get", f"{P}/sheet-compare")          # stage 41: progressive die vs stage dies
+        if cmp:
+            for mode, err in cmp["errors"].items():      # a die type may not fit (e.g. no die set for a large progressive die)
+                if not err or err.count(":") > 1 and err.split(":")[0] == err.split(":")[1].strip():
+                    a._find(name, "sheet-compare", f"{mode} not costed without a clear message", err)
+            if not cmp["modes"]:
+                a._find(name, "sheet-compare", "neither die type costed", repr(cmp["errors"]))
+            for mode, x in cmp["modes"].items():
+                nm = x["named"]
+                if abs(x["value"] - (nm["ex_works"] + nm["amortisation"])) > 1e-6 * max(1, x["value"]):
+                    a._find(name, "sheet-compare", f"{mode}: part cost is not ex-works + amortisation", "")
+                if nm["tools_needed"] < nm["lines_needed"] or nm["parts_per_tool"] > nm["tool_life"] + 1e-9:
+                    a._find(name, "sheet-compare", f"{mode}: die sets / parts per die set inconsistent", repr(nm))
+            for b in cmp["break_even"]:
+                if not cmp["sweep"][0]["annual_volume"] <= b["annual_volume"] <= cmp["sweep"][-1]["annual_volume"]:
+                    a._find(name, "sheet-compare", "break-even outside the volume range", repr(b))
     else:
         a.call(name, "get", f"{P}/sheet-tools", expect="any")
+        a.call(name, "get", f"{P}/sheet-compare", expect="any")
     a.call(name, "get", f"{P}/correction", expect="any")
     pc = a.call(name, "post", f"{P}/piece-cost", json={}, expect="ok" if ptype else "any")
     stored = a.call(name, "get", P) or {}
@@ -227,7 +246,14 @@ def run_case(a: Audit, name, file, material, process, volume, ptype) -> dict:
             a._find(name, "part cost", "part cost below its RM cost", f"{out['piece_inr']:.2f} < {out['rm_inr']:.2f}")
     if tool:
         _positive(a, name, "tool cost", out["tool_inr"])
-    a.call(name, "get", f"{P}/piece-cost/trace", expect="ok" if ptype else "any")
+    ptr = a.call(name, "get", f"{P}/piece-cost/trace", expect="ok" if ptype else "any")
+    if ptype and ptr and "calc:parts_per_tool" in (ptr.get("nodes") or {}):      # stage 41: amortisation by tool / mould life
+        nd = ptr["nodes"]
+        ppt = nd["calc:parts_per_tool"]["value"]
+        if ppt <= 0 or ppt > nd["in:lifetime_volume"]["value"] + 1e-6:
+            a._find(name, "piece-cost", "parts per tool not within the programme", repr(ppt))
+        elif abs(nd["calc:amortisation"]["value"] - nd["in:tool_cost"]["value"] / ppt) > 1e-6 * max(1, nd["calc:amortisation"]["value"]):
+            a._find(name, "piece-cost", "amortisation is not tool cost ÷ parts per tool", "")
     a.call(name, "get", f"{P}/piece-cost/export.xlsx", expect="ok" if ptype else "any", file_kind="xlsx")
     a.call(name, "get", f"{P}/piece-cost/export.pdf", expect="ok" if ptype else "any", file_kind="pdf")
     a.call(name, "get", f"{P}/drawing.pdf", file_kind="pdf")
@@ -307,7 +333,7 @@ def logins(a: Audit) -> None:
             s.post("/api/auth/logout")
             s.post("/api/auth/login", json={"username": "eng", "password": "correct horse battery"})
             seen = {p["process"] for p in s.get("/api/parts", params={"limit": 500}).json()["rows"]}
-            if seen - {"sheet_metal_multistage", "sheet_metal_progressive", "machined", "bought_out", "assembly", ""}:
+            if seen - {"sheet_metal_multistage", "sheet_metal_progressive", "bought_out", "assembly", ""}:
                 a._find("logins", "/api/parts", "engineer sees parts outside the tool group", ", ".join(sorted(seen)))
             if plastic and s.get(f"/api/parts/{plastic['id']}").status_code != 403:
                 a._find("logins", f"/api/parts/{plastic['id']}", "engineer opens another group's part", "")

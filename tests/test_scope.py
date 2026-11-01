@@ -102,3 +102,64 @@ def test_files_and_variants_of_other_groups_are_refused(server):
     server.post("/api/auth/logout")
     login(server)
     assert server.get(f"/api/files/{file_id}").status_code == 200
+
+
+def _part_in_variant(c, project_id, variant_id, file, material, process, code):
+    with open(SAMPLES / file, "rb") as fh:
+        m = c.post("/api/import/step", files={"file": (file, fh)}).json()
+    r = c.post(f"/api/import/{m['token']}/commit", json={"project_id": project_id, "variant_id": variant_id,
+                                                          "items": {m["root"]: {"material": material, "process": process, "part_code": code}}})
+    assert r.status_code == 200, r.text
+    pid = r.json()["part_ids"][0]
+    for u in ("rm-cost", "tool-cost", "piece-cost"):
+        c.post(f"/api/parts/{pid}/{u}", json={})
+    return pid
+
+
+def test_project_dashboard_and_leader_view_count_only_my_tool_groups(server):
+    """Stage 40: a limited user's project totals (dashboard, leader view, exports) cover their tool groups only."""
+    login(server)
+    p = server.post("/api/projects", json={"code": "MIX", "name": "Mixed project"}).json()
+    vid = next(v["id"] for v in server.post(f"/api/projects/{p['id']}/variants", json={"code": "V1", "name": "Base", "annual_volume": 10000,
+                                                                                       "target_bom_cost_inr": 100}).json()["variants"])
+    pl = _part_in_variant(server, p["id"], vid, "plastic_cover.step", "ABS", "injection_moulding", "MIX-PL")
+    sm = _part_in_variant(server, p["id"], vid, "example_bracket_revA.step", "Galvanised steel GI", "sheet_metal_multistage", "MIX-SM")
+    full = server.get(f"/api/projects/{p['id']}/dashboard").json()
+    lead_full = server.get(f"/api/projects/{p['id']}/leader").json()
+    assert full["parts_total"] == 2 and not full["scope"]["limited"]
+    server.post("/api/auth/logout")
+    _user(server, "smu", "engineer", ["sheet_metal"])
+    login(server, "smu")
+    d = server.get(f"/api/projects/{p['id']}/dashboard").json()
+    sm_capex = server.get(f"/api/parts/{sm}").json()["tool_capex_inr"]
+    assert d["parts_total"] == 1 and d["scope"]["limited"] and d["scope"]["hidden_parts"] == 1 and "not counted" in d["scope"]["note"]
+    assert abs(d["capex"]["tool_cost_inr"] - sm_capex) < 0.01 < full["capex"]["tool_cost_inr"] - sm_capex
+    lead = server.get(f"/api/projects/{p['id']}/leader").json()
+    lines = lead["variants"][0]["lines"]
+    assert [l["part_code"] for l in lines] == ["MIX-SM"] and len(lead_full["variants"][0]["lines"]) == 2
+    assert lead["capex"]["tool_inr"] < lead_full["capex"]["tool_inr"]
+    assert all(m["machine_id"].startswith("PRESS") for m in lead["machines"]["rows"])           # no moulding machine of the plastic part
+    from openpyxl import load_workbook
+    import io
+    wb = load_workbook(io.BytesIO(server.get(f"/api/projects/{p['id']}/leader.xlsx").content))
+    assert any("not counted" in str(c.value) for row in wb.worksheets[0].iter_rows() for c in row)
+    assert server.get(f"/api/projects/{p['id']}/dashboard.pdf").status_code == 200
+    server.post("/api/auth/logout")
+    _user(server, "hod", "head", [])
+    login(server, "hod")
+    assert server.get(f"/api/projects/{p['id']}/dashboard").json()["parts_total"] == 2
+
+
+def test_machined_parts_are_the_tool_group_machining(server):
+    """Machined parts (stage 37) are a tool group of their own: only users with Machining ticked see them."""
+    login(server)
+    p = server.post("/api/projects", json={"code": "MCH", "name": "Machined"}).json()
+    assert _part(server, p["id"], "plate_with_hole.step", "Mild steel CRCA / HR", "machined", "MCH-1").status_code == 200
+    server.post("/api/auth/logout")
+    _user(server, "mach", "engineer", ["machined"])
+    _user(server, "sheet2", "engineer", ["sheet_metal"])
+    login(server, "mach")
+    assert [r["part_code"] for r in server.get("/api/parts").json()["rows"]] == ["MCH-1"]
+    server.post("/api/auth/logout")
+    login(server, "sheet2")
+    assert server.get("/api/parts").json()["rows"] == []
