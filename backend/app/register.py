@@ -1256,7 +1256,7 @@ def rm_summary(d: dict) -> dict:
         out["problem"] = " ".join(r["missing"])
     elif latest is None:
         out["outdated"] = "The RM cost has not been calculated yet."
-    elif latest["key"] != r["key"]:
+    elif not _same_key(latest["key"], r["key"]):
         strip = lambda k: {a: b for a, b in k.items() if a not in ("rates", "as_of")}
         changes = _rate_changes(latest["rates_used"] or [], _rates_used(r))
         if strip(latest["key"]) == strip(r["key"]) and (changes or latest["key"]["as_of"] != r["key"]["as_of"]):
@@ -1281,7 +1281,7 @@ def compute_rm(part_id: int, reason: str = "calculated") -> dict:
     with db.engine().begin() as conn:
         last = conn.execute(select(db.rm_costs).where(db.rm_costs.c.part_id == part_id)
                             .order_by(db.rm_costs.c.version.desc()).limit(1)).mappings().first()
-        if last and last["key"] == r["key"]:
+        if last and _same_key(last["key"], r["key"]):
             return {"stored": False, "version": last["version"], "message": f"Already up to date (version {last['version']})."}
         version = (last["version"] if last else 0) + 1
         rid = conn.execute(db.rm_costs.insert().values(
@@ -1434,6 +1434,14 @@ def refresh_costs(part_ids, reason: str) -> None:
 
 class ToolNotApplicable(Exception):
     """No tool cost for this part (the message says why and what to do)."""
+
+
+def _same_key(a: dict, b: dict) -> bool:
+    """Is a stored cost still current? A new costing month alone is not a change: while the same approved rate versions
+    are used (no new price in the month) the stored version stays; a changed price, input or formula makes a new one."""
+    if a == b:
+        return True
+    return a.get("rates") == b.get("rates") and {k: v for k, v in a.items() if k != "as_of"} == {k: v for k, v in b.items() if k != "as_of"}
 
 
 TOOL_COLUMNS = ("id", "part_id", "version", "revision_id", "rev", "part_type", "country", "currency", "as_of", "inputs",
@@ -1677,7 +1685,7 @@ def piece_summary(part_id: int) -> dict:
     out["live"] = r
     if latest is None:
         out["outdated"] = "The part cost has not been stored yet."
-    elif latest["key"] != r["key"]:
+    elif not _same_key(latest["key"], r["key"]):
         same = {k: v for k, v in latest["key"].items() if k not in ("rates", "as_of")} == {k: v for k, v in r["key"].items() if k not in ("rates", "as_of")}
         out["outdated"] = (f"Newer approved rates exist than the ones used in part cost version {latest['version']}." if same
                            else f"RM / tool cost, inputs, master data, formulas or revision changed since part cost version {latest['version']}.")
@@ -1692,7 +1700,7 @@ def compute_piece(part_id: int, reason: str = "calculated") -> dict:
     with db.engine().begin() as conn:
         last = conn.execute(select(db.piece_costs).where(db.piece_costs.c.part_id == part_id)
                             .order_by(db.piece_costs.c.version.desc()).limit(1)).mappings().first()
-        if last and last["key"] == r["key"]:
+        if last and _same_key(last["key"], r["key"]):
             return {"stored": False, "version": last["version"], "message": f"Part cost already up to date (version {last['version']})."}
         version = (last["version"] if last else 0) + 1
         conn.execute(db.piece_costs.insert().values(
@@ -2386,7 +2394,7 @@ def tool_summary(d: dict) -> dict:
         out["problem"] = " ".join(r["missing"])
     elif latest is None:
         out["outdated"] = "The tool cost has not been calculated yet."
-    elif latest["key"] != r["key"]:
+    elif not _same_key(latest["key"], r["key"]):
         strip = lambda k: {a: b for a, b in k.items() if a not in ("rates", "as_of")}
         changes = _rate_changes(latest["rates_used"] or [], _rates_used(r))
         if strip(latest["key"]) == strip(r["key"]) and (changes or latest["key"]["as_of"] != r["key"]["as_of"]):
@@ -2408,7 +2416,7 @@ def compute_tool(part_id: int, reason: str = "calculated") -> dict:
     with db.engine().begin() as conn:
         last = conn.execute(select(db.tool_costs).where(db.tool_costs.c.part_id == part_id)
                             .order_by(db.tool_costs.c.version.desc()).limit(1)).mappings().first()
-        if last and last["key"] == r["key"]:
+        if last and _same_key(last["key"], r["key"]):
             return {"stored": False, "version": last["version"],
                     "message": f"Tool cost already up to date (version {last['version']})."}
         version = (last["version"] if last else 0) + 1
