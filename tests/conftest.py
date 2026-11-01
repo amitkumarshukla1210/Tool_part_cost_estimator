@@ -21,3 +21,31 @@ def master_data_copy(tmp_path, monkeypatch):
     # logins are on by default; the tests run without them unless a test turns them on (test_server_mode)
     monkeypatch.setenv("DTC_MODE", "local")
     return copy
+
+
+class Clock:
+    """The date the software sees as 'today'. Frozen in the tests so they pass in any real month."""
+
+    def __init__(self, iso: str):
+        self.iso = iso
+
+    def set(self, iso: str) -> None:
+        self.iso = iso
+
+
+@pytest.fixture(autouse=True)
+def clock(monkeypatch):
+    """Freeze 'today' at 2026-10-31 (the month the example rates start). A test moves the clock with clock.set('2026-11-05')."""
+    import datetime
+
+    from backend.app import rates
+
+    state = Clock("2026-10-31")
+
+    class FrozenDate(datetime.date):
+        @classmethod
+        def today(cls):
+            return cls.fromisoformat(state.iso)
+
+    monkeypatch.setattr(rates, "date", FrozenDate)
+    return state
