@@ -51,14 +51,19 @@ def seed() -> int:
 
 
 def _cycle_rule(key: str) -> tuple[float, bool]:
+    """(value, is_example) of a press-speed row; no built-in number: the row must be in Master data → Design rules."""
     r = mould_db.design_rules("sheet_metal").get(key)
-    if r and r["value"] is not None:
-        return float(r["value"]), bool(r.get("is_example"))
-    return float(CYCLE_RULES[key][0]), True
+    if not r or r["value"] is None:
+        raise ValueError(f"Master data → Design rules has no sheet_metal / {key} row (run the master-data update to add it).")
+    v = float(r["value"])
+    if v <= 0:
+        raise ValueError(f"Master data → Design rules sheet_metal / {key} must be above 0 (it is {v:g}).")
+    return v, bool(r.get("is_example"))
 
 
-def calculated_cycle(part_id: int, part_type: str) -> tuple[float | None, str]:
-    """The cycle time worked out for this part (s) and where it comes from; (None, reason) when it cannot be worked out.
+def calculated_cycle(part_id: int, part_type: str) -> tuple[float | None, str, bool]:
+    """The cycle time worked out for this part (s), where it comes from and whether it rests on EXAMPLE rules;
+    (None, reason, False) when it cannot be worked out.
 
     Moulds, dies, EPS and blow tools: the cycle of the simulation (fill + cooling + open / eject, insert loading).
     Sheet metal: strokes per part ÷ press speed (Design rules press_spm*), slower for drawn parts."""
@@ -69,19 +74,19 @@ def calculated_cycle(part_id: int, part_type: str) -> tuple[float | None, str]:
             ops = res.get("operations") or []
             prog = res.get("mode") == "progressive"
             drawn = float((res.get("features") or {}).get("draw_depth") or 0) > 0
-            spm, _ = _cycle_rule("press_spm" if prog else "press_spm_manual")
+            spm, ex1 = _cycle_rule("press_spm" if prog else "press_spm_manual")
             strokes = 1 if prog else max(len(ops), 1)
-            factor = _cycle_rule("press_spm_draw_factor")[0] if drawn else 1.0
+            factor, ex2 = _cycle_rule("press_spm_draw_factor") if drawn else (1.0, False)
             return strokes * 60 / (spm * factor), (
                 f"Press speed rule: {strokes} stroke(s) per part ({'progressive die' if prog else 'one stroke per operation'}) at "
-                f"{spm * factor:g} strokes/min{' (drawn part)' if drawn else ''}: Master data → Design rules press_spm*")
+                f"{spm * factor:g} strokes/min{' (drawn part)' if drawn else ''}: Master data → Design rules press_spm*"), ex1 or ex2
         _, _, res = register._simulate(part_id)
         cyc = res["results"].get("cycle_s")
         if cyc and cyc > 0:
-            return float(cyc), "Cycle time of the part's simulation (fill + cooling + open / eject, insert loading), not the target"
-        return None, "the simulation gave no cycle time"
-    except (register.RegisterError, register.ToolNotApplicable, ValueError, KeyError) as exc:
-        return None, str(exc)
+            return float(cyc), "Cycle time of the part's simulation (fill + cooling + open / eject, insert loading), not the target", False
+        return None, "the simulation gave no cycle time", False
+    except (register.RegisterError, register.ToolNotApplicable, ValueError, KeyError, ZeroDivisionError) as exc:
+        return None, str(exc), False
 
 
 def graft(t: Trace, sub: dict, prefix: str) -> str:
@@ -183,17 +188,16 @@ def run(part_id: int, country: str | None = None) -> dict:
         tools_cap, cap_note = stage_c["tools_for_capacity"], f"Tools for capacity: {stage_c.get('note', 'Stage C')}"
     else:   # machined: one fixture set per machine; older versions without Stage C: the tools of the version
         tools_cap, cap_note = tool_tr.get("tools_count") or 1, stage_c.get("note") or f"Tools of tool cost version {tool['version']}"
+    cycle_example = False
     if tool_tr.get("cycle_node") and "cycle_s" not in typed:   # machined (stage 37): the traced machining time
         cycle = graft(t, tool_tr, "mc:") and "mc:" + tool_tr["cycle_node"]
     elif "cycle_s" in typed:
         cycle = (typed["cycle_s"], "s", you, False)
     else:
-        calc, why = calculated_cycle(part_id, part_type)
-        if calc:   # the cycle worked out for the part, not the target of Parameters (editable per part)
-            cycle = (round(calc, 3), "s", reg(why), False)
-        else:
-            cycle = (params.get("cycle_time_s"), "s", {"type": "master", "sheet": "Parameters", "row": f"{part_type} / cycle_time_s",
-                                                       "note": f"Target cycle used because the cycle could not be calculated: {why}"}, False)
+        calc, why, cycle_example = calculated_cycle(part_id, part_type)
+        if not calc:   # always the calculated cycle: the target of Parameters is not used for the part cost
+            raise PieceError(f"Cycle time: it cannot be calculated ({why}). Type a cycle time on the part to cost it.")
+        cycle = (round(calc, 3), "s", reg(why) | ({"is_example": True} if cycle_example else {}), False)
     items = {
         "rm_cost": (rm["net_rm_cost"], cur, reg(f"RM cost version {rm['version']} (rev {rm['rev']})"), True),
         "cycle_s": cycle,
@@ -264,5 +268,5 @@ def run(part_id: int, country: str | None = None) -> dict:
                   "cycle_s": t.value(names["cycle_s"]) if "cycle_s" in names else None,
                   "overrides": (d.get("trace_overrides") or {}).get("piece") or {},
                   "rates": sorted(x["id"] for x in out["rates_used"]), "as_of": as_of, "master": master_hash(part_type)}
-    out["is_example"] = any(x.get("is_example") for x in out["rates_used"])
+    out["is_example"] = any(x.get("is_example") for x in out["rates_used"]) or cycle_example
     return out
