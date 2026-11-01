@@ -13,6 +13,7 @@ Holds the data that sizes a mould or die and builds its BOM:
                     or a rate per unit (kg, cm², ...); its machine, labour grade, operators and cost group
     design_rules    detailed 3D tool design: clearances, fits, plate / pillar / screw sizes, tolerances, finish, shrinkage
     general_tolerances  ISO 2768-1 linear and angular general tolerances by class, printed on the tool drawings (stage 31)
+    review_checklist  toolmaker review before the tool design is frozen (stage 43)
     process_windows / process_parameters  material temperature windows and the formulas of the process setting sheet (stage 34)
     flow_materials / flow_rules  material data and rules of the flow simulation (stage 39)
     fit_tolerances  ISO 286 limits of the fits (H7, g6 …) by size: the tolerance of every fitted dimension (stage 32)
@@ -268,6 +269,16 @@ TABLES = {
         col("is_example", "Example", "bool"),
         col("notes", "Notes", required=False),
     ]},
+    "review_checklist": {"title": "Review checklist", "unique": ("part_type", "item"), "columns": [
+        col("part_type", "Part type", "part_type", PART_TYPES),
+        col("step", "Order", "number"),
+        col("item", "Checklist point"),
+        col("rule", "Check formula (blank = signed by the toolmaker)", "formula", required=False),
+        col("message", "Message when the check fails", required=False),
+        col("blocking", "Blocks freezing the tool design", "bool"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes", required=False),
+    ]},
     "process_windows": {"title": "Process windows", "unique": ("material",), "columns": [
         col("material", "Material (Master data → Materials)"),
         col("melt_c", "Melt / metal / pour / preform temperature (°C)", "number"),
@@ -359,11 +370,12 @@ TABLES = {
 
 
 def _check(clean: dict) -> None:
-    from . import dim_tolerances, drawing_data, flow_sim, process_params
+    from . import dim_tolerances, drawing_data, flow_sim, process_params, tool_review
     flow_sim.validate(clean)
     drawing_data.validate(clean)
     dim_tolerances.validate(clean)
     process_params.validate(clean)
+    tool_review.validate(clean)
     for i, r in enumerate(clean.get("stock_sizes", []), start=2):
         if r["size_mm"] <= 0 or r["width_mm"] < 0 or not 0 < r["section_factor"] <= 1:
             raise MouldDbError(f"Stock sizes row {i}: size must be more than 0, width 0 or more and the section factor between 0 and 1.")

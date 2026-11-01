@@ -1065,6 +1065,43 @@ def parts_tool_design_file(part_id: int, kind: str, die: Optional[str] = None):
     return Response(data, media_type=media, headers={"Content-Disposition": f'{disp}; filename="{name}"'})
 
 
+# ---------- toolmaker review of the tool design (roadmap stage 43) ----------
+
+@app.get("/api/parts/{part_id}/tool-review")
+def parts_tool_review(part_id: int):
+    """The review checklist per tool: automatic checks, the toolmaker's sign-offs, and what still blocks freezing the design."""
+    from . import tool_review
+    return _design_error(lambda: tool_review.review(part_id))
+
+
+@app.post("/api/parts/{part_id}/tool-review")
+def parts_tool_review_sign(part_id: int, data: dict):
+    """Sign one checklist point of one tool: status ok / issue / na / waived (issue and waived need a comment). Kept as history."""
+    from . import tool_review
+    return _design_error(lambda: tool_review.sign(part_id, str(data.get("tool") or ""), str(data.get("item") or ""),
+                                                  str(data.get("status") or ""), data.get("comment") or ""))
+
+
+# ---------- design skills: learned from drawing-data corrections (roadmap stage 44) ----------
+
+@app.get("/api/design-skills")
+def design_skills_list(part_type: Optional[str] = None):
+    """Every learned drawing-data value: parts that show it, whether it is a skill, switched on, applied to new designs."""
+    from . import design_skills
+    return {"skills": design_skills.skills(part_type)}
+
+
+@app.post("/api/design-skills/status")
+def design_skills_status(data: dict):
+    """Switch a learned value on or off (kept as history)."""
+    from . import design_skills
+    try:
+        return design_skills.set_active(str(data.get("part_type") or ""), str(data.get("component") or ""), str(data.get("field") or ""),
+                                        str(data.get("value") or ""), bool(data.get("active")))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
 # ---------- process parameters for the best part quality (roadmap stage 34) ----------
 
 @app.get("/api/parts/{part_id}/process-parameters")

@@ -63,6 +63,13 @@ def test_technical_data_defaults_change_and_drawings():
     assert "Surface treatment" in [c.value for c in ws[3]]
 
 
+def sign_review(pid):
+    for t in client.get(f"/api/parts/{pid}/tool-review").json()["tools"]:
+        for x in t["rows"]:
+            if x["blocks_release"]:
+                assert client.post(f"/api/parts/{pid}/tool-review", json={"tool": t["key"], "item": x["item"], "status": "waived", "comment": "test"}).status_code == 200
+
+
 def test_release_from_the_design_loop_locks_the_data():
     pid = bracket("DD2")
     _, tool, dp = die_plate(pid)
@@ -71,6 +78,8 @@ def test_release_from_the_design_loop_locks_the_data():
         loop = client.get(f"/api/parts/{pid}/design-loop").json()
         if loop["status"] == order[-1]:
             break
+        if len(loop["next"]) and order[-1] in loop["next"]:
+            sign_review(pid)                                     # stage 43: the toolmaker review must be clear before the design is frozen
         nxt = max((c for c in loop["next"] if c != "corrections_required"), key=order.index)
         r = client.put(f"/api/parts/{pid}", json={"status": nxt, "status_comment": "ok"})
         assert r.status_code == 200, r.text

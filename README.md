@@ -1345,6 +1345,36 @@ who, clamp force, cycle, corrections), to download again later without calculati
 - Code: `flow_sim.py`, `sim_jobs.py` (background jobs), `render3d.py` (`face_view`, `paint`), `pdf_report.flow_pdf`, saved runs in the
   table `sim_runs` of your project database (files in the storage folder). Tests: `tests/test_flow_sim.py`.
 
+## Toolmaker review of the tool design (stage 43)
+
+On the part panel, under **Tool design**, the **Toolmaker review** lists what must be true before the design is frozen, for every tool
+(each die stage, or the mould). Nothing is fixed in the code: the points, their check formulas and whether they block are in
+**Master data → Mould & die database → Review checklist** (shipped as EXAMPLE rows for plastic, die casting, foundry, EPS, blow and sheet metal).
+
+- **Automatic points** have a check formula over facts of the design: `made_parts`, `std_parts`, `no_material`, `no_hardness`,
+  `rules_example`, `machine_typed`, `machine_bad`, `sim_runs`, `shut_height`. Example: `no_material == 0`. The page shows the formula and the message when it fails.
+- **Toolmaker points** have no formula and are signed on the page: *ok*, *issue*, *not applicable* or *waived*. *Issue* and *waived* need a comment (why).
+  An automatic point that fails can be *waived* with a comment.
+- **Sign-offs are never overwritten.** Every decision is a new row (who, when, comment); the latest counts and *Review history* shows all.
+- **Blocking points** (column *Blocks freezing the tool design*) stop the design loop from moving to its last status (*Tool design frozen*)
+  until they are ok, not applicable or waived. The error names the open points.
+- API: `GET /api/parts/{id}/tool-review`, `POST /api/parts/{id}/tool-review` with `tool`, `item`, `status`, `comment`.
+
+## Design skills: the tool design learns from your corrections (stage 44)
+
+Every change you save in **Tool design → Drawing data** (heat treatment, surface treatment, general tolerance class, Ra, tolerance unit)
+is remembered with the tool part's name (e.g. *Cavity insert*), the part type, who and when.
+
+- **When it becomes a skill.** The same value for the same field of the same tool part, set on at least **`skill_min_parts`** different parts
+  (Master data → Mould & die database → Design rules, one row per part type, EXAMPLE value 2), becomes a skill. Without that row nothing is applied.
+- **What a skill does.** On the next tool designs that field starts with the learned value, marked **skill** on the drawing data and printed on
+  the detail drawings (PDF / DXF) and the BOM. When two values compete, the one set on more parts wins.
+- **You stay in control.** A value typed on the part always wins over a skill. Under *Design skills learned by the team* every learned value shows
+  the parts, who taught it and its state (applied, needs more parts, another value wins, switched off), with **Switch off / Switch on** (kept as history).
+- **Released drawings never change.** When the design moves to *Tool design frozen*, the skill values it shows are written into its own drawing data
+  (revision history: *Design skill values kept at release*).
+- API: `GET /api/design-skills?part_type=…`, `POST /api/design-skills/status` with `part_type`, `component`, `field`, `value`, `active`.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:
