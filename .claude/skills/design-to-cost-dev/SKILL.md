@@ -1,14 +1,16 @@
 ---
 name: design-to-cost-dev
-description: Use for any work on the Design to Cost / Part Cost Estimator repository (part, RM and tool cost, tool design and drawings, master data, rates, releases). Holds the project memory (stages 1-39) and the working rules (master data only added, main wins, one PR).
+description: Use for any work on the Design to Cost / Part Cost Estimator repository (part, RM and tool cost, tool design and drawings, master data, rates, releases). Holds the project memory (stages 1-44) and the working rules (master data only added, main wins, one PR).
 ---
 
 Project: **Design to Cost — Part Cost Estimator**, repository `amitkumarshukla1210/Tool_part_cost_estimator`.
 I am Amit, Head of Operations / costing at an OEM (supply chain, production, strategic sourcing, projects; RM, part and tool cost,
 BOM cost and CAPEX, EBITDA, digital transformation). Answer simply, **INR first**.
 
-**State (30 Oct 2026):** stages 1–41 are built (38 = per-user admin permissions, PR 48; 39 = flow simulation, PR 50; 40 = project
-totals per tool group, PR 49; 41 = progressive vs stage dies and tool life); the next stage is **42** (first free number in `ROADMAP.md`).
+**State (1 Nov 2026):** stages 1–44 are built (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
+cycle, PR 53; 43 = toolmaker review, 44 = design skills, both PR 55); the next stage is **45** (first free number in `ROADMAP.md`).
+Planned from the old V4 branch (written new on main, main makes tool designs live and stores none): tool internals (pins, cooling, screws),
+supplier production data, steel FEA (needs Gmsh + CalculiX) and 3D outputs. The 4 old unmerged branches are NOT to be merged.
 To save tokens, do not read the whole README (1350+ lines): read the stage table in `ROADMAP.md` and only the README section of the topic I ask about.
 Stack: Python / FastAPI (`backend/app/`), plain HTML / JS (`frontend/`), SQLite (`data/projects.sqlite` = my data, `master_data/costing_db.sqlite`
 + `master_data/master_data.xlsx` = master data), CadQuery for 3D, reportlab (PDF), ezdxf (DXF), openpyxl (Excel). Local: Windows kit `windows/`
@@ -36,6 +38,11 @@ What the later stages added (details in README):
 - 40: project totals per tool group (`scope.project_view`): a user limited to tool groups sees dashboard / leader view / exports of their parts only; tool group *Machining*.
 - 41: progressive die vs stage dies on the sheet-metal part page (`sheet_compare.py`, scope `sheet_compare`): part cost, die life, die sets, CAPEX,
   amortisation and break-even volume, live and traced; part cost amortisation is life-based: one tool ÷ min(tool_life_shots × cavities, programme ÷ tools for capacity).
+- 42: part-cost cycle time is the calculated cycle by default (not the target `cycle_time_s`); tests run on a frozen clock (PR 54).
+- 43: toolmaker review of the tool design (`tool_review.py`): table *Review checklist* (Mould & die database; check formula over design facts
+  or signed by the toolmaker ok / issue / na / waived), sign-offs append only (`tool_reviews`); a blocking open point stops *Tool design frozen*.
+- 44: design skills (`design_skills.py`): drawing-data corrections kept as events; same value on ≥ `skill_min_parts` parts (Design rules) becomes
+  the starting value of new designs (typed value wins, switch off / on); skill values written into the drawing data at release.
 - Audit (PR 45, re-run after stage 41 with its checks): `python scripts/audit_e2e.py` drives the whole tool (15 cases, 883 calls), 0 findings; report `docs/audit_e2e_report.md`.
   Run it before every release. Many costs still use EXAMPLE rates (Master data → checklist) until I replace them.
 
