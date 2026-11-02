@@ -86,3 +86,21 @@ def test_sheet_metal_die_plate_and_bottom_shoe():
     runs = run_job(pid)
     names = {x["name"] for x in runs}
     assert "Die plate" in names and any(x.startswith("Bottom shoe") for x in names) and all("press force" in x["load_source"] for x in runs)
+
+
+def test_static_solver_first_and_a_broken_one_is_skipped(tmp_path, monkeypatch):
+    """Windows download of CalculiX 2.22: ccx_dynamic.exe misses mkl_rt.2.dll; ccx_static.exe runs and is the one used."""
+    folder = tmp_path / "tools" / "calculix" / "calculix_2.22_4win"
+    folder.mkdir(parents=True)
+    for name, body in (("ccx_dynamic.exe", "exit 1"), ("ccx_static.exe", "echo 'This is Version 2.22'")):
+        (folder / name).write_text(f"#!/bin/sh\n{body}\n")
+        (folder / name).chmod(0o755)
+    monkeypatch.setenv("DTC_DATA_FOLDER", str(tmp_path))
+    monkeypatch.delenv("DTC_CCX", raising=False)
+    monkeypatch.setattr(fea.shutil, "which", lambda name: None)
+    cands = fea.candidates()
+    assert cands[0].endswith("ccx_static.exe") and fea.ccx_path().endswith("ccx_static.exe")
+    (folder / "ccx_static.exe").unlink()
+    assert fea.ccx_path() is None
+    a = fea.available()
+    assert not a["available"] and "does not start" in a["message"] and "ccx_dynamic.exe" in a["message"]

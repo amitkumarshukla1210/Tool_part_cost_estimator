@@ -82,22 +82,63 @@ def rules(part_type: str) -> dict:
 
 # ---------- programs ----------
 
-def ccx_path() -> str | None:
+_RUNS: dict = {}
+
+
+def _quiet_windows_errors() -> None:
+    """Windows: a solver that misses a .dll must fail quietly, not open a "System Error" box on the server (the started program
+    inherits this error mode)."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002 | 0x8000)   # FAILCRITICALERRORS | NOGPFAULTERRORBOX | NOOPENFILEERRORBOX
+        except Exception:
+            pass
+
+
+def _runs(path: str) -> bool:
+    """True when the solver starts and answers `ccx -v` (a Windows build may miss a .dll, e.g. mkl_rt.2.dll of the dynamic build).
+    Kept per file and its time stamp, so a replaced file is tried again."""
+    try:
+        st = Path(path).stat()
+    except OSError:
+        return False
+    k = (path, st.st_size, st.st_mtime_ns)
+    if k not in _RUNS:
+        _quiet_windows_errors()
+        try:
+            r = subprocess.run([path, "-v"], capture_output=True, text=True, timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            _RUNS[k] = "version" in (r.stdout + r.stderr).lower()
+        except (OSError, subprocess.SubprocessError):
+            _RUNS[k] = False
+    return _RUNS[k]
+
+
+def candidates() -> list[str]:
+    """Every CalculiX solver found, best first: DTC_CCX, then the PATH, then <data folder>/tools/calculix and <app>/tools/calculix
+    (any ccx*.exe / ccx in any sub-folder; a static build before the others, as it needs no extra .dll files)."""
+    out = []
     env = os.environ.get("DTC_CCX", "").strip()
     if env and Path(env).exists():
-        return env
+        out.append(env)
     for name in ("ccx", "ccx.exe", "ccx_static", "ccx_2.21", "ccx_2.22"):
         p = shutil.which(name)
         if p:
-            return p
+            out.append(p)
     roots = [Path(os.environ[k]) / "tools" / "calculix" for k in ("DTC_DATA_FOLDER",) if os.environ.get(k)]
     roots.append(Path(__file__).resolve().parents[2] / "tools" / "calculix")
     for root in roots:
         if root.exists():
-            hits = sorted(root.rglob("ccx*.exe")) + sorted(root.rglob("ccx"))
-            if hits:
-                return str(hits[0])
-    return None
+            hits = [h for h in list(root.rglob("ccx*.exe")) + list(root.rglob("ccx")) if h.is_file()]
+            hits.sort(key=lambda h: (0 if "static" in h.name.lower() else 1, str(h)))
+            out += [str(h) for h in hits]
+    seen = set()
+    return [p for p in out if not (p in seen or seen.add(p))]
+
+
+def ccx_path() -> str | None:
+    """The first solver found that runs."""
+    return next((p for p in candidates() if _runs(p)), None)
 
 
 def available() -> dict:
@@ -108,9 +149,11 @@ def available() -> dict:
         g = False
     c = ccx_path()
     ok = g and bool(c)
+    broken = [p for p in candidates() if p != c and not _runs(p)] if not c else []
     return {"available": ok, "gmsh": g, "ccx": c, "message": "" if ok else
             "Real FEA is not available on this computer: " + ", ".join(x for x, have in (("Gmsh", g), ("CalculiX", bool(c))) if not have)
-            + " missing. " + INSTALL}
+            + " missing. " + ("Found but does not start (a .dll is missing; use the static build ccx_static.exe): " + "; ".join(broken) + ". " if broken else "")
+            + INSTALL}
 
 
 # ---------- one part ----------

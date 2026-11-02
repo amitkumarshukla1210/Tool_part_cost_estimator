@@ -560,7 +560,8 @@ def cmd_update(args) -> None:
         report = r.stdout.strip()
     else:
         report = "This version has no master-data merge tool: your master data was kept as it is."
-    for name in KIT_FILES:                                          # the kit updates itself
+    kit = set(KIT_FILES) | {f.name for f in (current / "windows").glob("DTC_*.bat")}     # a new .bat of a new version comes too
+    for name in sorted(kit):                                        # the kit updates itself
         f = current / "windows" / name
         if f.exists() and (not (BASE / name).exists() or (BASE / name).read_bytes() != f.read_bytes()):
             shutil.copy2(f, BASE / name)
@@ -719,10 +720,30 @@ def cmd_fea(_args) -> None:
         raise KitError("Installing Gmsh failed (see the messages above): check the internet / proxy and run DTC_Install_FEA.bat again.")
     folder = DATA / "tools" / "calculix"
     folder.mkdir(parents=True, exist_ok=True)
-    hits = sorted(folder.rglob("ccx*.exe"))
-    if hits:
-        say(f"CalculiX found: {hits[0]}")
+    hits = sorted(folder.rglob("ccx*.exe"), key=lambda h: (0 if "static" in h.name.lower() else 1, str(h)))   # static build first
+    if os.name == "nt":
+        try:
+            import ctypes
+            ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002 | 0x8000)     # a missing .dll: no "System Error" box
+        except Exception:
+            pass
+
+    def runs(p: Path) -> bool:
+        try:
+            r = subprocess.run([str(p), "-v"], capture_output=True, text=True, timeout=30)
+            return "version" in (r.stdout + r.stderr).lower()
+        except (OSError, subprocess.SubprocessError):
+            return False
+    good = next((h for h in hits if runs(h)), None)
+    for h in hits:
+        if h != good and not runs(h):
+            say(f"Not used (does not start, a .dll is missing): {h}")
+    if good:
+        say(f"CalculiX found: {good}")
         say("The strength check is ready: restart the app (DTC_Start.bat) and open Tool design → Strength check.")
+    elif hits:
+        say("CalculiX was found but none of these starts (a .dll is missing). Use the static build (ccx_static.exe) of the")
+        say(f"CalculiX Windows download in {folder}.")
     else:
         say(f"Gmsh is installed. CalculiX is still missing: download the Windows build of CalculiX (ccx) from the official CalculiX")
         say(f"site and copy ccx.exe (with the .dll files next to it) into {folder} - then restart the app.")

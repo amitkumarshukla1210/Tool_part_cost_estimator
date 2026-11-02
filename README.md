@@ -1406,6 +1406,16 @@ clear of the part vs the lines tried, screws and dowels. The toolmaker review ch
   (from the official CalculiX site, with its .dll files) into `DTC_Data\tools\calculix`, and restart. Without the programs the check says
   *Not available* and how to install them; nothing is estimated instead. Linux: `pip install gmsh` and the `calculix-ccx` package.
 
+- If the CalculiX download holds several solvers (e.g. `ccx_dynamic.exe` and `ccx_static.exe`), the app takes the one that starts, the
+  static build first; one that misses a .dll (the dynamic build needs Intel's `mkl_rt.2.dll`) is skipped and named on the page.
+  `python dtc_manager.py fea` (or `DTC_Install_FEA.bat`) shows which one is used. A new `DTC_*.bat` of a new version is copied up by
+  every update, also when the old `dtc_manager.py` did not know it yet.
+
+**Speed.** The 3D tool design is made once and kept while nothing it depends on changes (part, revision, tool cost, inserts,
+drawing data, design skills, master data and rates). Every block of the tool-design panel and every download (STEP, STL, PDF,
+release ZIP, 3D viewer) uses it: on the example cover the panel's seven requests went from 56 s to under 4 s (about 1 s when kept).
+Any change makes a new design on the next request.
+
 **4. 3D outputs.** *Open 3D viewer* (per tool): rotate, zoom, explode, show the workpiece, click a part for its item, material, hardness, size,
 stock, steel kg and its INR share. The same viewer is a single HTML file in the release ZIP (opens offline). Also: assembly STL, and STEP, STL and
 a picture of every tool part (production-data table); the release ZIP holds `3D/STL/`, `pictures/` and the viewer.
