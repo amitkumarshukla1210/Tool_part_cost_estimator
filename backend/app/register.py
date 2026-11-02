@@ -46,8 +46,8 @@ _PART_MESH_CACHE = OrderedDict()
 _PART_MESH_CACHE_LOCK = threading.Lock()
 _PART_MESH_CACHE_LIMIT = 2
 _SIMULATION_CACHE_LOCK = threading.Lock()
-_SIMULATION_CACHE_KEY = None
-_SIMULATION_CACHE_VALUE = None
+_SIMULATION_CACHE: OrderedDict = OrderedDict()      # simulation key -> result, the last few parts (part cost cycle time, stage 42)
+_SIMULATION_CACHE_LIMIT = 16
 
 
 def _part_mesh(path: Path):
@@ -2338,7 +2338,6 @@ def _simulation_key(part_id: int) -> str | None:
 
 def _simulate(part_id: int):
     from . import simulation
-    global _SIMULATION_CACHE_KEY, _SIMULATION_CACHE_VALUE
 
     def calculate():
         d, rev, part_type, verts, tris, concept_result, facts = _concept_inputs(part_id)
@@ -2352,11 +2351,14 @@ def _simulate(part_id: int):
     if key is None:
         return calculate()
     with _SIMULATION_CACHE_LOCK:
-        if key == _SIMULATION_CACHE_KEY:
-            return _SIMULATION_CACHE_VALUE
+        if key in _SIMULATION_CACHE:                     # kept for the last parts opened, not only the last one
+            _SIMULATION_CACHE.move_to_end(key)
+            return _SIMULATION_CACHE[key]
         value = calculate()
         if _simulation_key(part_id) == key:
-            _SIMULATION_CACHE_KEY, _SIMULATION_CACHE_VALUE = key, value
+            _SIMULATION_CACHE[key] = value
+            while len(_SIMULATION_CACHE) > _SIMULATION_CACHE_LIMIT:
+                _SIMULATION_CACHE.popitem(last=False)
         return value
 
 

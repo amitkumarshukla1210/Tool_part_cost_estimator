@@ -90,25 +90,42 @@ async function openPart(id) {
     return status($("status"), err.message, "error");
   }
   history.replaceState(null, "", `?part=${id}`);
-  part.trace = null;
-  if (part.file_id && !part.is_assembly) part.trace = await api(`/api/parts/${id}/trace`).catch(() => null);
-  part.rmTrace = part.rm?.applicable && !part.rm.problem ? await api(`/api/parts/${id}/rm-cost/trace`).catch(() => null) : null;
-  part.rmVersions = part.rm?.versions ? await api(`/api/parts/${id}/rm-cost`).catch(() => []) : [];
-  bomChoices = bomChoices || (await api("/api/tool-bom/choices").catch(() => null));
-  part.toolTrace = part.tool?.versions || (part.tool?.applicable && !part.tool.problem)
-    ? await api(`/api/parts/${id}/tool-cost/trace`).catch(() => null) : null;
-  part.toolVersions = part.tool?.versions ? await api(`/api/parts/${id}/tool-cost`).catch(() => []) : [];
-  part.piece = part.is_assembly || !part.tool?.applicable ? null : await api(`/api/parts/${id}/piece-cost`).catch(() => null);
-  part.sheet = null;
-  if (!part.is_assembly && /sheet_metal/.test(part.process || "")) {
-    part.sheet = await api(`/api/parts/${id}/sheet-tools`).catch((err) => ({ problem: err.message }));
-    part.layout = part.sheet.problem ? null : await api(`/api/parts/${id}/sheet-layout`).catch(() => null);
-  }
-  part.loop = part.is_assembly ? null : await api(`/api/parts/${id}/design-loop`).catch(() => null);
-  part.sup = part.is_assembly ? null : await api(`/api/parts/${id}/suppliers`).catch(() => null);
-  supplierList = supplierList || (await api("/api/suppliers").then((r) => r.suppliers).catch(() => []));
+  const p = part, none = Promise.resolve(null);
+  // everything the panel shows is asked for at the same time (before: one request after the other)
+  const get = (url, fallback = null) => api(url).catch(() => fallback);
+  const sheet = !p.is_assembly && /sheet_metal/.test(p.process || "")
+    ? api(`/api/parts/${id}/sheet-tools`).catch((err) => ({ problem: err.message })) : none;
+  const [trace, rmTrace, rmVersions, choices, toolTrace, toolVersions, sh, loop, sup, suppliers] = await Promise.all([
+    p.file_id && !p.is_assembly ? get(`/api/parts/${id}/trace`) : none,
+    p.rm?.applicable && !p.rm.problem ? get(`/api/parts/${id}/rm-cost/trace`) : none,
+    p.rm?.versions ? get(`/api/parts/${id}/rm-cost`, []) : Promise.resolve([]),
+    bomChoices ? Promise.resolve(bomChoices) : get("/api/tool-bom/choices"),
+    p.tool?.versions || (p.tool?.applicable && !p.tool.problem) ? get(`/api/parts/${id}/tool-cost/trace`) : none,
+    p.tool?.versions ? get(`/api/parts/${id}/tool-cost`, []) : Promise.resolve([]),
+    sheet,
+    p.is_assembly ? none : get(`/api/parts/${id}/design-loop`),
+    p.is_assembly ? none : get(`/api/parts/${id}/suppliers`),
+    supplierList ? Promise.resolve(supplierList) : api("/api/suppliers").then((r) => r.suppliers).catch(() => []),
+  ]);
+  if (part !== p) return;                                   // another part was opened meanwhile
+  Object.assign(p, { trace, rmTrace, rmVersions, toolTrace, toolVersions, sheet: sh, loop, sup, layout: null });
+  bomChoices = choices;
+  supplierList = suppliers;
+  if (sh && !sh.problem) p.layout = await get(`/api/parts/${id}/sheet-layout`);
+  // the part cost works out the cycle time from the simulation of the 3D model (stage 42): seconds on a large part.
+  // The panel opens now; the part cost fills in when it is ready.
+  const wantPiece = !p.is_assembly && p.tool?.applicable;
+  p.piece = null;
+  p.piecePending = wantPiece;
   renderPart();
   $("panel").hidden = false;
+  p.piecePromise = wantPiece ? get(`/api/parts/${id}/piece-cost`).then((r) => {
+    p.piecePending = false;
+    p.piece = r;
+    const box = $("pieceBox");
+    if (part === p && box) box.innerHTML = pieceBlock(p);
+  }) : Promise.resolve();
+  return p.piecePromise;
 }
 
 function geometryRows(g) {
@@ -512,7 +529,7 @@ function renderPart() {
     ${loopBlock(p)}
     ${rmBlock(p)}
     ${toolBlock(p)}
-    ${pieceBlock(p)}
+    <div id="pieceBox">${pieceBlock(p)}</div>
     ${sheetBlock(p)}
     ${compareBlock(p)}
     ${suppliersBlock(p)}
@@ -1069,6 +1086,7 @@ $("panelBody").addEventListener("submit", async (e) => {
 // part (piece) cost: live traced result, typed inputs, stored versions, downloads
 function pieceBlock(p) {
   const s = p.piece;
+  if (!s && p.piecePending) return `<h3 class="block-title">Part cost</h3><p class="note">Working out the part cost (cycle time from the simulation of the 3D model)…</p>`;
   if (!s) return "";
   let html = `<h3 class="block-title">Part cost</h3>`;
   if (s.problem) return html + `<p class="note">${esc(s.problem)}</p>`;
@@ -1104,7 +1122,7 @@ $("panelBody").addEventListener("submit", async (e) => {
   for (const k of ["cycle_s", "cavities", "secondary_ops_pct"]) if (f.get(k) !== "") inputs[k] = Number(f.get(k));
   try {
     const r = await api(`/api/parts/${part.id}/piece-cost`, { method: "POST", body: JSON.stringify({ piece_inputs: inputs, reason: "changed in the part panel" }) });
-    await openPart(part.id);
+    await openPart(part.id);                                 // resolves once the part cost is shown again
     status($("pieceStatus"), r.message, "ok");
   } catch (err) {
     status($("pieceStatus"), err.message, "error");
