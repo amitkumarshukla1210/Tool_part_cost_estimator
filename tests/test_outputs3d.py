@@ -36,6 +36,11 @@ def test_viewer_page_has_every_part_with_its_data_and_cost():
     want = next(p for p in prod["parts"] if p["name"] == "Cavity insert")
     assert cav["stock"] == want["stock_mm"] and cav["inr"] == pytest.approx(want["total_inr"]) and cav["v"] and cav["t"]
     assert data["tool_cost_inr"] == pytest.approx(prod["sums"]["tool_cost_inr"]) and any(p["kind"] == "ref" for p in data["parts"])
+    assert 'id="ghost"' in r.text and "p.lifts" in r.text                 # see-through selection; explode by stacking order
+    made = [p for p in data["parts"] if p["kind"] == "made"]
+    centre = lambda p: p["locs"][0][2] + (min(p["v"][2::3]) + max(p["v"][2::3])) / 2
+    plates = {p["name"]: centre(p) for p in made}
+    assert plates["Cavity insert"] != plates["A plate (cavity side)"] and plates["Core insert"] != plates["B plate (core side)"]   # own levels
     assert "getContext(\"webgl\"" in r.text and "http" not in r.text.split("<script>")[1].split("const D")[0]          # nothing from the internet
 
 

@@ -1417,7 +1417,9 @@ release ZIP, 3D viewer) uses it: on the example cover the panel's seven requests
 Any change makes a new design on the next request.
 
 **4. 3D outputs.** *Open 3D viewer* (per tool): rotate, zoom, explode, show the workpiece, click a part for its item, material, hardness, size,
-stock, steel kg and its INR share. The same viewer is a single HTML file in the release ZIP (opens offline). Also: assembly STL, and STEP, STL and
+stock, steel kg and its INR share. The explode separates the parts by stacking order, so a part that sits in a pocket (cavity insert in the
+A plate, core insert in the B plate) comes out of it, and the view pulls back to keep the whole stack in sight; a selected part is shown
+solid and the others see-through (switch off with *See through the others*). The same viewer is a single HTML file in the release ZIP (opens offline). Also: assembly STL, and STEP, STL and
 a picture of every tool part (production-data table); the release ZIP holds `3D/STL/`, `pictures/` and the viewer.
 
 ## Look & feel: Design to Cost theme
