@@ -7,8 +7,8 @@ Project: **Design to Cost — Part Cost Estimator**, repository `amitkumarshukla
 I am Amit, Head of Operations / costing at an OEM (supply chain, production, strategic sourcing, projects; RM, part and tool cost,
 BOM cost and CAPEX, EBITDA, digital transformation). Answer simply, **INR first**.
 
-**State (1 Nov 2026):** stages 1–45 are built (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
-cycle, PR 53; 43 = toolmaker review, 44 = design skills, both PR 55; 45 = tool internals, production data, FEA, 3D outputs, PR 57);
+**State (2 Nov 2026):** stages 1–45 are built (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
+cycle, PR 53; 43 = toolmaker review, 44 = design skills, both PR 55; 45 = tool internals, production data, FEA, 3D outputs, PR 57; fixes PR 59);
 the next stage is **46** (first free number in `ROADMAP.md`). Everything of the old V4 branch is now on main (written new);
 the 4 old unmerged branches are NOT to be merged.
 To save tokens, do not read the whole README (1350+ lines): read the stage table in `ROADMAP.md` and only the README section of the topic I ask about.
@@ -48,6 +48,13 @@ What the later stages added (details in README):
   real FEA with Gmsh + CalculiX (`fea.py`, `fea_*` Design rules, background job, `tool_fea_runs`, `DTC_Install_FEA.bat`; Gmsh runs in its own
   process); 3D outputs (`outputs3d.py`: offline WebGL viewer per tool, STL, STEP / STL / picture per part, all in the release ZIP).
   The full test suite takes ~19 min (real FEA); Gmsh needs libglu1 on Linux.
+- After 45 (PR 59): `register.tool_designs` keeps the 3D design per part / die (fingerprint: part row, revisions, tool costs, inserts,
+  drawing data, design skills, part history, master-data file stamps; one lock per part; callers get a copy). Never build the tool
+  design outside it. Panel 56 s → ~1-4 s. CalculiX: the solver that answers `ccx -v` is used, static build first (Windows 2.22 zip:
+  `ccx_dynamic.exe` needs mkl_rt.2.dll). Update copies every `windows/DTC_*.bat` (new .bat files are no longer missed).
+- Amit's PC: kit at `D:\Project\DTC Tool and mould`, app on port 8100, CalculiX 2.22 `ccx_static.exe` in
+  `DTC_Data\tools\calculix\calculix_2.22_4win\calculix_2.22_4win`, Gmsh in the venv. FEA limits and `fea_mesh_mm` still EXAMPLE
+  (large 1000 mm moulds: `fea_mesh_mm` 25-40).
 - Audit (PR 45, re-run after stage 41 with its checks): `python scripts/audit_e2e.py` drives the whole tool (15 cases, 883 calls), 0 findings; report `docs/audit_e2e_report.md`.
   Run it before every release. Many costs still use EXAMPLE rates (Master data → checklist) until I replace them.
 
