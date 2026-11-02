@@ -1,16 +1,16 @@
 ---
 name: design-to-cost-dev
-description: Use for any work on the Design to Cost / Part Cost Estimator repository (part, RM and tool cost, tool design and drawings, master data, rates, releases). Holds the project memory (stages 1-44) and the working rules (master data only added, main wins, one PR).
+description: Use for any work on the Design to Cost / Part Cost Estimator repository (part, RM and tool cost, tool design and drawings, master data, rates, releases). Holds the project memory (stages 1-45) and the working rules (master data only added, main wins, one PR).
 ---
 
 Project: **Design to Cost — Part Cost Estimator**, repository `amitkumarshukla1210/Tool_part_cost_estimator`.
 I am Amit, Head of Operations / costing at an OEM (supply chain, production, strategic sourcing, projects; RM, part and tool cost,
 BOM cost and CAPEX, EBITDA, digital transformation). Answer simply, **INR first**.
 
-**State (1 Nov 2026):** stages 1–44 are built (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
-cycle, PR 53; 43 = toolmaker review, 44 = design skills, both PR 55); the next stage is **45** (first free number in `ROADMAP.md`).
-Planned from the old V4 branch (written new on main, main makes tool designs live and stores none): tool internals (pins, cooling, screws),
-supplier production data, steel FEA (needs Gmsh + CalculiX) and 3D outputs. The 4 old unmerged branches are NOT to be merged.
+**State (1 Nov 2026):** stages 1–45 are built (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
+cycle, PR 53; 43 = toolmaker review, 44 = design skills, both PR 55; 45 = tool internals, production data, FEA, 3D outputs, PR 57);
+the next stage is **46** (first free number in `ROADMAP.md`). Everything of the old V4 branch is now on main (written new);
+the 4 old unmerged branches are NOT to be merged.
 To save tokens, do not read the whole README (1350+ lines): read the stage table in `ROADMAP.md` and only the README section of the topic I ask about.
 Stack: Python / FastAPI (`backend/app/`), plain HTML / JS (`frontend/`), SQLite (`data/projects.sqlite` = my data, `master_data/costing_db.sqlite`
 + `master_data/master_data.xlsx` = master data), CadQuery for 3D, reportlab (PDF), ezdxf (DXF), openpyxl (Excel). Local: Windows kit `windows/`
@@ -43,6 +43,11 @@ What the later stages added (details in README):
   or signed by the toolmaker ok / issue / na / waived), sign-offs append only (`tool_reviews`); a blocking open point stops *Tool design frozen*.
 - 44: design skills (`design_skills.py`): drawing-data corrections kept as events; same value on ≥ `skill_min_parts` parts (Design rules) becomes
   the starting value of new designs (typed value wins, switch off / on); skill values written into the drawing data at release.
+- 45: tool internals (pins / cooling wanted vs placed, screws, dowels → review facts); supplier production data (`production_data.py`:
+  stock = finished + 2 × `stock_allowance_mm` rounded to `stock_round_mm`, operations, cost = split of the tool cost that adds up exactly, Excel);
+  real FEA with Gmsh + CalculiX (`fea.py`, `fea_*` Design rules, background job, `tool_fea_runs`, `DTC_Install_FEA.bat`; Gmsh runs in its own
+  process); 3D outputs (`outputs3d.py`: offline WebGL viewer per tool, STL, STEP / STL / picture per part, all in the release ZIP).
+  The full test suite takes ~19 min (real FEA); Gmsh needs libglu1 on Linux.
 - Audit (PR 45, re-run after stage 41 with its checks): `python scripts/audit_e2e.py` drives the whole tool (15 cases, 883 calls), 0 findings; report `docs/audit_e2e_report.md`.
   Run it before every release. Many costs still use EXAMPLE rates (Master data → checklist) until I replace them.
 
