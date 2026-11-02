@@ -158,3 +158,34 @@ def test_a_broken_new_version_changes_nothing(kit, tmp_path):
         kit.cmd_update([str(broken)])
     assert not list(kit.BASE.glob("_dtc_new_*")) and kit.is_app(kit.BASE / "Tool_part_cost_estimator")
     assert (kit.DATA / "master_data" / "costing_db.sqlite").read_bytes() == before
+
+
+def test_update_copies_every_new_bat_of_the_new_version(kit, tmp_path):
+    """A .bat that the old dtc_manager.py does not list yet (e.g. DTC_Install_FEA.bat of stage 45) still comes with the update."""
+    old_install(kit.BASE)
+    z = release_zip(tmp_path, change=lambda src: (src / "windows" / "DTC_Brand_New.bat").write_text("@echo off\n"))
+    kit.cmd_update([str(z)])
+    assert (kit.BASE / "DTC_Brand_New.bat").exists() and (kit.BASE / "DTC_Install_FEA.bat").exists()
+
+
+def test_fea_command_takes_the_solver_that_starts(kit, monkeypatch, capsys):
+    """ccx_dynamic.exe without its .dll does not start: the static build is used and the broken one is named."""
+    folder = kit.DATA / "tools" / "calculix" / "calculix_2.22_4win"
+    folder.mkdir(parents=True)
+    for name, body in (("ccx_dynamic.exe", "exit 1"), ("ccx_static.exe", "echo 'This is Version 2.22'")):
+        (folder / name).write_text(f"#!/bin/sh\n{body}\n")
+        (folder / name).chmod(0o755)
+    monkeypatch.setattr(kit, "app_dir", lambda: kit.BASE / "Tool_part_cost_estimator")
+    monkeypatch.setattr(kit.subprocess, "run", _real_run_except_pip(kit.subprocess.run))
+    kit.cmd_fea([])
+    out = capsys.readouterr().out
+    assert "CalculiX found:" in out and "ccx_static.exe" in out.split("CalculiX found:")[1].splitlines()[0]
+    assert any(line.startswith("Not used") and line.rstrip().endswith("ccx_dynamic.exe") for line in out.splitlines())
+
+
+def _real_run_except_pip(run):
+    def fake(cmd, *a, **k):
+        if "pip" in cmd:
+            return subprocess.CompletedProcess(cmd, 0)
+        return run(cmd, *a, **k)
+    return fake
