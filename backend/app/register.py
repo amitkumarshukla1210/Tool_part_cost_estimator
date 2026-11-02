@@ -3254,7 +3254,85 @@ def export_dashboard_pdf(project_id: int) -> bytes:
 
 # ---------- detailed tool design (roadmap stage 27) ----------
 
+# ---------- one 3D tool design per state of the part (stage 45 fix) ----------
+# Every block of the tool-design panel and every download used to design the tool in 3D again: a large mould 6-7 times
+# for one click. The design is kept per part and key until anything it depends on changes (the fingerprint below).
+_DESIGN_CACHE: OrderedDict = OrderedDict()
+_DESIGN_CACHE_LOCK = threading.Lock()
+_DESIGN_KEY_LOCKS: dict = {}
+_DESIGN_CACHE_LIMIT = 4
+
+
+def _file_stamp(path) -> tuple:
+    try:
+        st = Path(path).stat()
+        return (str(path), st.st_size, st.st_mtime_ns)
+    except OSError:
+        return (str(path), None, None)
+
+
+def _design_fingerprint(part_id: int) -> str:
+    """Everything a tool design depends on: the part row (status = release), its revisions, stored tool costs, inserts,
+    drawing data, the design skills, and the master data files (rates, mould & die database, register setup, master data)."""
+    import hashlib
+    import json
+    from . import costing_db
+    with db.engine().connect() as conn:
+        part = conn.execute(select(db.parts).where(db.parts.c.id == part_id)).mappings().first()
+        if not part:
+            raise RegisterError(f"Part {part_id} does not exist.")
+        mx = lambda col, *where: conn.execute(select(func.max(col)).where(*where)).scalar() if where else conn.execute(select(func.max(col))).scalar()
+        bits = [dict(part),
+                mx(db.revisions.c.id, db.revisions.c.part_id == part_id),
+                mx(db.tool_costs.c.id, db.tool_costs.c.part_id == part_id),
+                [tuple(r) for r in conn.execute(select(db.part_inserts.c.id, db.part_inserts.c.insert_part_id)
+                                                .where(db.part_inserts.c.part_id == part_id))],
+                [(r[0], str(r[1])) for r in conn.execute(select(db.tool_drawing_data.c.id, db.tool_drawing_data.c.edited_at)
+                                                         .where(db.tool_drawing_data.c.part_id == part_id))],
+                mx(db.design_skill_events.c.id), mx(db.design_skill_status.c.id),
+                mx(db.history.c.id, (db.history.c.entity == "part") & (db.history.c.entity_id == part_id))]
+    bits += [_file_stamp(costing_db.path()), _file_stamp(master_data.path())]
+    return hashlib.sha1(json.dumps(bits, default=str, sort_keys=True).encode()).hexdigest()
+
+
+def _design_copy(d: dict, rev: dict, designs: list) -> tuple[dict, dict, list]:
+    """A copy the caller may change (notes added for a download) without changing the kept design."""
+    return dict(d), dict(rev), [(k, dict(des, notes=list(des.get("notes", [])))) for k, des in designs]
+
+
+def clear_design_cache() -> None:
+    with _DESIGN_CACHE_LOCK:
+        _DESIGN_CACHE.clear()
+
+
 def tool_designs(part_id: int, key: str | None = None) -> tuple[dict, dict, list]:
+    """(part, revision, [(stage no, design)]): the kept design while nothing it depends on has changed, else designed now
+    (requests for the same part wait for one design instead of each making their own)."""
+    fp = _design_fingerprint(part_id)
+    ck = (part_id, key, fp)
+    with _DESIGN_CACHE_LOCK:
+        lock = _DESIGN_KEY_LOCKS.setdefault((part_id, key), threading.Lock())
+    with lock:
+        with _DESIGN_CACHE_LOCK:
+            hit = _DESIGN_CACHE.get(ck)
+            full = _DESIGN_CACHE.get((part_id, None, fp)) if key else None
+            if hit:
+                _DESIGN_CACHE.move_to_end(ck)
+        if hit:
+            return _design_copy(*hit)
+        if full and any(des["key"] == key for _, des in full[2]):
+            d, rev, designs = full
+            return _design_copy(d, rev, [(k, des) for k, des in designs if des["key"] == key])
+        value = _tool_designs_build(part_id, key)
+        if _design_fingerprint(part_id) == fp:       # nothing changed while designing: keep it
+            with _DESIGN_CACHE_LOCK:
+                _DESIGN_CACHE[ck] = value
+                while len(_DESIGN_CACHE) > _DESIGN_CACHE_LIMIT:
+                    _DESIGN_CACHE.popitem(last=False)
+        return _design_copy(*value)
+
+
+def _tool_designs_build(part_id: int, key: str | None = None) -> tuple[dict, dict, list]:
     """(part, revision, [(stage no, design)]) - every die stage of a sheet-metal part or the mould of a moulded part,
     designed in 3D from the current revision and the stored (else live) tool cost."""
     from . import die_cost, mould_design, tool_design
