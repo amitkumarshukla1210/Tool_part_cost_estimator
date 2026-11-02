@@ -117,6 +117,7 @@ _PAGE = r"""<!DOCTYPE html>
 <div id="bar"><b>__TITLE__</b>
   <label>Explode <input type="range" id="explode" min="0" max="100" value="0" /></label>
   <label><input type="checkbox" id="showref" /> Show the part (workpiece)</label>
+  <label><input type="checkbox" id="ghost" checked /> See through the others when a part is selected</label>
   <button id="reset">Reset view</button></div>
 <canvas id="gl"></canvas>
 <div id="side"><div id="info"><h3>Click a part</h3><p>Drag to rotate, wheel to zoom, right-drag to move. Click a part (or a row below) to see its data.</p></div><div id="list"></div></div>
@@ -129,7 +130,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 if (!gl) { document.getElementById("hint").textContent = "This browser has no WebGL: open the STEP or STL files instead."; }
 const VS = `attribute vec3 p; attribute vec3 n; uniform mat4 m; uniform vec3 off; varying float l;
   void main(){ vec3 q = p + off; gl_Position = m * vec4(q, 1.0); l = 0.35 + 0.65 * abs(dot(normalize(n), normalize(vec3(0.4, -0.5, 0.75)))); }`;
-const FS = `precision mediump float; uniform vec3 c; uniform float pick; varying float l; void main(){ gl_FragColor = vec4(pick > 0.5 ? c : c * l, 1.0); }`;
+const FS = `precision mediump float; uniform vec3 c; uniform float pick; uniform float a; varying float l; void main(){ gl_FragColor = vec4(pick > 0.5 ? c : c * l, pick > 0.5 ? 1.0 : a); }`;
 function sh(t, s) { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); return o; }
 const pr = gl.createProgram(); gl.attachShader(pr, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(pr); gl.useProgram(pr);
 const U = (n) => gl.getUniformLocation(pr, n), A = (n) => gl.getAttribLocation(pr, n);
@@ -146,18 +147,40 @@ const parts = D.parts.map((p, k) => {
     if (p.kind === "ref") continue; lo[d] = Math.min(lo[d], p.v[i + d] + L[d]); hi[d] = Math.max(hi[d], p.v[i + d] + L[d]); }
   const pb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, pb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pos), gl.STATIC_DRAW);
   const nb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, nb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(nor), gl.STATIC_DRAW);
-  return { ...p, pb, nb, count: pos.length / 3, id: [((k + 1) & 255) / 255, (((k + 1) >> 8) & 255) / 255, 0.5] };
+  let z0 = 1e9, z1 = -1e9;
+  for (let i = 2; i < p.v.length; i += 3) { z0 = Math.min(z0, p.v[i]); z1 = Math.max(z1, p.v[i]); }
+  return { ...p, pb, nb, count: pos.length / 3, z0, z1, id: [((k + 1) & 255) / 255, (((k + 1) >> 8) & 255) / 255, 0.5] };
 });
+// Explode by stacking order: every made part gets its own level, ordered by the height of its centre, and levels move apart from the
+// parting plane by one tallest-part height each. A part that sits in a pocket (cavity insert in the A plate, core insert in the B plate)
+// has its centre nearer to the parting plane than its plate, so it comes out of the pocket instead of moving with the plate.
+// Standard parts move with the nearest level; the workpiece stays at the parting plane.
+const ref = parts.find((p) => p.kind === "ref");
+const made = [];
+parts.forEach((p) => { if (p.kind === "made") p.locs.forEach((L) => made.push(L[2] + (p.z0 + p.z1) / 2)); });
+const levels = [...new Set(made.map((z) => Math.round(z * 10) / 10))].sort((a, b) => a - b);
+const zp = ref && ref.locs.length ? ref.locs[0][2] + (ref.z0 + ref.z1) / 2 : (lo[2] + hi[2]) / 2;
+const below = levels.filter((z) => z < zp).length;
+const gap = Math.max(1, ...parts.filter((p) => p.kind === "made").map((p) => p.z1 - p.z0));
+const lift = (cz) => {
+  if (!levels.length) return 0;
+  let r = 0, best = 1e18;
+  levels.forEach((z, i) => { if (Math.abs(z - cz) < best) { best = Math.abs(z - cz); r = i; } });
+  return (r < below ? r - below : r - below + 1) * gap;
+};
+parts.forEach((p) => { p.lifts = p.locs.map((L) => p.kind === "ref" ? 0 : lift(L[2] + (p.z0 + p.z1) / 2)); });
 const ctr = [0, 1, 2].map((d) => (lo[d] + hi[d]) / 2), rad = Math.max(1, Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2);
 let az = -0.9, el = 0.5, dist = rad * 3.2, pan = [0, 0], sel = -1;
 function mat() {
-  const w = cv.clientWidth, h = cv.clientHeight, asp = w / h, f = 1 / Math.tan(0.35), near = dist / 50, far = dist * 6;
+  const spread = levels.length * gap * document.getElementById("explode").value / 100 * 1.2;    // the exploded stack is this much taller
+  const D = dist * (1 + spread / (2 * rad));                                                        // so the camera pulls back with it
+  const w = cv.clientWidth, h = cv.clientHeight, asp = w / h, f = 1 / Math.tan(0.35), near = D / 50, far = D * 6;
   const ca = Math.cos(az), sa = Math.sin(az), ce = Math.cos(el), se = Math.sin(el);
   // view rotation, rows: x' = ca*x + sa*y ; y' = -sa*se*x + ca*se*y + ce*z ; z' = sa*ce*x - ca*ce*y + se*z (column-major below)
   const t = [-ctr[0], -ctr[1], -ctr[2]];
   const x = (p) => [ca * p[0] + sa * p[1], -sa * se * p[0] + ca * se * p[1] + ce * p[2], sa * ce * p[0] - ca * ce * p[1] + se * p[2]];
   const tx = x(t);
-  const V = [ca, -sa * se, sa * ce, 0, sa, ca * se, -ca * ce, 0, 0, ce, se, 0, tx[0] + pan[0], tx[1] + pan[1], tx[2] - dist, 1];
+  const V = [ca, -sa * se, sa * ce, 0, sa, ca * se, -ca * ce, 0, 0, ce, se, 0, tx[0] + pan[0], tx[1] + pan[1], tx[2] - D, 1];
   const P = [f / asp, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) / (near - far), -1, 0, 0, 2 * far * near / (near - far), 0];
   const M = new Array(16).fill(0);
   for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) for (let k = 0; k < 4; k++) M[j * 4 + i] += P[k * 4 + i] * V[j * 4 + k];
@@ -169,15 +192,21 @@ function draw(pick) {
   gl.viewport(0, 0, w, h); gl.enable(gl.DEPTH_TEST);
   gl.clearColor(pick ? 0 : 0.953, pick ? 0 : 0.961, pick ? 0 : 0.973, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   gl.uniformMatrix4fv(U("m"), false, new Float32Array(mat())); gl.uniform1f(U("pick"), pick ? 1 : 0);
-  const ex = document.getElementById("explode").value / 100 * 1.5, showRef = document.getElementById("showref").checked;
-  parts.forEach((p, k) => {
-    if (p.kind === "ref" && !showRef) return;
+  const ex = document.getElementById("explode").value / 100 * 1.2, showRef = document.getElementById("showref").checked;
+  const ghost = !pick && sel >= 0 && document.getElementById("ghost").checked;
+  const one = (p, k, alpha) => {
+    if (p.kind === "ref" && !showRef && k !== sel) return;
     gl.bindBuffer(gl.ARRAY_BUFFER, p.pb); gl.vertexAttribPointer(A("p"), 3, gl.FLOAT, false, 0, 0); gl.enableVertexAttribArray(A("p"));
     gl.bindBuffer(gl.ARRAY_BUFFER, p.nb); gl.vertexAttribPointer(A("n"), 3, gl.FLOAT, false, 0, 0); gl.enableVertexAttribArray(A("n"));
-    const col = pick ? p.id : (k === sel ? [0.85, 0.1, 0.75] : p.rgb);
-    gl.uniform3fv(U("c"), col);
-    for (const L of p.locs) { gl.uniform3fv(U("off"), [L[0], L[1], L[2] + (L[2] - lo[2]) * ex]); gl.drawArrays(gl.TRIANGLES, 0, p.count); }
-  });
+    gl.uniform3fv(U("c"), pick ? p.id : (k === sel ? [0.85, 0.1, 0.75] : p.rgb));
+    gl.uniform1f(U("a"), alpha);
+    p.locs.forEach((L, i) => { gl.uniform3fv(U("off"), [L[0], L[1], L[2] + p.lifts[i] * ex]); gl.drawArrays(gl.TRIANGLES, 0, p.count); });
+  };
+  if (!ghost) { gl.disable(gl.BLEND); gl.depthMask(true); parts.forEach((p, k) => one(p, k, 1.0)); return; }
+  gl.disable(gl.BLEND); gl.depthMask(true); one(parts[sel], sel, 1.0);          // the selected part, solid
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+  parts.forEach((p, k) => { if (k !== sel) one(p, k, 0.16); });                  // the others, see-through
+  gl.depthMask(true); gl.disable(gl.BLEND);
 }
 function info(k) {
   sel = k; draw(false);
@@ -201,7 +230,9 @@ window.addEventListener("mouseup", (e) => {
   if (drag && !moved && e.button === 0) {
     draw(true); const r = cv.getBoundingClientRect(), px = new Uint8Array(4);
     gl.readPixels(e.clientX - r.left, cv.height - (e.clientY - r.top), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-    const k = px[0] + px[1] * 256 - 1; draw(false); if (k >= 0 && k < parts.length) info(k);
+    const k = px[0] + px[1] * 256 - 1; draw(false);
+    if (k >= 0 && k < parts.length) info(k);
+    else { sel = -1; document.querySelectorAll("#list div").forEach((d) => d.classList.remove("on")); draw(false); }     // empty space: nothing selected
   }
   drag = null;
 });
@@ -214,6 +245,7 @@ cv.addEventListener("contextmenu", (e) => e.preventDefault());
 cv.addEventListener("wheel", (e) => { e.preventDefault(); dist *= e.deltaY > 0 ? 1.1 : 0.9; draw(false); }, { passive: false });
 document.getElementById("explode").addEventListener("input", () => draw(false));
 document.getElementById("showref").addEventListener("change", () => draw(false));
+document.getElementById("ghost").addEventListener("change", () => draw(false));
 document.getElementById("reset").addEventListener("click", () => { az = -0.9; el = 0.5; dist = rad * 3.2; pan = [0, 0]; draw(false); });
 window.addEventListener("resize", () => draw(false));
 draw(false);
