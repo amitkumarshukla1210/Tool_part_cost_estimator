@@ -204,7 +204,8 @@ def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -
                 core = core.cut(cyl)
     # stage 46: the channels joined into circuits (cooling_plan) and the Mould systems worked out with the design facts
     L0 = float(b["length_mm"])
-    cooling = mould_features.cooling_plan(chans, s, cells, il, iw, cd, L0, val("v:pocket_l", il)) if part_type in ("plastic", "die_casting", "blow") else []
+    cooling = (mould_features.cooling_plan(chans, s, cells, il, iw, cd, L0, val("v:pocket_l", il), cd + rules("cooling_cross_extra_mm", 1))
+               if part_type in ("plastic", "die_casting", "blow") else [])
     facts = mould_systems.design_facts(part, s, cells, rows, cols, val, b, lines) | {
         "cool_circuits": float(len(cooling)) if part_type != "eps" else 2.0,
         "circuit_len_mm": max((c["len_mm"] for c in cooling), default=0.0)}

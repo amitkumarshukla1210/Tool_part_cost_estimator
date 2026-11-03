@@ -102,11 +102,12 @@ def apply(ctx: dict) -> None:
 
 # ---------- cooling circuits (stage 46) ----------
 
-def cooling_plan(chans, part, cells, il, iw, cd, L, pocket_l) -> list[dict]:
+def cooling_plan(chans, part, cells, il, iw, cd, L, pocket_l, xd: float | None = None) -> list[dict]:
     """The cooling circuits of the mould from the channels drilled in the inserts (chans: (half, y, z, cylinder) in insert
     coordinates). Per insert half and row of cavities: the two channels run through every insert of the row; a cross channel
     drilled from the side of the last insert turns the water back (U-turn) so IN and OUT are both on the -X side of the mould.
     When the cross channel would hit the part, each channel is its own straight circuit (IN on -X, OUT on +X)."""
+    xd = xd or cd
     rows = {}
     for cx, cy in cells:
         rows.setdefault(round(cy, 3), []).append(cx)
@@ -123,7 +124,7 @@ def cooling_plan(chans, part, cells, il, iw, cd, L, pocket_l) -> list[dict]:
             x_u = None
             if len(ys) == 2:
                 for xu in (il / 2 - 1.5 * cd, il / 2 - cd):
-                    cyl = cq.Solid.makeCylinder(cd / 2, iw / 2 - ys[0] + 1, cq.Vector(xu, iw / 2 + 0.5, z), cq.Vector(0, -1, 0))
+                    cyl = cq.Solid.makeCylinder(xd / 2, iw / 2 + 0.5 - ys[0] + xd, cq.Vector(xu, iw / 2 + 0.5, z), cq.Vector(0, -1, 0))
                     if cyl.intersect(part).Volume() <= 1e-6:
                         x_u = xu
                         break
@@ -158,6 +159,7 @@ def _cooling(ctx):
     R, comps, L, il, iw = ctx["rules"], ctx["comps"], ctx["L"], ctx["il"], ctx["iw"]
     cd = R("cooling_d_mm")
     nd, nl, pg = R("nipple_d_mm", 13), R("nipple_len_mm", 35), R("plug_len_mm", 10)
+    xd = cd + R("cooling_cross_extra_mm", 1)          # equal drills crossing at 90° touch along their sides (no clean solid)
     pocket_l = ctx.get("pocket_l") or il
     tube, plugs, rings, nip_in, nip_out = [], [], [], [], []
     for c in plan:
@@ -178,8 +180,8 @@ def _cooling(ctx):
         if c["uturn"]:
             xu = xs[-1] + c["x_u"]
             ylo, yhi = c["row_y"] + c["ys"][0], c["row_y"] + iw / 2 + 0.5
-            cut(comps, ("Cavity insert" if c["half"] == "cavity" else "Core insert",), _bar((xu, ylo, z), (xu, yhi, z), cd),
-                "Cooling cross channel (U-turn), plugged")
+            cut(comps, ("Cavity insert" if c["half"] == "cavity" else "Core insert",), _bar((xu, ylo - xd, z), (xu, yhi, z), xd),
+                f"Cooling cross channel Ø{xd:g} (U-turn), plugged")
             plugs += [(xs[-1] + il / 2, c["row_y"] + y, z, "x") for y in c["ys"]] + [(xu, c["row_y"] + iw / 2, z, "y")]
         nip_in.append(c["in"])
         nip_out.append(c["out"])
@@ -200,8 +202,8 @@ def _cooling(ctx):
                           size=(pg, cd, cd), color="std", drawing="none"))
         side = [(x, y, z) for x, y, z, d in plugs if d == "y"]
         if side:
-            comps.append(Comp(f"Cooling plug Ø{cd:g} (cross channel)", cq.Solid.makeCylinder(cd / 2, pg, cq.Vector(0, -pg, 0), cq.Vector(0, 1, 0)),
-                              side, kind="std", std=f"Pressure plug for Ø{cd:g} (brass, taper thread)", size=(cd, pg, cd), color="std", drawing="none"))
+            comps.append(Comp(f"Cooling plug Ø{xd:g} (cross channel)", cq.Solid.makeCylinder(xd / 2, pg, cq.Vector(0, -pg, 0), cq.Vector(0, 1, 0)),
+                              side, kind="std", std=f"Pressure plug for Ø{xd:g} (brass, taper thread)", size=(xd, pg, xd), color="std", drawing="none"))
     comps.append(Comp(f"Cooling nipple IN Ø{nd:g}", cq.Solid.makeCylinder(nd / 2, nl, cq.Vector(-nl, 0, 0), cq.Vector(1, 0, 0)), nip_in, kind="std",
                       std=f"Quick-coupling nipple Ø{nd:g} marked IN (blue)", size=(nl, nd, nd), color="std", drawing="none"))
     outs_l = [p for p in nip_out if p[0] < 0]

@@ -98,6 +98,8 @@ _COOL = {
     "nipple_d_mm": ({"plastic": 13, "die_casting": 13, "blow": 13}, "mm", "Cooling nipple (quick coupling) diameter"),
     "nipple_len_mm": ({"plastic": 35, "die_casting": 35, "blow": 35}, "mm", "Cooling nipple length out of the plate"),
     "plug_len_mm": ({"plastic": 10, "die_casting": 10, "blow": 10}, "mm", "Pressure plug length"),
+    "cooling_cross_extra_mm": ({"plastic": 1, "die_casting": 1, "blow": 1}, "mm",
+                               "U-turn cross channel drilled this much larger than the cooling channels, so the drills meet cleanly"),
 }
 RULES += [(pt, k, v, unit, desc + " (stage 46)") for k, (vals, unit, desc) in _COOL.items() for pt, v in vals.items()]
 TEXT_RULES = [("plastic", "coolant_medium", "Water, closed circuit with a temperature-control unit"),
