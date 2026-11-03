@@ -141,6 +141,10 @@ def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -
         notes.append("Blow mould: parting plane through the middle.")
     # cavity centres
     cells = [((c - (cols - 1) / 2) * (il + gapc), (r - (rows - 1) / 2) * (iw + gapc)) for r in range(rows) for c in range(cols)]
+    # stage 46: gate, runner, overflow (and later ejection, cooling) worked out by the Mould systems formulas
+    from . import mould_systems
+    facts = mould_systems.design_facts(part, s, cells, rows, cols, val, b, lines)
+    systems = mould_systems.compute(part_type, facts, part.get("material") or "", part.get("mould_typed") or {})
     # cooling channels in the inserts, kept clear of the part
     cd = rules("cooling_d_mm")
     depth = rules("cooling_depth_factor") * cd
@@ -344,7 +348,8 @@ def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -
     ctx = {"part_type": part_type, "rules": rules, "lines": lines, "val": val, "comps": comps, "notes": notes, "part": s, "bb": bb,
            "pl": pl, "ha": ha, "hb": hb, "cells": cells, "il": il, "iw": iw, "L": L, "W": W, "ta": ta, "tb": tb, "tc": tc,
            "z_tc": z_tc, "z_ret": z_ret, "ej_ret_h": ej_ret_h, "ejection": ejection, "pocket_w": pocket_w, "base_mat": base_mat,
-           "base_make": base_make, "core_mat": km, "stack": z_tc + (tc or 0) - z_bc if tc else (pl + ta) - (pl - tb)}
+           "base_make": base_make, "core_mat": km, "stack": z_tc + (tc or 0) - z_bc if tc else (pl + ta) - (pl - tb),
+           "systems": systems}
     mould_features.apply(ctx)
     # the moulded part (reference)
     comps.append(Comp("Moulded part (reference)", s, [(x, y, 0.0) for x, y in cells], kind="ref", size=(bb.xlen, bb.ylen, bb.zlen),
@@ -353,6 +358,9 @@ def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -
     # stage 45: what the rules wanted and what fitted (per cavity): ejector pin grid points vs pins under the part,
     # cooling lines tried (2 per insert half) vs lines placed clear of the part
     des["internals"] = {"pins_wanted": (nx * ny) if ejection else 0, "pins_placed": len(pins), "cool_wanted": tried, "cool_placed": len(chans)}
+    des["systems"] = systems
+    des["gates"] = ctx.get("gates") or []
+    des["notes"] += mould_systems.notes(systems)
     return des
 
 
@@ -447,17 +455,23 @@ def foundry_design(part: dict, shape, tr: dict, axis: str = "z") -> dict:
     comps.append(Comp("Drag pattern", drag_s, [(cx + db_.xmin, cy + db_.ymin, db_.zmin - tp / 2) for cx, cy in cells], material=pm,
                       color="hard", size=(db_.xlen, db_.ylen, db_.zlen), drawing="solid",
                       notes=["Lower half of the casting below the parting plane", f"Finish {rules.text('finish_pattern')}"]))
-    # gating: sprue (cope), runner bar and ingate on the parting plane, riser on the top of the casting
-    spd, rw, igw = rules("sprue_d_mm"), rules("runner_w_mm"), rules("ingate_w_mm")
+    # gating: sprue (cope), runner bar and ingate on the parting plane, riser on the top of the casting; sized by the Mould systems
+    # formulas (stage 46: choke area by Bernoulli, gating ratio, riser by the modulus method), else by the Design rules
+    from . import mould_systems
+    facts = mould_systems.design_facts(part, s, cells, rows, cols, val, b, lines) | {"cope_h_mm": hc}
+    systems = mould_systems.compute("foundry", facts, part.get("material") or "", part.get("mould_typed") or {})
+    sv = lambda k, d: mould_systems.value(systems, k, d)
     wall = max(float(part.get("wall_mm") or 0), 4.0)
-    rd = max(40.0, rules("riser_d_factor") * wall)
+    spd, rw = sv("sprue_dia", rules("sprue_d_mm")), sv("runner_side", rules("runner_w_mm"))
+    igw, igt = sv("ingate_width", rules("ingate_w_mm")), sv("ingate_thk", rw * 0.4)
+    rd = sv("riser_dia", max(40.0, rules("riser_d_factor") * wall))
     sx = -(il / 2) + spd + 10
     gating = []
     for cx, cy in cells:
         gx = cx + sx
         sprue = cq.Solid.makeCylinder(spd / 2, hc - 10, cq.Vector(gx, cy, pl + tp / 2), cq.Vector(0, 0, 1))
         runner = _box(gx, cy - rw / 2, pl + tp / 2, cx - bb.xlen / 2 - igw * 0.2, cy + rw / 2, pl + tp / 2 + rw)
-        ingate = _box(cx - bb.xlen / 2 - igw * 0.2, cy - igw / 2, pl + tp / 2, cx - bb.xlen / 2 + 3, cy + igw / 2, pl + tp / 2 + rw * 0.4)
+        ingate = _box(cx - bb.xlen / 2 - igw * 0.2, cy - igw / 2, pl + tp / 2, cx - bb.xlen / 2 + 3, cy + igw / 2, pl + tp / 2 + min(igt, rw))
         riser = cq.Solid.makeCylinder(rd / 2, max(rd * 1.5, 40), cq.Vector(cx, cy, cb.zmax + tp / 2 - 2), cq.Vector(0, 0, 1))
         gating.append(sprue.fuse(runner).fuse(ingate).fuse(riser).clean())
     gl = _line(lines, "Gating & riser patterns")
@@ -465,7 +479,7 @@ def foundry_design(part: dict, shape, tr: dict, axis: str = "z") -> dict:
         gb = g.BoundingBox()
         comps.append(Comp(f"Gating & riser pattern {k}" if len(gating) > 1 else "Gating & riser pattern", g.translate(cq.Vector(-gb.xmin, -gb.ymin, -gb.zmin)),
                           [(gb.xmin, gb.ymin, gb.zmin)], material=gl.get("grade") or pm, color="std", size=(gb.xlen, gb.ylen, gb.zlen),
-                          drawing="solid", notes=[f"Sprue Ø{spd:g}, runner {rw:g} × {rw:g}, ingate {igw:g}, riser Ø{rd:.0f} (= {rules('riser_d_factor'):g} × wall)"]))
+                          drawing="solid", notes=[f"Sprue Ø{spd:.1f}, runner {rw:.1f} × {rw:.1f}, ingate {igw:.1f} × {igt:.1f}, riser Ø{rd:.0f}"]))
     # core box: the region the casting encloses (open side down), when there is one
     core_line = _line(lines, "Core box")
     if (core_line.get("quantity") or 0) > 0:
@@ -497,6 +511,7 @@ def foundry_design(part: dict, shape, tr: dict, axis: str = "z") -> dict:
     for i, c in enumerate(order, start=1):
         c.no = f"{i:02d}" if c.kind != "ref" else "REF"
     notes.append(f"Flasks {L:.0f} × {W:.0f} mm, cope {hc:g} / drag {hd:g} mm, {len(cells)} pattern(s) on the match plate.")
-    return {"name": f"Pattern equipment · {len(cells)} pattern{'s' if len(cells) > 1 else ''}", "key": "pattern", "components": order,
+    notes += mould_systems.notes(systems)
+    return {"systems": systems, "name": f"Pattern equipment · {len(cells)} pattern{'s' if len(cells) > 1 else ''}", "key": "pattern", "components": order,
             "notes": notes, "shut_height": round(hc + hd + tp, 1), "die_set": f"{b.get('series', '')} {b.get('size_code', '')} {L:.0f} × {W:.0f}",
             "rules_are_examples": rules.is_example, "part_type": "foundry"}

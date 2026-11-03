@@ -1215,6 +1215,13 @@ def parts_cavities_save(part_id: int, data: dict):
     return _design_error(lambda: cavity_spec.save(part_id, data.get("cavities")))
 
 
+@app.put("/api/parts/{part_id}/mould-systems")
+def parts_mould_systems_save(part_id: int, data: dict):
+    """Type over Mould systems values (stage 46). data: {values: {name: number | null (= back to the formula)}}; returns the tool design."""
+    from . import mould_systems
+    return _design_error(lambda: (mould_systems.save_typed(part_id, data.get("values") or {}), register.tool_design_summary(part_id))[1])
+
+
 @app.get("/api/parts/{part_id}/machine-check")
 def parts_machine_check(part_id: int):
     """Each tool against the typed machine (tool needs / machine has / ok), or the recommended machine."""

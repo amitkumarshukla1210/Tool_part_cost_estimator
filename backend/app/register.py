@@ -3378,9 +3378,13 @@ def _tool_designs_build(part_id: int, key: str | None = None) -> tuple[dict, dic
         axis = _concept_inputs(part_id)[5]["opening_axis"]
     except Exception:
         axis = "z"
+    from . import mould_systems
+    density, _ = _density(d["material"])
+    info = d | {"wall_mm": (rev.get("geometry") or {}).get("wall_mm"), "density_g_cm3": density,
+                "mould_typed": mould_systems.typed(part_id)}         # stage 46: facts and typed values of the Mould systems
     try:
-        des = (mould_design.foundry_design(d | {"wall_mm": (rev.get("geometry") or {}).get("wall_mm")}, shape, tr, axis)
-               if part_type == "foundry" else mould_design.mould_design(d, shape, tr, part_type, axis))
+        des = (mould_design.foundry_design(info, shape, tr, axis)
+               if part_type == "foundry" else mould_design.mould_design(info, shape, tr, part_type, axis))
     except tool_design.DesignError as exc:
         raise RegisterError(str(exc)) from None
     from . import drawing_data
@@ -3398,6 +3402,7 @@ def tool_design_summary(part_id: int) -> dict:
     return {"part_id": part_id, "rev": rev["rev"], "tools": [
         {"stage": k, "key": des["key"], "name": des["name"], "notes": des["notes"], "shut_height": des["shut_height"],
          "die_set": des["die_set"], "rules_are_examples": des["rules_are_examples"], "internals": _internals(des),
+         "systems": des.get("systems"), "gates": [{k: v for k, v in g.items() if k != "cell"} for g in des.get("gates") or []],
          "components": [{"no": c.no, "name": c.name, "qty": c.qty, "kind": c.kind, "material": c.material, "hardness": c.hardness,
                          "std": c.std or c.make, "size": [round(v, 1) for v in c.size]} for c in des["components"] if c.kind != "ref"]}
         for k, des in designs]}

@@ -1561,6 +1561,7 @@ async function toolDesignLoad() {
         ${t.internals ? `<p class="note"><b>Internals:</b> ejector pins ${t.internals.pins_placed} placed of ${t.internals.pins_wanted} wanted ·
           cooling lines ${t.internals.cool_placed} of ${t.internals.cool_wanted} · screws ${t.internals.screws} · dowels ${t.internals.dowels}
           ${t.internals.pins_placed < t.internals.pins_wanted || t.internals.cool_placed < t.internals.cool_wanted ? ' <span class="badge missing">check in the review</span>' : ""}</p>` : ""}
+        ${mouldSystemsHtml(t)}
         <p class="downloads"><a class="btn btn-outline small" href="/api/parts/${part.id}/tool-design.html${q}" target="_blank">🧊 Open 3D viewer</a> ·
           <a class="link" href="/api/parts/${part.id}/tool-design.stl${q}">⬇ Assembly STL</a> ·
           <a class="link" href="/api/parts/${part.id}/tool-design.step${q}">⬇ Assembly 3D (STEP)</a> ·
@@ -1582,6 +1583,45 @@ async function toolDesignLoad() {
     status($("tdStatus"), err.message, "error");
   }
 }
+
+// Mould systems (stage 46): gate, runner, overflow, ejection and cooling worked out by the master-data formulas; type over a value
+const SYSTEM_TITLES = { gate: "Gate and runner", overflow: "Overflows", ejection: "Ejection", cooling: "Cooling (water)" };
+function mouldSystemsHtml(t) {
+  const sy = t.systems;
+  if (!sy || !sy.rows.length) return "";
+  const groups = Object.keys(SYSTEM_TITLES).filter((k) => sy.rows.some((r) => r.system === k) || sy.checks.some((c) => c.system === k));
+  const inputs = (r) => Object.entries(r.inputs).map(([k, v]) => `${esc(k)} = ${fmt(v, 3)}`).join(", ");
+  return `<details class="card" open><summary><b>Mould systems</b> · gate, overflow, ejection, cooling worked out by formulas
+      ${sy.is_example ? '<span class="badge example">EXAMPLE</span>' : ""}</summary>
+    <p class="note">Formulas: Master data → Mould &amp; die database → <b>Mould systems</b> (sizes they use: Design rules). Type a value to use your own;
+      empty = back to the formula. The 3D design, drawings and review use these values.</p>
+    <form class="msForm" data-tool="${esc(t.key)}">${groups.map((g) => `<h5>${SYSTEM_TITLES[g]}</h5>
+      <div class="table-wrap"><table class="cost-table"><thead><tr><th>Value</th><th class="num">Result</th><th>Unit</th><th>Your value</th>
+        <th>Formula and inputs</th><th>Source</th></tr></thead><tbody>
+        ${sy.rows.filter((r) => r.system === g).map((r) => `<tr><td>${esc(r.label)}${r.is_example ? ' <span class="badge example">EX</span>' : ""}</td>
+          <td class="num"><b>${r.value == null ? "—" : fmt(r.value, r.value < 10 ? 2 : 1)}</b></td><td>${esc(r.unit)}</td>
+          <td><input name="${esc(r.name)}" type="number" step="any" min="0" style="width:90px" value="${r.source === "typed by you" ? r.value : ""}" /></td>
+          <td class="note"><code>${esc(r.formula)}</code><br/>${inputs(r)}${r.why ? `<br/><i>${esc(r.why)}</i>` : ""}</td>
+          <td class="note">${esc(r.source)}</td></tr>`).join("")}
+        ${sy.checks.filter((c) => c.system === g).map((c) => `<tr><td colspan="6">${c.ok === true ? '<span class="badge status">ok</span>'
+          : c.ok === false ? '<span class="badge missing">check</span>' : '<span class="badge">not checked</span>'} <code>${esc(c.formula)}</code>
+          ${c.message ? ` ${esc(c.message)}` : ""}</td></tr>`).join("")}</tbody></table></div>`).join("")}
+      ${t.gates && t.gates.length ? `<p class="note">Gates placed: ${t.gates.length} (${esc([...new Set(t.gates.map((g) => g.kind))].join(", "))}).</p>` : ""}
+      <div class="dialog-actions"><button type="submit" class="btn btn-primary small">Save my values and design again</button></div>
+      <p class="status msStatus"></p></form></details>`;
+}
+
+document.addEventListener("submit", async (e) => {
+  if (!e.target.classList || !e.target.classList.contains("msForm")) return;
+  e.preventDefault();
+  const values = Object.fromEntries([...new FormData(e.target)].map(([k, v]) => [k, v === "" ? null : v]));
+  const st = e.target.querySelector(".msStatus");
+  try {
+    status(st, "Saving and designing again…");
+    await api(`/api/parts/${part.id}/mould-systems`, { method: "PUT", body: JSON.stringify({ values }) });
+    toolDesignLoad();
+  } catch (err) { status(st, err.message, "error"); }
+});
 
 // supplier production data: stock, weight, operations and cost share per tool part (stage 45)
 async function productionDataLoad() {

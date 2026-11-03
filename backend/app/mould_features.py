@@ -23,6 +23,7 @@ import math
 
 import cadquery as cq
 
+from . import mould_systems
 from .tool_design import Comp, _line
 
 
@@ -138,14 +139,18 @@ def _gating(ctx):
             locs.append((cx, cy, ztop))
             tool = _bar((cx, cy, ztop - 0.01), (cx, cy, z_tc + 5), nd + 2)
             cut(comps, ("A plate", "Cavity insert"), tool, "Hot-runner nozzle bore")
+        ctx["gates"] = [{"cell": (cx, cy), "x": 0.0, "y": 0.0, "z": z, "kind": "hot-runner nozzle"} for cx, cy, z in locs]
         nl = z_tc + 5 - min(z for _, _, z in locs)
         comps.append(Comp(f"Hot runner nozzle Ø{nd:g}", cq.Solid.makeCylinder(nd / 2, nl), locs, kind="std", make=nz_line.get("make") or "",
                           std=" ".join(v for v in (nz_line.get("std_part") or "", nz_line.get("part_number") or "") if v) or
                           f"Hot runner nozzle Ø{nd:g} × {nl:.0f}", size=(nd, nd, nl), color="std", drawing="none"))
         notes.append(f"Hot runner: manifold plate {mp:g} mm, {len(cells)} nozzle(s) gating on the top of the part.")
         return
-    rd = R("runner_d_mm", 6)
-    gw, gh = R("gate_w_mm", 3), R("gate_h_mm", 1.2)
+    # stage 46: sizes from the Mould systems formulas (typed values win), else the Design rules
+    sv = lambda k, d: mould_systems.value(ctx.get("systems"), k, d)
+    rd = sv("runner_dia", R("runner_d_mm", 6))
+    gw, gh = sv("gate_width", R("gate_w_mm", 3)), sv("gate_thk", R("gate_h_mm", 1.2))
+    ngate = max(1, int(round(sv("gates", 1))))
     if pt == "die_casting":
         ssd = R("shot_sleeve_d_mm", 80)
         hx, hy = 0.0, -(ctx["pocket_w"] / 2 + ssd * 0.75)
@@ -168,24 +173,32 @@ def _gating(ctx):
                 gd = R("sprue_bush_d_mm") * 0.375
                 cut(comps, ("Cavity insert",), _bar((0, 0, max(zs) - 0.01), (0, 0, pl + ctx["ha"] + 1), gd), "Direct sprue gate")
                 notes.append(f"Gate: direct sprue gate Ø{gd:g} on the top of the part.")
+                ctx["gates"] = [{"cell": cells[0], "x": 0.0, "y": 0.0, "z": max(zs), "kind": "direct sprue"}]
                 return
+    gates = []
     for cx, cy in cells:
         ux, uy = _gate_side(cx, cy, hx, hy)
         ex = cx + ux * (bb.xlen / 2)
         ey = cy + uy * (bb.ylen / 2)
-        out = (ex + ux * 3, ey + uy * 3)
-        runner = _bar((hx, hy, pl), (out[0], out[1], pl), rd)
-        cut(comps, ("A plate", "B plate", "Cavity insert", "Core insert"), runner, f"Runner Ø{rd:g} on the parting plane")
-        gx0, gx1 = sorted((ex - ux * 0.5, out[0]))
-        gy0, gy1 = sorted((ey - uy * 0.5, out[1]))
-        if ux:
-            gate = _box(gx0, cy - gw / 2, pl, gx1, cy + gw / 2, pl + gh)
-        else:
-            gate = _box(cx - gw / 2, gy0, pl, cx + gw / 2, gy1, pl + gh)
-        cut(comps, ("Cavity insert", "Core insert"), gate, f"Edge gate {gw:g} × {gh:g}")
+        side = bb.ylen if ux else bb.xlen                    # length of the side the gates are on
+        for g in range(ngate):
+            f = (g + 1) / (ngate + 1) - 0.5 if ngate > 1 else 0.0
+            gx_, gy_ = (ex, cy + f * side) if ux else (cx + f * side, ey)
+            out = (gx_ + ux * 3, gy_ + uy * 3)
+            runner = _bar((hx, hy, pl), (out[0], out[1], pl), rd)
+            cut(comps, ("A plate", "B plate", "Cavity insert", "Core insert"), runner, f"Runner Ø{rd:.1f} on the parting plane")
+            gx0, gx1 = sorted((gx_ - ux * 0.5, out[0]))
+            gy0, gy1 = sorted((gy_ - uy * 0.5, out[1]))
+            if ux:
+                gate = _box(gx0, gy_ - gw / 2, pl, gx1, gy_ + gw / 2, pl + gh)
+            else:
+                gate = _box(gx_ - gw / 2, gy0, pl, gx_ + gw / 2, gy1, pl + gh)
+            cut(comps, ("Cavity insert", "Core insert"), gate, f"Edge gate {gw:.1f} × {gh:.1f}")
+            gates.append({"cell": (cx, cy), "x": gx_ - cx, "y": gy_ - cy, "z": pl + gh / 2, "kind": "edge"})
         if pt == "die_casting":
-            n = int(R("overflows", 3))
-            ow, olen, oh = R("overflow_w_mm", 12), R("overflow_l_mm", 20), R("overflow_h_mm", 6)
+            n = max(1, int(round(sv("overflows", R("overflows", 3)))))
+            ow, oh = R("overflow_w_mm", 12), R("overflow_h_mm", 6)
+            olen = sv("overflow_len", R("overflow_l_mm", 20))
             for k in range(n):
                 f = (k + 1) / (n + 1) - 0.5
                 if ux:
@@ -203,11 +216,12 @@ def _gating(ctx):
                                 max(py + uy * olen / 2, cy - uy * bb.ylen / 2), pl + 0.01)
                     vent = _box(px - 4, min(py, cy - uy * ctx["iw"] / 2), pl - 0.3, px + 4, max(py, cy - uy * ctx["iw"] / 2), pl + 0.01)
                 cut(comps, ("Core insert",), ov.fuse(link).fuse(vent), "Overflows with vacuum vents")
+    ctx["gates"] = gates
     if pt == "die_casting":
-        notes.append(f"Shot sleeve Ø{R('shot_sleeve_d_mm', 80):g} with biscuit beside the cavities, runner Ø{rd:g} and gate "
-                     f"{gw:g} × {gh:g} to each cavity, {int(R('overflows', 3))} overflows with vacuum vents per cavity.")
+        notes.append(f"Shot sleeve Ø{R('shot_sleeve_d_mm', 80):g} with biscuit beside the cavities, runner Ø{rd:.1f} and gate "
+                     f"{gw:.1f} × {gh:.1f} to each cavity, {n} overflow(s) {ow:g} × {olen:.0f} × {oh:g} with vacuum vents per cavity.")
     else:
-        notes.append(f"Cold runner Ø{rd:g} on the parting plane from the sprue, edge gate {gw:g} × {gh:g} to each cavity.")
+        notes.append(f"Cold runner Ø{rd:.1f} on the parting plane from the sprue, {ngate} edge gate(s) {gw:.1f} × {gh:.1f} to each cavity.")
 
 
 # ---------- slides and lifters ----------
@@ -312,8 +326,12 @@ def _eps(ctx):
     for name, z in (("Steam chamber back plate (cavity side)", z_top + ch), ("Steam chamber back plate (core side)", z_bot - ch - back)):
         comps.append(Comp(name, _box(0, 0, 0, L, W, back), [(-L / 2, -W / 2, z)], material=ctx["base_mat"], color="shoe",
                           size=(L, W, back), drawing="solid"))
-    nfill = int(_line(ctx["lines"], "Fill gun").get("quantity") or len(cells))
-    per = max(1, round(nfill / max(len(cells), 1)))
+    guns = mould_systems.value(ctx.get("systems"), "fill_guns", None)       # stage 46: fill guns per cavity by formula
+    if guns is None:
+        nfill = int(_line(ctx["lines"], "Fill gun").get("quantity") or len(cells))
+        per = max(1, round(nfill / max(len(cells), 1)))
+    else:
+        per = max(1, int(round(guns)))
     idd = R("injector_d_mm", 20)
     locs = []
     for cx, cy in cells:
@@ -328,6 +346,7 @@ def _eps(ctx):
             zt = max(zs)
             cut(comps, ("Cavity insert", "A plate"), _bar((x, y, zt - 0.01), (x, y, z_top + 0.01), idd + 1), "Fill injector bore")
             locs.append((x, y, zt))
+    ctx["gates"] = [{"cell": None, "x": x, "y": y, "z": z, "kind": "fill gun"} for x, y, z in locs]
     fl = _line(ctx["lines"], "Fill gun")
     if locs:
         h = z_top + ch - min(z for _, _, z in locs)

@@ -109,7 +109,8 @@ parts = Table(
     # your changes of traced values for this part (traceability panel): {"rm" | "tool" | "piece": {node id: {...}}}
     Column("trace_overrides", JSON),
     Column("machine", JSON),             # production machine typed before the tool design (stage 33): {spec, skipped}
-    Column("cavity_check", JSON),        # cavities asked before the mould design (stage 46): {asked, typed, recommended, by, at}
+    Column("cavity_check", JSON),
+    Column("mould_typed", JSON),         # Mould systems values typed over the formulas (stage 46): {name: value}        # cavities asked before the mould design (stage 46): {asked, typed, recommended, by, at}
     Column("created_by", String(100), default=""),
     Column("created_at", DateTime, default=now),
     Column("updated_at", DateTime, default=now, onupdate=now),
