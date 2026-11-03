@@ -104,3 +104,20 @@ def test_static_solver_first_and_a_broken_one_is_skipped(tmp_path, monkeypatch):
     assert fea.ccx_path() is None
     a = fea.available()
     assert not a["available"] and "does not start" in a["message"] and "ccx_dynamic.exe" in a["message"]
+
+
+def test_a_mesh_calculix_refuses_is_made_again(monkeypatch):
+    """Stage 46: a distorted element (nonpositive jacobian) next to a cooling hole: the next Gmsh attempt is used, not an estimate."""
+    calls = []
+
+    def fake(shape, size, force_n, patch, strip, R, title="", start=0, used=None):
+        calls.append(start)
+        used.append(start)
+        if start < 2:
+            raise fea.FeaError("CalculiX stopped:  *ERROR in e_c3d: nonpositive jacobian")
+        return {"ok": True, "start": start}
+    monkeypatch.setattr(fea, "_check_part", fake)
+    assert fea.check_part(None, (1, 1, 1), 1.0, (1, 1), None, {})["start"] == 2 and calls == [0, 1, 2]
+    monkeypatch.setattr(fea, "_check_part", lambda *a, **k: (_ for _ in ()).throw(fea.FeaError("CalculiX stopped: other")))
+    with pytest.raises(fea.FeaError, match="other"):
+        fea.check_part(None, (1, 1, 1), 1.0, (1, 1), None, {})

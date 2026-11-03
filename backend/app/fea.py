@@ -186,9 +186,10 @@ gmsh.finalize()
 ATTEMPTS = ((1.0, 6), (1.0, 1), (0.5, 6), (0.5, 1), (0.25, 6))
 
 
-def _mesh(shape, size: float):
+def _mesh(shape, size: float, start: int = 0, used: list | None = None):
     """Second-order tetrahedra of a CadQuery shape: (nodes {id: (x, y, z)}, elements [(id, [10 node ids])], element size used).
-    Gmsh runs in its own Python process: it needs the main thread (signals) and keeps one global model."""
+    Gmsh runs in its own Python process: it needs the main thread (signals) and keeps one global model.
+    start: the first of ATTEMPTS to try; used (a list) gets the number of the attempt that meshed."""
     import json
     import sys
     import cadquery as cq
@@ -196,7 +197,9 @@ def _mesh(shape, size: float):
     with tempfile.TemporaryDirectory() as tmp:
         step, out = Path(tmp) / "part.step", Path(tmp) / "mesh.json"
         cq.exporters.export(cq.Workplane("XY").add(shape), str(step), exportType="STEP")
-        for factor, algo in ATTEMPTS:
+        for k, (factor, algo) in enumerate(ATTEMPTS):
+            if k < start:
+                continue
             out.unlink(missing_ok=True)
             try:
                 r = subprocess.run([sys.executable, "-c", _MESHER, str(step), str(size * factor), str(algo), str(out)],
@@ -206,6 +209,8 @@ def _mesh(shape, size: float):
             if r.returncode == 0 and out.exists():
                 m = json.loads(out.read_text())
                 if m["elems"]:
+                    if used is not None:
+                        used.append(k)
                     c = m["coords"]
                     nodes = {t: (c[3 * i], c[3 * i + 1], c[3 * i + 2]) for i, t in enumerate(m["tags"])}
                     return nodes, [(e[0], e[1:]) for e in m["elems"]], size * factor
@@ -353,6 +358,22 @@ def _picture(nodes, disp, top, title) -> bytes:
 
 
 def check_part(shape, size, force_n: float, patch: tuple, strip: float | None, R: dict, title: str = "") -> dict:
+    """FEA of one part (see _check_part). A mesh CalculiX refuses (a distorted element: "nonpositive jacobian", e.g. next to a
+    cooling hole close to a face) is made again with the next Gmsh attempt (other method / finer), so no result is estimated."""
+    start, last = 0, None
+    while start < len(ATTEMPTS):
+        used = []
+        try:
+            return _check_part(shape, size, force_n, patch, strip, R, title, start, used)
+        except FeaError as exc:
+            if "jacobian" not in str(exc).lower() or not used:
+                raise
+            last, start = exc, used[0] + 1
+    raise FeaError(f"{last} (also with every finer mesh)")
+
+
+def _check_part(shape, size, force_n: float, patch: tuple, strip: float | None, R: dict, title: str = "", start: int = 0,
+                used: list | None = None) -> dict:
     """FEA of one part. size = (L, W, H); patch = (l, w) of the part's outline, centred; strip = support strip width along the two
     long edges of the bottom face (a plate that spans), None = the part sits on its flat back face.
 
@@ -362,7 +383,7 @@ def check_part(shape, size, force_n: float, patch: tuple, strip: float | None, R
     av = available()
     if not av["available"]:
         raise FeaError(av["message"])
-    nodes, elems, mesh_mm = _mesh(shape, R["fea_mesh_mm"])
+    nodes, elems, mesh_mm = _mesh(shape, R["fea_mesh_mm"], start, used)
     zmin = min(p[2] for p in nodes.values())
     zmax = max(p[2] for p in nodes.values())
     xmin, xmax = min(p[0] for p in nodes.values()), max(p[0] for p in nodes.values())
