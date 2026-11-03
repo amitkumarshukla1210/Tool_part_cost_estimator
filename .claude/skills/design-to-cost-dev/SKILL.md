@@ -7,9 +7,9 @@ Project: **Design to Cost — Part Cost Estimator**, repository `amitkumarshukla
 I am Amit, Head of Operations / costing at an OEM (supply chain, production, strategic sourcing, projects; RM, part and tool cost,
 BOM cost and CAPEX, EBITDA, digital transformation). Answer simply, **INR first**.
 
-**State (3 Nov 2026):** stages 1–45 are built (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
-cycle, PR 53; 43 = toolmaker review, 44 = design skills, both PR 55; 45 = tool internals, production data, FEA, 3D outputs, PR 57; fixes PR 59, 61, 62);
-the next stage is **46** (first free number in `ROADMAP.md`). Everything of the old V4 branch is now on main (written new);
+**State (3 Nov 2026):** stages 1–46 are built (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
+cycle, PR 53; 43 = toolmaker review, 44 = design skills, both PR 55; 45 = tool internals, production data, FEA, 3D outputs, PR 57; fixes PR 59, 61, 62;
+46 = cavities, gate, overflow, ejection, cooling of the mould, PR 64); the next stage is **47** (first free number in `ROADMAP.md`). Everything of the old V4 branch is now on main (written new);
 the 4 old unmerged branches are NOT to be merged.
 To save tokens, do not read the whole README (1350+ lines): read the stage table in `ROADMAP.md` and only the README section of the topic I ask about.
 Stack: Python / FastAPI (`backend/app/`), plain HTML / JS (`frontend/`), SQLite (`data/projects.sqlite` = my data, `master_data/costing_db.sqlite`
@@ -56,6 +56,18 @@ What the later stages added (details in README):
   selected part solid and the others see-through. PR 62: the part panel asks for everything in parallel and opens at once; the part
   cost (simulated cycle, stage 42) fills in when ready (`#pieceBox`, `openPart` resolves after it); simulation results kept for the
   last 16 parts (`_SIMULATION_CACHE`). Keep panel requests parallel; never make the panel wait for a slow calculation.
+- 46 (PR 64): cavities asked before the mould design (`cavity_spec.py`, parts.cavity_check; typed = tool input `cavities`), then the machine.
+  New Mould & die table *Mould systems* (`mould_systems.py`): gate / overflow / ejection / cooling values by formula rows in order (facts of
+  the design + Design rules + Process windows + Flow materials), typed per part wins (parts.mould_typed, PUT …/mould-systems), checks →
+  review fact `systems_bad`. Ejector stroke = part h + `eject_extra_mm`; spacer blocks raised when the catalogue base is short (the cover
+  had 20 mm for a 30 mm part); EPS pneumatic ejectors; machine check uses it; 3D viewer *Open & eject*. Cooling channels joined into
+  circuits (`mould_features.cooling_plan` / `_cooling`: bridge tubes, U-turn cross channel Ø cd + `cooling_cross_extra_mm` — equal drills at
+  90° make a tangent solid FEA cannot mesh — plugs, O-rings, IN / OUT nipples); coolant inlet / flow / Reynolds / outlet / pressure drop,
+  dew-point check. Flow simulation runs on the designed gate (`register.design_gates`, `mould_design.to_model`), checks gate shear and freeze.
+  Fixes: 2-cavity drawing set PDF overflow (`tool_drawings._holes_at_side`), cut labels per part only, FEA re-meshes on "nonpositive jacobian".
+  New EXAMPLE values to replace: gate factors, `eject_extra_mm`, `stop_disc_mm`, coolant rows (`water_below_mould_c`, `water_dt_max_c`,
+  `tcu_pressure_bar`, `dew_point_c` …), `cooling_cross_extra_mm`, `gate_freeze_share`. Full suite: ~25 min, 443 tests.
+  Fingerprints: a cloud clone is shallow — `git fetch --unshallow` before `upgrade_tools fingerprints`, or old rows are lost.
 - To open a STEP: his CAD, eDrawings Viewer (SOLIDWORKS free downloads; not "3DEXPERIENCE Exchange", that is a SOLIDWORKS add-in),
   CAD Assistant, FreeCAD, or the app's own 3D viewer. Windows 3D Viewer opens the STL, not STEP.
 - Amit's PC: kit at `D:\Project\DTC Tool and mould`, app on port 8100, CalculiX 2.22 `ccx_static.exe` in
