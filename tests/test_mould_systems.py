@@ -150,3 +150,54 @@ def test_eps_pneumatic_ejectors_and_blow_opening(tmp_path):
     pid = add(tmp_path, bottle(), "bottle4.step", "PET bottle grade (IV 0.80)", "stretch_blow_moulding", "MSE4")
     des = _design(pid)
     assert des["motion"]["eject_mm"] == 0 and des["motion"]["opening_mm"] == round(_rows(des)["opening_stroke"]["value"], 1)
+
+
+# ---------- cooling circuits and water data (stage 46, 4/5) ----------
+
+def test_cooling_circuits_are_built_with_nipples_plugs_and_o_rings():
+    pid = add_part(project("MSC1"), "plastic_cover.step", "ABS", "injection_moulding", "MSC1-1")
+    client.put(f"/api/parts/{pid}/cavities", json={"cavities": 2})
+    des = _design(pid)
+    circ = des["cooling"]
+    assert len(circ) >= 2 and {c["half"] for c in circ} == {"cavity", "core"} and all(c["len_mm"] > 0 for c in circ)
+    names = {c.name: c for c in des["components"]}
+    nin = next(c for n, c in names.items() if n.startswith("Cooling nipple IN"))
+    assert len(nin.locs) == len(circ) and all(x < 0 for x, _, _ in nin.locs)          # IN on the operator (-X) side
+    nout = sum(len(c.locs) for n, c in names.items() if n.startswith("Cooling nipple OUT"))
+    assert nout == len(circ)
+    if any(c["uturn"] for c in circ):
+        assert any(n.startswith("Cooling plug") for n in names) and any("U-turn" in " ".join(c.notes) for c in des["components"] if c.name.startswith("Cavity insert") or c.name.startswith("Core insert"))
+    assert any(n.startswith("O-ring") for n in names)
+    assert any(n.startswith("Cooling circuits: C1") for n in des["notes"])
+
+
+def test_water_data_by_formula_and_checks():
+    pid = add_part(project("MSC2"), "plastic_cover.step", "ABS", "injection_moulding", "MSC2-1")
+    des = _design(pid)
+    r, f = _rows(des), des["systems"]["facts"]
+    rules = {k: float(v["value"]) for k, v in mould_db.design_rules("plastic").items() if v["value"] is not None}
+    from backend.app import process_params
+    win = process_params.window("ABS")
+    assert r["water_in"]["value"] == win["mould_c"] - rules["water_below_mould_c"]
+    assert r["flow_set"]["value"] == max(r["flow_heat"]["value"], r["flow_turb"]["value"])
+    assert r["reynolds"]["value"] >= rules["reynolds_min"] - 1
+    q = r["flow_set"]["value"]
+    out = r["water_in"]["value"] + r["heat_kw"]["value"] / f["cool_circuits"] / (4.186 * 1.0 * q / 60)
+    assert abs(r["water_out"]["value"] - out) < 1e-3 and r["water_out"]["value"] - r["water_in"]["value"] <= rules["water_dt_max_c"] + 1e-6
+    assert f["cool_circuits"] == len(des["cooling"]) and f["circuit_len_mm"] == max(c["len_mm"] for c in des["cooling"])
+    assert r["pressure_drop"]["value"] > 0 and any(n.startswith("Cooling with water") for n in des["notes"])
+    # the inlet temperature to keep is typed colder than the dew point: the check tells why
+    client.put(f"/api/parts/{pid}/mould-systems", json={"values": {"water_in": 10}})
+    chk = {c["name"]: c for c in _design(pid)["systems"]["checks"]}
+    assert chk["chk_dew"]["ok"] is False and "10 °C is below the dew point" in chk["chk_dew"]["message"]
+
+
+def test_die_casting_uses_thermal_oil_and_eps_spray_circuits(tmp_path):
+    pid = add_part(project("MSC3"), "plastic_cover.step", "Aluminium ADC12 / A383", "die_casting", "MSC3-1")
+    des = _design(pid)
+    assert des["systems"]["coolant"].startswith("Thermal oil") and any(n.startswith("Cooling with thermal oil") for n in des["notes"])
+    assert _rows(des)["water_in"]["value"] > 100
+    pid = add(tmp_path, eps_tray(), "eps3.step", "EPS bead grade S (20 kg/m3)", "eps_moulding", "MSC4")
+    des = _design(pid)
+    assert des["systems"]["facts"]["cool_circuits"] == 2 and _rows(des)["flow_set"]["value"] > 0 and des["cooling"] == []
+

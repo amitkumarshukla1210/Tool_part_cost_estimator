@@ -43,6 +43,8 @@ FACTS = {
     "eject_c": "Part temperature at ejection (°C)", "diffusivity_mm2_s": "Thermal diffusivity (Flow materials, mm²/s)",
     "no_flow_c": "No-flow / minimum flow temperature (Flow materials, °C)", "nadca_k_s_mm": "NADCA fill-time factor K (s/mm)",
     "nadca_z_c_pct": "NADCA Z (°C per % solid)", "chvorinov_s_mm2": "Chvorinov B (s/mm²); EPS: cooling s per mm² of wall",
+    "cool_circuits": "Cooling circuits of the mould (EPS: the two steam-chamber spray circuits)",
+    "circuit_len_mm": "Longest cooling circuit, plate + inserts + bridges (mm)",
 }
 
 # new Design rules rows (part type, parameter): value, unit, description - added by seed(), never changed
@@ -53,6 +55,7 @@ RULES = [
     ("plastic", "gate_land_mm", 1.0, "mm", "Gate land length (stage 46)"),
     ("plastic", "flow_ratio_max", 150, "-", "Longest flow length / wall that one gate fills; more gates above it (stage 46)"),
     ("plastic", "gates_max", 4, "-", "Most gates per cavity the gate design adds (stage 46)"),
+    ("plastic", "gate_freeze_share", 0.3, "-", "Flow simulation: the gate must stay open this share of the part cooling time (packing) (stage 46)"),
     ("die_casting", "dc_solid_pct", 20, "%", "NADCA fill time: share of solid allowed at the end of the fill (stage 46)"),
     ("die_casting", "gate_velocity_m_s", 40, "m/s", "Metal speed through the gate (aluminium 30 - 50, zinc 35 - 50) (stage 46)"),
     ("die_casting", "gate_thk_factor", 0.5, "-", "Gate thickness = factor × wall (stage 46)"),
@@ -76,6 +79,30 @@ RULES = [
     ("eps", "eps_cm2_per_ejector", 150, "cm²", "Projected part area pushed off by one pneumatic ejector (stage 46)"),
     ("eps", "eps_ejector_stroke_mm", 100, "mm", "Stroke of the pneumatic ejectors of the EPS machine / mould (stage 46)"),
 ]
+# cooling water (stage 46): part type → value; the coolant of die casting is thermal oil
+_COOL = {
+    "cycle_extra_s": ({"plastic": 8, "die_casting": 20, "blow": 6, "eps": 40}, "s", "Cycle = cooling time + this (open, eject, close, spray / fill)"),
+    "runner_share_pct": ({"plastic": 10, "die_casting": 50, "blow": 0, "eps": 0}, "%", "Runner / biscuit / overflow metal or plastic cooled too, % of the parts"),
+    "melt_cp_kj_kgk": ({"plastic": 2.0, "die_casting": 1.1, "blow": 1.6, "eps": 1.3}, "kJ/kg·K", "Specific heat of the part material (melt to ejection)"),
+    "melt_latent_kj_kg": ({"plastic": 60, "die_casting": 390, "blow": 0, "eps": 0}, "kJ/kg", "Latent heat set free on freezing (amorphous plastics 0, PP / PA 100+, aluminium 390)"),
+    "water_heat_share": ({"plastic": 0.9, "die_casting": 0.6, "blow": 0.9, "eps": 0.9}, "-", "Share of the heat the coolant takes (rest: air, spray, platens)"),
+    "water_below_mould_c": ({"plastic": 5, "die_casting": 20, "blow": 3, "eps": 15}, "°C", "Coolant inlet = mould / die temperature − this"),
+    "water_dt_max_c": ({"plastic": 3, "die_casting": 5, "blow": 3, "eps": 5}, "°C", "Largest rise of the coolant from IN to OUT (even mould temperature)"),
+    "coolant_cp_kj_kgk": ({"plastic": 4.186, "die_casting": 2.1, "blow": 4.186, "eps": 4.186}, "kJ/kg·K", "Specific heat of the coolant (water 4.186, thermal oil about 2.1)"),
+    "coolant_density_kg_l": ({"plastic": 1.0, "die_casting": 0.85, "blow": 1.0, "eps": 1.0}, "kg/L", "Density of the coolant"),
+    "coolant_visc_mm2_s": ({"plastic": 0.7, "die_casting": 1.5, "blow": 1.1, "eps": 0.9}, "mm²/s", "Kinematic viscosity of the coolant at its temperature"),
+    "reynolds_min": ({"plastic": 10000, "die_casting": 10000, "blow": 10000, "eps": 10000}, "-", "Smallest Reynolds number (turbulent flow takes the heat away)"),
+    "fittings_loss_pct": ({"plastic": 50, "die_casting": 50, "blow": 50, "eps": 50}, "%", "Pressure drop of bends, plugs, nipples and hoses on top of the straight channel"),
+    "tcu_pressure_bar": ({"plastic": 3, "die_casting": 3, "blow": 3, "eps": 3}, "bar", "Pressure the temperature-control unit / chiller pump gives"),
+    "dew_point_c": ({"plastic": 15, "die_casting": 15, "blow": 15, "eps": 15}, "°C", "Dew point of the shop air: colder water makes the mould sweat"),
+    "nipple_d_mm": ({"plastic": 13, "die_casting": 13, "blow": 13}, "mm", "Cooling nipple (quick coupling) diameter"),
+    "nipple_len_mm": ({"plastic": 35, "die_casting": 35, "blow": 35}, "mm", "Cooling nipple length out of the plate"),
+    "plug_len_mm": ({"plastic": 10, "die_casting": 10, "blow": 10}, "mm", "Pressure plug length"),
+}
+RULES += [(pt, k, v, unit, desc + " (stage 46)") for k, (vals, unit, desc) in _COOL.items() for pt, v in vals.items()]
+TEXT_RULES = [("plastic", "coolant_medium", "Water, closed circuit with a temperature-control unit"),
+              ("die_casting", "coolant_medium", "Thermal oil from the die temperature-control unit"),
+              ("blow", "coolant_medium", "Chilled water"), ("eps", "coolant_medium", "Water sprayed in the steam chambers")]
 
 # part type, system, name, formula, unit, meaning (or warning of a check), why, kind
 V, C = "value", "check"
@@ -142,8 +169,8 @@ EJECT_ROWS = [r for pt in ("plastic", "die_casting") for r in (
     (pt, "ejection", "chk_stroke", "eject_stroke <= spacer_used - ejector_plates_mm - stop_disc_mm", "",
      "The ejector stroke ({eject_stroke:.0f} mm) is shorter than the part needs: it cannot come off the core. Raise the spacer blocks.", "", C),
     (pt, "ejection", "chk_base", "base_stroke >= eject_stroke", "",
-     "The catalogue mould base gives {base_stroke:.0f} mm of ejector stroke; the part needs {eject_stroke:.0f} mm: spacer blocks raised to "
-     "{spacer_used:.0f} mm (special spacer blocks, mould {spacer_used - spacer_block_mm:.0f} mm higher).", "", C))] + [
+     "The catalogue mould base gives {base_stroke:.0f} mm of ejector stroke; the part needs {eject_stroke:.0f} mm: spacer blocks raised from "
+     "{spacer_block_mm:.0f} to {spacer_used:.0f} mm (special spacer blocks, the mould gets higher).", "", C))] + [
     ("eps", "ejection", "eps_ejectors", "max(2, ceil(projected_area_cm2 / eps_cm2_per_ejector))", "", "Pneumatic ejectors per cavity",
      "one per eps_cm2_per_ejector of projected area, at least 2; air ejection through the steam vents helps", V),
     ("eps", "ejection", "eject_stroke", "part_h + eject_extra_mm", "mm", "Ejector stroke needed", "part height + eject_extra_mm", V),
@@ -154,7 +181,41 @@ EJECT_ROWS = [r for pt in ("plastic", "die_casting") for r in (
     ("blow", "ejection", "opening_stroke", "rec_stroke_factor * part_h + rec_stroke_extra_mm", "mm", "Mould opening stroke needed",
      "the bottle is taken out between the halves (no ejector pins)", V),
 ]
-SEED_ROWS = GATE_ROWS + EJECT_ROWS
+_COOL_TIME = {
+    "plastic": ("wall_mm ** 2 / (3.1416 ** 2 * diffusivity_mm2_s) * log(4 / 3.1416 * (melt_c - mould_c) / max(eject_c - mould_c, 1))",
+                "t = s² / (π² α) × ln(4/π × (Tm − Tw) / (Te − Tw)): the wall cooled to the ejection temperature"),
+    "blow": ("wall_mm ** 2 / (3.1416 ** 2 * diffusivity_mm2_s) * log(4 / 3.1416 * (melt_c - mould_c) / max(eject_c - mould_c, 1))",
+             "t = s² / (π² α) × ln(4/π × (Tpreform − Tw) / (Te − Tw))"),
+    "die_casting": ("chvorinov_s_mm2 * (wall_mm / 2) ** 2", "Chvorinov: t = B × M², modulus of a wall M = wall / 2"),
+    "eps": ("chvorinov_s_mm2 * wall_mm ** 2", "EPS: cooling s per mm² of wall (Flow materials)"),
+}
+COOL_ROWS = [r for pt in ("plastic", "die_casting", "blow", "eps") for r in (
+    (pt, "cooling", "cool_time", _COOL_TIME[pt][0], "s", "Cooling time", _COOL_TIME[pt][1], V),
+    (pt, "cooling", "cycle", "cool_time + cycle_extra_s", "s", "Cycle (for the heat load)", "cooling time + cycle_extra_s", V),
+    (pt, "cooling", "heat_kj", "part_weight_g / 1000 * cavities * (1 + runner_share_pct / 100) * (melt_cp_kj_kgk * max(melt_c - eject_c, 0) + melt_latent_kj_kg)",
+     "kJ", "Heat per shot", "mass × (cp × (melt − ejection temperature) + latent heat)", V),
+    (pt, "cooling", "heat_kw", "heat_kj / cycle * water_heat_share", "kW", "Heat the coolant takes", "heat per shot / cycle × coolant share", V),
+    (pt, "cooling", "water_in", "mould_c - water_below_mould_c", "°C", "Coolant inlet temperature to keep",
+     "mould / die temperature of the material window − water_below_mould_c", V),
+    (pt, "cooling", "flow_total", "heat_kw / (coolant_cp_kj_kgk * coolant_density_kg_l * water_dt_max_c) * 60", "L/min", "Coolant flow for the heat (whole mould)",
+     "Q = P / (cp × ρ × ΔT)", V),
+    (pt, "cooling", "flow_heat", "flow_total / max(cool_circuits, 1)", "L/min", "Flow per circuit for the heat", "shared by the circuits", V),
+    (pt, "cooling", "flow_turb", "reynolds_min * coolant_visc_mm2_s * 3.1416 * cooling_d_mm / 4 * 0.00006", "L/min",
+     "Flow per circuit for turbulent flow", "Q = Re × ν × π × d / 4", V),
+    (pt, "cooling", "flow_set", "max(flow_heat, flow_turb)", "L/min", "Coolant flow to set per circuit", "the larger of heat and turbulence", V),
+    (pt, "cooling", "velocity", "flow_set / 60000 / (3.1416 * (cooling_d_mm / 1000) ** 2 / 4)", "m/s", "Coolant speed in the channel", "Q / channel section", V),
+    (pt, "cooling", "reynolds", "velocity * cooling_d_mm / 1000 / (coolant_visc_mm2_s * 0.000001)", "", "Reynolds number", "v × d / ν", V),
+    (pt, "cooling", "water_out", "water_in + heat_kw / max(cool_circuits, 1) / (coolant_cp_kj_kgk * coolant_density_kg_l * flow_set / 60)", "°C",
+     "Coolant outlet temperature", "inlet + heat per circuit / (cp × ρ × Q)", V),
+    (pt, "cooling", "pressure_drop", "0.316 * max(reynolds, 1) ** -0.25 * circuit_len_mm / cooling_d_mm * coolant_density_kg_l * 1000 * velocity ** 2 / 2 / 100000 * (1 + fittings_loss_pct / 100)",
+     "bar", "Pressure drop of the longest circuit", "Blasius friction × length / d × ρv²/2, + fittings", V),
+    (pt, "cooling", "chk_circuits", "cool_circuits >= 1", "",
+     "No cooling circuit could be placed clear of the part: baffles, bubblers or conformal cooling by the designer.", "", C),
+    (pt, "cooling", "chk_dew", "water_in >= dew_point_c", "",
+     "Coolant inlet {water_in:.0f} °C is below the dew point ({dew_point_c:.0f} °C): the mould sweats; dry the air or use warmer water.", "", C),
+    (pt, "cooling", "chk_pressure", "pressure_drop <= tcu_pressure_bar", "",
+     "Pressure drop {pressure_drop:.1f} bar is above the pump ({tcu_pressure_bar:.0f} bar): split the circuit or use a bigger channel.", "", C))]
+SEED_ROWS = GATE_ROWS + EJECT_ROWS + COOL_ROWS
 
 
 def seed() -> dict:
@@ -165,6 +226,11 @@ def seed() -> dict:
     for pt, k, v, u, desc in RULES:
         if (pt, k) not in have:
             d["design_rules"].append({"part_type": pt, "parameter": k, "value": v, "text": "", "unit": u, "description": desc, "is_example": True})
+            out["rules"] += 1
+    for pt, k, text in TEXT_RULES:
+        if (pt, k) not in have:
+            d["design_rules"].append({"part_type": pt, "parameter": k, "value": None, "text": text, "unit": "", "is_example": True,
+                                      "description": "Coolant of the mould (stage 46)"})
             out["rules"] += 1
     have = {(r["part_type"], r["name"]) for r in d["mould_systems"]}
     step = {}
@@ -328,7 +394,8 @@ def compute(part_type: str, facts: dict, material: str = "", typed_values: dict 
         rows.append({"system": r["system"], "name": r["name"], "label": r["label"], "value": round(v, 6), "unit": r["unit"],
                      "formula": r["formula"], "why": r["why"], "inputs": inputs, "source": src, "is_example": bool(r["is_example"])})
     values = {x["name"]: x["value"] for x in rows if x["value"] is not None}
-    return {"part_type": part_type, "rows": rows, "checks": checks, "values": values, "facts": {k: round(float(v), 4) for k, v in facts.items() if v is not None},
+    medium = (mould_db.design_rules(part_type).get("coolant_medium") or {}).get("text") or ""
+    return {"part_type": part_type, "rows": rows, "checks": checks, "values": values, "coolant": medium, "facts": {k: round(float(v), 4) for k, v in facts.items() if v is not None},
             "is_example": any(x["is_example"] for x in rows + checks), "material_known": bool(set(base) & {"melt_c", "diffusivity_mm2_s", "no_flow_c"})}
 
 
@@ -337,16 +404,26 @@ def value(systems: dict | None, name: str, default=None):
     return default if v is None else float(v)
 
 
+def _num(v: float) -> str:
+    """A value for a note: whole above 100, one decimal above 10, else two decimals."""
+    return f"{v:,.0f}" if abs(v) >= 100 else f"{v:.1f}" if abs(v) >= 10 else f"{v:.2f}"
+
+
+NOTE_COOLING = ("water_in", "flow_set", "water_out", "heat_kw", "pressure_drop", "reynolds")
+
+
 def notes(systems: dict | None) -> list[str]:
     """Short lines for the drawing notes: the gate / overflow values and the open checks."""
     if not systems:
         return []
     out = []
     for sysname in SYSTEMS:
-        rows = [r for r in systems["rows"] if r["system"] == sysname and r["value"] is not None]
+        rows = [r for r in systems["rows"] if r["system"] == sysname and r["value"] is not None
+                and (sysname != "cooling" or r["name"] in NOTE_COOLING)]
         if rows:
-            out.append(f"{sysname.capitalize()} (Mould systems{', EXAMPLE rules' if any(r['is_example'] for r in rows) else ''}): "
-                       + ", ".join(f"{r['label'].lower()} {r['value']:g}{(' ' + r['unit']) if r['unit'] else ''}"
+            head = sysname.capitalize() + (f" with {systems['coolant'].lower()}" if sysname == "cooling" and systems.get("coolant") else "")
+            out.append(f"{head} (Mould systems{', EXAMPLE rules' if any(r['is_example'] for r in rows) else ''}): "
+                       + ", ".join(f"{r['label'].lower()} {_num(r['value'])}{(' ' + r['unit']) if r['unit'] else ''}"
                                    + (" (typed)" if r["source"] == "typed by you" else "") for r in rows))
     out += [f"Check: {c['message']}" for c in systems["checks"] if c["ok"] is False]
     return out

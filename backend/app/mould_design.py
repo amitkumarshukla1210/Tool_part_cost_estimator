@@ -78,9 +78,12 @@ def split_core_cavity(shape, axis: str, shrink: float, il: float, iw: float, bac
     bottom of the part (middle = through the middle, blow moulds). cavity = upper block − part; core = lower block − part
     + whatever the part encloses above the parting plane."""
     s = _orient(shape, axis)
+    ops = [("orient", axis)]                    # stage 46: how the model was moved, to map design points back (to_model)
     if shrink:
         s = s.scale(1 + shrink)
+        ops.append(("scale", 1 + shrink))
     bb = s.BoundingBox()
+    ops.append(("move", (-bb.center.x, -bb.center.y, -bb.zmin)))
     s = s.translate(cq.Vector(-bb.center.x, -bb.center.y, -bb.zmin))       # centred, bottom at z = 0
     bb = s.BoundingBox()
     H = bb.zlen
@@ -91,6 +94,7 @@ def split_core_cavity(shape, axis: str, shrink: float, il: float, iw: float, bac
         lo, hi = _section_area(s, H * 0.02), _section_area(s, H * 0.98)
         if hi < lo:                     # open side at the top: turn the part over so the open side is down
             s = s.rotate((0, 0, 0), (1, 0, 0), 180).translate(cq.Vector(0, 0, H))
+            ops.append(("flip", H))
             bb = s.BoundingBox()
             lo = hi
         pl = 0.0
@@ -105,6 +109,7 @@ def split_core_cavity(shape, axis: str, shrink: float, il: float, iw: float, bac
         fp = sorted(upper.cut(f).Solids(), key=lambda x: -x.Volume())
         if len(fp) > 1:
             s, pieces, bb = f, fp, f.BoundingBox()
+            ops.append(("flip", H))
     cavity = pieces[0]
     core = lower.cut(s) if middle or pl > bb.zmin + 1e-6 else lower
     enclosed = None
@@ -116,7 +121,46 @@ def split_core_cavity(shape, axis: str, shrink: float, il: float, iw: float, bac
         notes.append("Core and cavity could not be separated cleanly (holes through the part link inside and outside): "
                      "the designer splits the shut-offs.")
     return {"part": s, "bb": bb, "H": H, "pl": pl, "cavity": cavity, "core": core, "enclosed": enclosed, "ha": ha, "hb": hb,
-            "notes": notes}
+            "notes": notes, "ops": ops}
+
+
+def _rot(p, axis: str, deg: float):
+    import math
+    c, s_ = math.cos(math.radians(deg)), math.sin(math.radians(deg))
+    x, y, z = p
+    if axis == "x":
+        return (x, y * c - z * s_, y * s_ + z * c)
+    return (x * c + z * s_, y, -x * s_ + z * c)                      # about y
+
+
+def to_design(p, ops):
+    """A point of the part model (mm) in the design coordinates of one cavity (the forward of split_core_cavity)."""
+    for op, a in ops:
+        if op == "orient":
+            p = _rot(p, "y", -90) if a == "x" else _rot(p, "x", 90) if a == "y" else p
+        elif op == "scale":
+            p = tuple(v * a for v in p)
+        elif op == "move":
+            p = (p[0] + a[0], p[1] + a[1], p[2] + a[2])
+        elif op == "flip":
+            p = _rot(p, "x", 180)
+            p = (p[0], p[1], p[2] + a)
+    return p
+
+
+def to_model(p, ops):
+    """A design point of one cavity (mm, cavity centred) back in the coordinates of the part model (stage 46: the gate of
+    the mould design given to the flow simulation)."""
+    for op, a in reversed(ops):
+        if op == "orient":
+            p = _rot(p, "y", 90) if a == "x" else _rot(p, "x", -90) if a == "y" else p
+        elif op == "scale":
+            p = tuple(v / a for v in p)
+        elif op == "move":
+            p = (p[0] - a[0], p[1] - a[1], p[2] - a[2])
+        elif op == "flip":
+            p = _rot((p[0], p[1], p[2] - a), "x", 180)
+    return p
 
 
 def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -> dict:
@@ -142,9 +186,7 @@ def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -
     # cavity centres
     cells = [((c - (cols - 1) / 2) * (il + gapc), (r - (rows - 1) / 2) * (iw + gapc)) for r in range(rows) for c in range(cols)]
     # stage 46: gate, runner, overflow (and later ejection, cooling) worked out by the Mould systems formulas
-    from . import mould_systems
-    facts = mould_systems.design_facts(part, s, cells, rows, cols, val, b, lines)
-    systems = mould_systems.compute(part_type, facts, part.get("material") or "", part.get("mould_typed") or {})
+    from . import mould_features, mould_systems
     # cooling channels in the inserts, kept clear of the part
     cd = rules("cooling_d_mm")
     depth = rules("cooling_depth_factor") * cd
@@ -160,6 +202,13 @@ def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -
                 cavity = cavity.cut(cyl)
             elif half == "core" and z - cd / 2 > pl - hb:
                 core = core.cut(cyl)
+    # stage 46: the channels joined into circuits (cooling_plan) and the Mould systems worked out with the design facts
+    L0 = float(b["length_mm"])
+    cooling = mould_features.cooling_plan(chans, s, cells, il, iw, cd, L0, val("v:pocket_l", il)) if part_type in ("plastic", "die_casting", "blow") else []
+    facts = mould_systems.design_facts(part, s, cells, rows, cols, val, b, lines) | {
+        "cool_circuits": float(len(cooling)) if part_type != "eps" else 2.0,
+        "circuit_len_mm": max((c["len_mm"] for c in cooling), default=0.0)}
+    systems = mould_systems.compute(part_type, facts, part.get("material") or "", part.get("mould_typed") or {})
     cav_line, core_line = _line(lines, "Cavity insert"), _line(lines, "Core insert")
     cm, ch = _mat(rules, cav_line, "")
     km, kh = _mat(rules, core_line, cm)
@@ -356,7 +405,7 @@ def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -
            "pl": pl, "ha": ha, "hb": hb, "cells": cells, "il": il, "iw": iw, "L": L, "W": W, "ta": ta, "tb": tb, "tc": tc,
            "z_tc": z_tc, "z_ret": z_ret, "ej_ret_h": ej_ret_h, "ejection": ejection, "pocket_w": pocket_w, "base_mat": base_mat,
            "base_make": base_make, "core_mat": km, "stack": z_tc + (tc or 0) - z_bc if tc else (pl + ta) - (pl - tb),
-           "systems": systems}
+           "systems": systems, "cooling": cooling, "pocket_l": pocket_l}
     mould_features.apply(ctx)
     # the moulded part (reference)
     comps.append(Comp("Moulded part (reference)", s, [(x, y, 0.0) for x, y in cells], kind="ref", size=(bb.xlen, bb.ylen, bb.zlen),
@@ -368,6 +417,8 @@ def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -
     des["internals"] = {"pins_wanted": (nx * ny) if ejection else 0, "pins_placed": len(pins), "cool_wanted": tried, "cool_placed": len(chans)}
     des["systems"] = systems
     des["gates"] = ctx.get("gates") or []
+    des["cooling"] = [{k: v for k, v in c.items() if k != "xs"} for c in cooling]
+    des["ops"] = sp["ops"]
     # stage 46: how the mould opens and ejects (3D viewer): the fixed half lifts by the opening stroke, then the ejector
     # system and the part move by the ejector stroke
     eject = mould_systems.value(systems, "eject_stroke", None)
