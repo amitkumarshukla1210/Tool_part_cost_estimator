@@ -1422,6 +1422,51 @@ A plate, core insert in the B plate) comes out of it, and the view pulls back to
 solid and the others see-through (switch off with *See through the others*). The same viewer is a single HTML file in the release ZIP (opens offline). Also: assembly STL, and STEP, STL and
 a picture of every tool part (production-data table); the release ZIP holds `3D/STL/`, `pictures/` and the viewer.
 
+## Cavities, gate, overflow, ejection and cooling of the mould (stage 46)
+
+For every mould (plastic, die casting, EPS, blow moulding) and the foundry pattern equipment. Everything is on the part panel under
+**Tool design**.
+
+**1. Cavities first.** *Make the tool design* now asks the number of cavities before anything else (then the production machine of stage 33,
+then the design). The form shows the **recommended** number of Stage C of the tool cost (cavities needed for the volume, cycle and OEE, and
+what limits it). *Take the recommended* keeps following Stage C; a **typed** number (1-256) is saved as the tool input *cavities*, so the tool
+cost, the layout, the mould base and the 3D design all use it. Change it later with *Cavities…*. The answer is kept on the part and logged.
+
+**2. Mould systems: every size by a formula in master data.** New table Master data → Mould & die database → **Mould systems**: one row per
+value, in order (part type, system, name, formula, unit, meaning, why; kind *value* or *check*). A row uses the facts of the design (part size,
+volume, surface, weight, wall, cavities, layout, runner length, mould base plates, cooling circuits), the numeric Design rules and Parameters,
+the material window (Process windows) and the flow material (Flow materials), and every row before it. The tool design panel shows each value
+with its formula, the inputs and their values, and the source. **Type your own value** in *Your value* (empty = back to the formula): a typed
+value wins and is marked *typed by you*. The values go on the drawing notes; failing checks go to the toolmaker review
+(*Mould systems checks pass*). All seeded rows and the Design rules they use are **EXAMPLE** until you replace them.
+
+| System | Plastic | Die casting | EPS | Foundry |
+|---|---|---|---|---|
+| Gate | gates per cavity by flow ratio (`flow_ratio_max`); thickness = `gate_thk_factor` × wall; width W = n × √(part surface) / 30 (`gate_n_factor`); land; runner D = √W × ⁴√L / 3.7; several edge gates per cavity built in 3D | NADCA fill time; gate area = volume / (fill time × `gate_velocity_m_s`); thickness, width; runner section = `runner_area_factor` × gate | fill guns per cavity = part volume / `eps_cm3_per_gun` (checked against the tool BOM) | poured weight, pouring time, choke area by Bernoulli; sprue, runner and ingate by the gating ratio; riser by the modulus method |
+| Overflow | – | count by `overflow_pitch_mm`, volume = `overflow_pct` of the part, length from the volume | – | – |
+
+**3. Ejection: the part comes off the core.** Ejector stroke needed = part height + `eject_extra_mm`. The catalogue mould base gives spacer block −
+ejector plates − stop discs; when that is short (the example cover: 20 mm of stroke for a 30 mm part) the design **raises the spacer blocks**
+(the mould gets higher; noted on the drawings and as a review check). The opening stroke = `rec_stroke_factor` × part height +
+`rec_stroke_extra_mm`. EPS moulds get **pneumatic ejectors** (count by projected area, stroke checked). The production machine check (stage 33)
+uses this ejector stroke. In the **3D viewer**, *Open & eject* (or *▶ Play*): the half above the parting plane lifts by the opening stroke, then
+the ejector plates, pins, lifters and the part move up by the ejector stroke.
+
+**4. Cooling circuits and water.** The channels in the inserts are joined into **circuits**: per insert half and row of cavities, the water
+comes in through the plate on the operator side, runs through every insert of the row (bridge tubes with O-rings between them), turns back
+in a cross channel of the last insert (plugged) and goes out on the same side. When the cross channel would hit the part, each channel is
+its own straight circuit (OUT on the far side). IN / OUT nipples, plugs and O-rings are in the BOM; each circuit is listed on the drawing.
+Per mould (plastic, die casting, blow; EPS: the spray in the two steam chambers): cooling time, heat per shot and in kW, **coolant inlet
+temperature to keep** (mould temperature of the material window − `water_below_mould_c`), flow per circuit (the larger of the heat
+load with `water_dt_max_c` and turbulent flow `reynolds_min`), speed, Reynolds number, **outlet temperature**, pressure drop of the longest
+circuit. Checks: a circuit was placed, the inlet is not below the dew point (`dew_point_c`, the mould would sweat), the pressure drop is within
+the pump (`tcu_pressure_bar`). The coolant is in Design rules `coolant_medium` (die casting: thermal oil).
+
+**5. The flow simulation runs on the designed gate.** *Run flow simulation* uses by default **the gate(s) of the mould design** (first
+cavity), mapped back to the part model, and the designed gate size: the shear rate in the gate (γ = 6Q / (W h²)) against the material limit
+(Flow materials `max_shear_1_s`), and when the gate freezes against `gate_freeze_share` × the part cooling time (plastic). Both give a
+correction when they fail, on the screen and in the PDF. Choose *found by the solver* or type a gate point for the solver's own gate.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:
