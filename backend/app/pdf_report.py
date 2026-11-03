@@ -385,6 +385,12 @@ def flow_pdf(res: dict, pictures: list, part: dict, rev: str) -> bytes:
              ["How the gate was chosen", res["gate_note"]],
              ["Machine (smallest that takes the clamp force)", f"{m['machine_id']} ({m['tonnage_t']:g} t)" if m.get("machine_id") else
               ("none large enough" if r.get("clamp_t") else "-")]]
+    gd = res.get("gate_design")
+    if gd:                                   # stage 46: the gate of the mould design checked in the simulation
+        mrows.append(["Designed gate (Mould systems)", f"{gd['width_mm']:.2f} × {gd['thk_mm']:.2f} mm, {gd['per_cavity']} per cavity"])
+        mrows.append(["Shear in the gate", f"{gd['shear_1_s']:,.0f} 1/s" + (f" (limit {gd['max_shear_1_s']:,.0f})" if gd.get("max_shear_1_s") else "")])
+        if gd.get("freeze_s") is not None:
+            mrows.append(["Gate freezes after", f"{gd['freeze_s']:.1f} s (needed {gd.get('freeze_needed_s') or 0:.1f} s)"])
     pm = res.get("production_machine")
     if pm:
         mrows.append(["Production machine (stage 33)", f"{pm['tonnage_t']:g} t · " + ("enough" if pm["ok"] else "TOO SMALL")])

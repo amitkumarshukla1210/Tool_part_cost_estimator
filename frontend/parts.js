@@ -1898,7 +1898,9 @@ function flowBox(p) {
       every run is saved with its PDF report and video. For the tool release of a critical part, also attach the report of Moldflow / MAGMA / ProCAST.</p>
     <form id="flowForm" class="toolbar">
       <label>Gates <input type="number" name="gates" min="1" max="8" value="1" style="width:4em" /></label>
-      <label>Gate point x, y, z (mm) <input name="gate_point" placeholder="empty = found by the solver" size="22" /></label>
+      <label>Gate <select name="gate_from"><option value="design">of the mould design (Mould systems)</option>
+        <option value="auto">found by the solver</option></select></label>
+      <label>or gate point x, y, z (mm) <input name="gate_point" placeholder="empty = as chosen" size="22" /></label>
       <label class="check"><input type="checkbox" name="video" checked /> Video</label>
       <button type="submit" class="btn btn-primary small">Run flow simulation</button>
     </form>
@@ -1967,6 +1969,9 @@ function flowResult(r) {
   return `${r.is_example ? '<p class="note"><b>Uses EXAMPLE flow data / rules.</b></p>' : ""}
     <h4>${s.corrections.length ? "Corrections required" : "No corrections required"}</h4>
     <ul>${s.corrections.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+    ${s.gate_design ? `<p><b>Designed gate</b> ${fmt(s.gate_design.width_mm, 2)} × ${fmt(s.gate_design.thk_mm, 2)} mm, ${s.gate_design.per_cavity} per cavity:
+      shear ${fmt(s.gate_design.shear_1_s, 0)} 1/s${s.gate_design.max_shear_1_s ? ` (material limit ${fmt(s.gate_design.max_shear_1_s, 0)})` : ""}${s.gate_design.freeze_s != null
+      ? ` · gate freezes after ${fmt(s.gate_design.freeze_s, 1)} s (needed ${fmt(s.gate_design.freeze_needed_s, 1)} s)` : ""}</p>` : ""}
     <p>Gate ${s.gates.map((g) => `(${g.at_mm.join(", ")})`).join(", ") || "-"} mm · ${esc(s.gate_note)} · machine <b>${esc(s.machine?.machine_id || (x.clamp_t ? "none large enough" : "-"))}</b>
       ${s.machine?.tonnage_t ? ` (${fmt(s.machine.tonnage_t)} t)` : ""}</p>
     <div class="table-wrap"><table class="cost-table"><tbody>
@@ -1989,7 +1994,7 @@ $("panelBody").addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = e.target.elements;
     const gp = f.gate_point.value.trim();
-    const body = { gates: Number(f.gates.value || 1), video: f.video.checked,
+    const body = { gates: Number(f.gates.value || 1), video: f.video.checked, gate_from: f.gate_from.value,
                    gate_point: gp ? gp.split(/[,;\s]+/).filter(Boolean).map(Number) : null };
     if (body.gate_point && (body.gate_point.length !== 3 || body.gate_point.some((v) => !Number.isFinite(v)))) {
       $("flowJob").innerHTML = '<p class="status error">Gate point: three numbers x, y, z in mm (or leave it empty).</p>';

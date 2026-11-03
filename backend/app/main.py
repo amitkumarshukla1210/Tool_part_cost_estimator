@@ -1362,7 +1362,8 @@ def parts_simulation_pdf(part_id: int):
 
 @app.post("/api/parts/{part_id}/flow-simulation")
 def parts_flow_simulation(part_id: int, data: Optional[dict] = None):
-    """Start a flow simulation in the background. data: {gates: 1-8, gate_point: [x, y, z] mm or null, video: true}.
+    """Start a flow simulation in the background. data: {gates: 1-8, gate_point: [x, y, z] mm or null, video: true,
+    gate_from: "design" (default: the gates and gate size of the mould design, stage 46) | "auto" (found by the solver)}.
     Returns the job; GET …/sim-jobs/{id} gives its progress, and the saved run when done."""
     from . import sim_jobs
     data = data or {}
@@ -1375,8 +1376,9 @@ def parts_flow_simulation(part_id: int, data: Optional[dict] = None):
     if not 1 <= gates <= 8 or (gp is not None and len(gp) != 3):
         raise HTTPException(400, "Gates: 1 to 8. Gate point: x, y, z in mm.")
     register.part_detail(part_id, with_rm=False)
+    gate_from = "auto" if data.get("gate_from") == "auto" else "design"      # stage 46: the gates of the mould design by default
     return sim_jobs.start(part_id, "flow", lambda progress: register.flow_simulation_run(
-        part_id, gates, gp, bool(data.get("video", True)), progress), register.user())
+        part_id, gates, gp, bool(data.get("video", True)), progress, gate_from), register.user())
 
 
 @app.post("/api/parts/{part_id}/simulation/video-job")
