@@ -78,19 +78,34 @@ def find(design: dict, item: str):
 def viewer_data(part: dict, design: dict, rev: str, production: dict | None = None) -> dict:
     """Meshes (rounded to 0.01 mm) and data of every part of one tool; production = production_data tool entry (or None)."""
     prod = {p["item"]: p for p in (production or {}).get("parts", [])}
+    motion = design.get("motion") or {}
+
+    def moves(c, loc, z0, z1):
+        """Stage 46: how a part moves when the mould opens and ejects: open (the half above the parting plane), eject, or stay."""
+        if not motion:
+            return ""
+        if c.kind == "ref" or any(c.name.startswith(n) for n in motion.get("eject_names", [])):
+            return "eject" if motion.get("eject_mm") else ""
+        if any(c.name.startswith(n) for n in motion.get("stay_names", [])):
+            return ""
+        return "open" if float(loc[2]) + (z0 + z1) / 2 > float(motion.get("parting_z", 0)) + 1e-6 else ""
     std = {s["element"].lower(): s for s in (production or {}).get("standard", [])}
     parts = []
     for c in design["components"]:
         v, t = comp_mesh(c)
+        zs = v.reshape(-1, 3)[:, 2] if len(v) else [0.0]
+        z0, z1 = float(min(zs)), float(max(zs))
         p = prod.get(c.no) or {}
         s = next((x for k, x in std.items() if c.name.lower().startswith(k) or k.startswith(c.name.lower().split(" ")[0])), None) if c.kind == "std" else None
         parts.append({"item": c.no or "REF", "name": c.name, "kind": c.kind, "qty": c.qty, "material": c.material or "", "hardness": c.hardness or "",
                       "std": c.std or c.make or "", "size": [round(x, 1) for x in c.size], "stock": p.get("stock_mm"), "kg": p.get("kg_total"),
                       "inr": p.get("total_inr") if p else (s or {}).get("inr"), "inr_note": "share of the tool cost" if p else ("bought-out line" if s else ""),
                       "rgb": list(tool_design.COLORS.get(c.color, (0.6, 0.6, 0.6))), "locs": [list(map(float, loc[:3])) for loc in c.locs],
+                      "moves": [moves(c, loc, z0, z1) for loc in c.locs],
                       "v": [round(float(x), 2) for x in v.reshape(-1)], "t": [int(x) for x in t.reshape(-1)]})
     return {"title": f"{part['part_code']} rev {rev} · {design['name']}", "part_code": part["part_code"], "rev": rev, "tool": design["name"],
-            "tool_cost_inr": (production or {}).get("sums", {}).get("tool_cost_inr"), "parts": parts}
+            "tool_cost_inr": (production or {}).get("sums", {}).get("tool_cost_inr"), "parts": parts,
+            "motion": {k: motion.get(k) for k in ("opening_mm", "eject_mm")} if motion else None}
 
 
 def viewer_html(data: dict) -> str:
@@ -116,6 +131,7 @@ _PAGE = r"""<!DOCTYPE html>
 </style></head><body>
 <div id="bar"><b>__TITLE__</b>
   <label>Explode <input type="range" id="explode" min="0" max="100" value="0" /></label>
+  <label id="motionBox">Open &amp; eject <input type="range" id="motion" min="0" max="100" value="0" /> <button id="play" type="button">▶ Play</button></label>
   <label><input type="checkbox" id="showref" /> Show the part (workpiece)</label>
   <label><input type="checkbox" id="ghost" checked /> See through the others when a part is selected</label>
   <button id="reset">Reset view</button></div>
@@ -186,6 +202,16 @@ function mat() {
   for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) for (let k = 0; k < 4; k++) M[j * 4 + i] += P[k * 4 + i] * V[j * 4 + k];
   return M;
 }
+// Open & eject (stage 46): 0 - 50 % the half above the parting plane lifts by the opening stroke; 50 - 100 % the ejector plates,
+// pins, lifters and the part move up by the ejector stroke (the part comes off the core)
+const M = D.motion || { opening_mm: 0, eject_mm: 0 };
+if (!D.motion) document.getElementById("motionBox").style.display = "none";
+function moveZ(p, i) {
+  const t = document.getElementById("motion").value / 100, kind = (p.moves || [])[i];
+  if (kind === "open") return M.opening_mm * Math.min(1, t * 2);
+  if (kind === "eject") return M.eject_mm * Math.max(0, t * 2 - 1);
+  return 0;
+}
 function draw(pick) {
   const w = cv.clientWidth, h = cv.clientHeight;
   if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
@@ -200,7 +226,7 @@ function draw(pick) {
     gl.bindBuffer(gl.ARRAY_BUFFER, p.nb); gl.vertexAttribPointer(A("n"), 3, gl.FLOAT, false, 0, 0); gl.enableVertexAttribArray(A("n"));
     gl.uniform3fv(U("c"), pick ? p.id : (k === sel ? [0.85, 0.1, 0.75] : p.rgb));
     gl.uniform1f(U("a"), alpha);
-    p.locs.forEach((L, i) => { gl.uniform3fv(U("off"), [L[0], L[1], L[2] + p.lifts[i] * ex]); gl.drawArrays(gl.TRIANGLES, 0, p.count); });
+    p.locs.forEach((L, i) => { gl.uniform3fv(U("off"), [L[0], L[1], L[2] + p.lifts[i] * ex + moveZ(p, i)]); gl.drawArrays(gl.TRIANGLES, 0, p.count); });
   };
   if (!ghost) { gl.disable(gl.BLEND); gl.depthMask(true); parts.forEach((p, k) => one(p, k, 1.0)); return; }
   gl.disable(gl.BLEND); gl.depthMask(true); one(parts[sel], sel, 1.0);          // the selected part, solid
@@ -223,7 +249,8 @@ function info(k) {
 document.getElementById("list").innerHTML = parts.map((p) => `<div><span class="sw" style="background:rgb(${p.rgb.map((c) => Math.round(c * 255)).join(",")})"></span>
   <span>${esc(p.item)} · ${esc(p.name)}${p.qty > 1 ? " × " + p.qty : ""}</span></div>`).join("");
 document.querySelectorAll("#list div").forEach((d, i) => d.addEventListener("click", () => info(i)));
-document.getElementById("hint").textContent = D.tool_cost_inr ? "Tool cost ₹ " + fmt(D.tool_cost_inr) + " (production data: parts + standard parts + tool level)" : "";
+document.getElementById("hint").textContent = (D.tool_cost_inr ? "Tool cost ₹ " + fmt(D.tool_cost_inr) + " (production data: parts + standard parts + tool level)" : "")
+  + (D.motion ? `${D.tool_cost_inr ? " · " : ""}opening stroke ${fmt(D.motion.opening_mm)} mm, ejector stroke ${fmt(D.motion.eject_mm)} mm (Mould systems)` : "");
 let drag = null, moved = false;
 cv.addEventListener("mousedown", (e) => { drag = [e.clientX, e.clientY, e.button]; moved = false; });
 window.addEventListener("mouseup", (e) => {
@@ -244,6 +271,16 @@ window.addEventListener("mousemove", (e) => {
 cv.addEventListener("contextmenu", (e) => e.preventDefault());
 cv.addEventListener("wheel", (e) => { e.preventDefault(); dist *= e.deltaY > 0 ? 1.1 : 0.9; draw(false); }, { passive: false });
 document.getElementById("explode").addEventListener("input", () => draw(false));
+document.getElementById("motion").addEventListener("input", () => {
+  if (document.getElementById("motion").value > 50) document.getElementById("showref").checked = true;      // show the part coming out
+  draw(false);
+});
+document.getElementById("play").addEventListener("click", () => {
+  const el = document.getElementById("motion"); el.value = 0; document.getElementById("showref").checked = true;
+  const t0 = performance.now();
+  const step = (now) => { el.value = Math.min(100, (now - t0) / 40); draw(false); if (el.value < 100) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+});
 document.getElementById("showref").addEventListener("change", () => draw(false));
 document.getElementById("ghost").addEventListener("change", () => draw(false));
 document.getElementById("reset").addEventListener("click", () => { az = -0.9; el = 0.5; dist = rad * 3.2; pan = [0, 0]; draw(false); });

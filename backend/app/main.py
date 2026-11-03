@@ -1200,6 +1200,28 @@ def parts_machine_save(part_id: int, data: dict):
     return _design_error(lambda: machine_spec.save(part_id, data.get("spec"), bool(data.get("skipped"))))
 
 
+# ---------- cavities asked before the mould design (roadmap stage 46) ----------
+
+@app.get("/api/parts/{part_id}/cavities")
+def parts_cavities(part_id: int):
+    from . import cavity_spec
+    return _design_error(lambda: cavity_spec.get(part_id))
+
+
+@app.put("/api/parts/{part_id}/cavities")
+def parts_cavities_save(part_id: int, data: dict):
+    """data: {cavities: 1-256 | null (= the recommended number of Stage C)}."""
+    from . import cavity_spec
+    return _design_error(lambda: cavity_spec.save(part_id, data.get("cavities")))
+
+
+@app.put("/api/parts/{part_id}/mould-systems")
+def parts_mould_systems_save(part_id: int, data: dict):
+    """Type over Mould systems values (stage 46). data: {values: {name: number | null (= back to the formula)}}; returns the tool design."""
+    from . import mould_systems
+    return _design_error(lambda: (mould_systems.save_typed(part_id, data.get("values") or {}), register.tool_design_summary(part_id))[1])
+
+
 @app.get("/api/parts/{part_id}/machine-check")
 def parts_machine_check(part_id: int):
     """Each tool against the typed machine (tool needs / machine has / ok), or the recommended machine."""
@@ -1340,7 +1362,8 @@ def parts_simulation_pdf(part_id: int):
 
 @app.post("/api/parts/{part_id}/flow-simulation")
 def parts_flow_simulation(part_id: int, data: Optional[dict] = None):
-    """Start a flow simulation in the background. data: {gates: 1-8, gate_point: [x, y, z] mm or null, video: true}.
+    """Start a flow simulation in the background. data: {gates: 1-8, gate_point: [x, y, z] mm or null, video: true,
+    gate_from: "design" (default: the gates and gate size of the mould design, stage 46) | "auto" (found by the solver)}.
     Returns the job; GET …/sim-jobs/{id} gives its progress, and the saved run when done."""
     from . import sim_jobs
     data = data or {}
@@ -1353,8 +1376,9 @@ def parts_flow_simulation(part_id: int, data: Optional[dict] = None):
     if not 1 <= gates <= 8 or (gp is not None and len(gp) != 3):
         raise HTTPException(400, "Gates: 1 to 8. Gate point: x, y, z in mm.")
     register.part_detail(part_id, with_rm=False)
+    gate_from = "auto" if data.get("gate_from") == "auto" else "design"      # stage 46: the gates of the mould design by default
     return sim_jobs.start(part_id, "flow", lambda progress: register.flow_simulation_run(
-        part_id, gates, gp, bool(data.get("video", True)), progress), register.user())
+        part_id, gates, gp, bool(data.get("video", True)), progress, gate_from), register.user())
 
 
 @app.post("/api/parts/{part_id}/simulation/video-job")

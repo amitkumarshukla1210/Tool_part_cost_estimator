@@ -16,6 +16,7 @@ Holds the data that sizes a mould or die and builds its BOM:
     review_checklist  toolmaker review before the tool design is frozen (stage 43)
     process_windows / process_parameters  material temperature windows and the formulas of the process setting sheet (stage 34)
     flow_materials / flow_rules  material data and rules of the flow simulation (stage 39)
+    mould_systems   gate, runner, overflow, ejection and cooling of the mould design worked out by formulas (stage 46)
     fit_tolerances  ISO 286 limits of the fits (H7, g6 …) by size: the tolerance of every fitted dimension (stage 32)
     time_parameters removal rates, set-up hours and shares that the BOM hour / amount rules use
 
@@ -366,11 +367,26 @@ TABLES = {
         col("is_example", "Example", "bool"),
         col("notes", "Notes", required=False),
     ]},
+    # Mould systems (roadmap stage 46): gate, runner, overflow, ejection and cooling worked out by formulas, in order
+    "mould_systems": {"title": "Mould systems", "unique": ("part_type", "name"), "columns": [
+        col("part_type", "Part type", "part_type", PART_TYPES),
+        col("step", "Order", "number"),
+        col("system", "System (gate, overflow, ejection, cooling)", "text", ("gate", "overflow", "ejection", "cooling")),
+        col("name", "Name (used by the rows after it)"),
+        col("formula", "Value (formula); a check row: ok when true", "formula"),
+        col("unit", "Unit", required=False),
+        col("label", "Meaning (or the warning of a check row)"),
+        col("why", "Why", required=False),
+        col("kind", "Kind (value or check)", "text", ("value", "check")),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes", required=False),
+    ]},
 }
 
 
 def _check(clean: dict) -> None:
-    from . import dim_tolerances, drawing_data, flow_sim, process_params, tool_review
+    from . import dim_tolerances, drawing_data, flow_sim, mould_systems, process_params, tool_review
+    mould_systems.validate(clean)
     flow_sim.validate(clean)
     drawing_data.validate(clean)
     dim_tolerances.validate(clean)

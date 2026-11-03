@@ -148,7 +148,8 @@ def needs(part_id: int, designs: list | None = None, rev: dict | None = None) ->
         force = src.get("force_t") if src else (tr.get("trial") or {}).get("force_t")
         out.append({"stage": k, "key": des["key"], "name": des["name"], "force_t": round(float(force or 0), 1),
                     "length_mm": float(base.get("length_mm") or 0), "width_mm": float(base.get("width_mm") or 0),
-                    "height_mm": float(des.get("shut_height") or 0), "part_height_mm": part_h})
+                    "height_mm": float(des.get("shut_height") or 0), "part_height_mm": part_h,
+                    "eject_stroke_mm": float((des.get("motion") or {}).get("eject_mm") or 0)})     # stage 46: Mould systems
     return out
 
 
@@ -166,7 +167,8 @@ def recommend(part_type: str, tools: list[dict]) -> dict:
     if fam == "moulding":
         rec = {"tonnage_t": round(force * (1 + m("rec_tonnage_margin_pct") / 100), 1), "tie_bar_h_mm": round(L + m("rec_platen_margin_mm")),
                "tie_bar_v_mm": round(W + m("rec_platen_margin_mm")), "min_height_mm": max(round(hmin - m("rec_height_margin_mm")), 0),
-               "max_height_mm": round(hmax + m("rec_height_margin_mm")), "opening_stroke_mm": stroke, "ejector_stroke_mm": round(ph + 10)}
+               "max_height_mm": round(hmax + m("rec_height_margin_mm")), "opening_stroke_mm": stroke,
+               "ejector_stroke_mm": round(max((t.get("eject_stroke_mm") or 0 for t in tools), default=0) or ph + 10)}
     elif fam == "press":
         rec = {"tonnage_t": round(force * (1 + m("rec_tonnage_margin_pct") / 100), 1), "bolster_l_mm": round(L + m("rec_platen_margin_mm")),
                "bolster_w_mm": round(W + m("rec_platen_margin_mm")), "min_height_mm": max(round(hmin - m("rec_height_margin_mm")), 0),
@@ -214,7 +216,7 @@ def check(part_type: str, spec: dict, tools: list[dict]) -> list[dict]:
             need = round(_rule(part_type, "rec_stroke_factor") * t["part_height_mm"] + _rule(part_type, "rec_stroke_extra_mm"))
             row(t, "Stroke", f"{need:g} mm", f"{spec[stroke_key]:g} mm", spec[stroke_key] >= need, "A machine with a longer stroke.")
         if fam == "moulding" and spec.get("ejector_stroke_mm") and t["part_height_mm"]:
-            need = round(t["part_height_mm"] + 10)
+            need = round(t.get("eject_stroke_mm") or t["part_height_mm"] + 10)      # Mould systems eject_stroke, else the old rule
             row(t, "Ejector stroke", f"{need:g} mm", f"{spec['ejector_stroke_mm']:g} mm", spec["ejector_stroke_mm"] >= need, "A longer ejector stroke.")
     return rows
 

@@ -383,8 +383,9 @@ function toolBlock(p) {
         pillars, bushes, standard parts, screws; an assembly drawing and a detail drawing of every made part with tolerances,
         material, hardness and your logo. A first-cut design by the Design rules (Master data) for your tool designer to check and release.</p>
       <button type="button" class="btn btn-primary small" id="tdRun">Make the tool design</button>
+      ${tr.dies ? "" : '<button type="button" class="btn btn-outline small" id="tdCavities">Cavities…</button>'}
       <button type="button" class="btn btn-outline small" id="tdMachine">Production machine…</button> <span class="status" id="tdStatus"></span>
-      <div id="mcBox"></div><div id="tdOut"></div></details>`;
+      <div id="cvBox"></div><div id="mcBox"></div><div id="tdOut"></div></details>`;
   }
   if (tr?.lines) html += bomEditor(p, tr);
   const typed = p.tool_inputs || {};
@@ -743,7 +744,8 @@ $("panelBody").addEventListener("click", async (e) => {
     finally { button.disabled = false; }
     return;
   }
-  if (e.target.id === "tdRun") return machineFirst();
+  if (e.target.id === "tdRun") return cavitiesFirst();
+  if (e.target.id === "tdCavities") return cavitiesForm(false);
   if (e.target.id === "tdMachine") return machineForm(false);
   if (e.target.id === "fixOpen") return fixPreview(true);
   if (e.target.id === "fixRefresh") return fixPreview(false);
@@ -1463,6 +1465,36 @@ async function fixPreview(first) {
   }
 }
 
+// cavities of the mould (stage 46): asked before the first mould design, then the production machine
+async function cavitiesFirst() {
+  let c = null;
+  try { c = await api(`/api/parts/${part.id}/cavities`); } catch { return machineFirst(); }   // a die or no mould: no cavities to ask
+  if (!c.asked) return cavitiesForm(true, c);
+  return machineFirst();
+}
+
+async function cavitiesForm(thenDesign, c = null) {
+  const box = $("cvBox");
+  try { c = c || await api(`/api/parts/${part.id}/cavities`); } catch (err) { status($("tdStatus"), err.message, "error"); return; }
+  box.innerHTML = `<form class="card grid2" id="cvForm"><h4 class="span2">How many cavities will this mould have?</h4>
+    <p class="note span2">Recommended by Stage C of the tool cost: <b>${c.recommended ?? "—"}</b> cavit${c.recommended === 1 ? "y" : "ies"}
+      (${fmt(c.needed, 2)} needed${c.limited_by ? `, limited by ${esc(c.limited_by)}` : ""}).<br/><span class="note">${esc(c.stage_c_note)}</span></p>
+    <label>Cavities per tool <input name="cavities" type="number" min="1" max="256" step="1" value="${c.typed ?? ""}" placeholder="${c.recommended ?? ""}" /></label>
+    <p class="note">Empty = take the recommended number (it follows the volume). A typed number is used by the tool cost, the layout, the mould base and the 3D design.</p>
+    <div class="span2 dialog-actions"><button type="button" class="btn btn-outline small" id="cvTake">Take the recommended ${c.recommended ?? ""}</button>
+      <button type="submit" class="btn btn-primary small">Save cavities${thenDesign ? " and go on" : ""}</button></div><p class="status span2" id="cvStatus"></p></form>`;
+  const done = async (cavities) => {
+    try {
+      status($("cvStatus"), "Saving… (the tool cost is worked out again)");
+      await api(`/api/parts/${part.id}/cavities`, { method: "PUT", body: JSON.stringify({ cavities }) });
+      box.innerHTML = "";
+      if (thenDesign) machineFirst(); else status($("tdStatus"), "Cavities saved: make the tool design again to see them.");
+    } catch (err) { status($("cvStatus"), err.message, "error"); }
+  };
+  $("cvTake").addEventListener("click", () => done(null));
+  $("cvForm").addEventListener("submit", (e) => { e.preventDefault(); done(new FormData(e.target).get("cavities") || null); });
+}
+
 // the production machine of the tool (stage 33): asked before the first tool design, checked, or recommended
 async function machineFirst() {
   let m = null;
@@ -1529,6 +1561,7 @@ async function toolDesignLoad() {
         ${t.internals ? `<p class="note"><b>Internals:</b> ejector pins ${t.internals.pins_placed} placed of ${t.internals.pins_wanted} wanted ·
           cooling lines ${t.internals.cool_placed} of ${t.internals.cool_wanted} · screws ${t.internals.screws} · dowels ${t.internals.dowels}
           ${t.internals.pins_placed < t.internals.pins_wanted || t.internals.cool_placed < t.internals.cool_wanted ? ' <span class="badge missing">check in the review</span>' : ""}</p>` : ""}
+        ${mouldSystemsHtml(t)}
         <p class="downloads"><a class="btn btn-outline small" href="/api/parts/${part.id}/tool-design.html${q}" target="_blank">🧊 Open 3D viewer</a> ·
           <a class="link" href="/api/parts/${part.id}/tool-design.stl${q}">⬇ Assembly STL</a> ·
           <a class="link" href="/api/parts/${part.id}/tool-design.step${q}">⬇ Assembly 3D (STEP)</a> ·
@@ -1550,6 +1583,45 @@ async function toolDesignLoad() {
     status($("tdStatus"), err.message, "error");
   }
 }
+
+// Mould systems (stage 46): gate, runner, overflow, ejection and cooling worked out by the master-data formulas; type over a value
+const SYSTEM_TITLES = { gate: "Gate and runner", overflow: "Overflows", ejection: "Ejection", cooling: "Cooling (water)" };
+function mouldSystemsHtml(t) {
+  const sy = t.systems;
+  if (!sy || !sy.rows.length) return "";
+  const groups = Object.keys(SYSTEM_TITLES).filter((k) => sy.rows.some((r) => r.system === k) || sy.checks.some((c) => c.system === k));
+  const inputs = (r) => Object.entries(r.inputs).map(([k, v]) => `${esc(k)} = ${fmt(v, 3)}`).join(", ");
+  return `<details class="card" open><summary><b>Mould systems</b> · gate, overflow, ejection, cooling worked out by formulas
+      ${sy.is_example ? '<span class="badge example">EXAMPLE</span>' : ""}</summary>
+    <p class="note">Formulas: Master data → Mould &amp; die database → <b>Mould systems</b> (sizes they use: Design rules). Type a value to use your own;
+      empty = back to the formula. The 3D design, drawings and review use these values.</p>
+    <form class="msForm" data-tool="${esc(t.key)}">${groups.map((g) => `<h5>${SYSTEM_TITLES[g]}</h5>
+      <div class="table-wrap"><table class="cost-table"><thead><tr><th>Value</th><th class="num">Result</th><th>Unit</th><th>Your value</th>
+        <th>Formula and inputs</th><th>Source</th></tr></thead><tbody>
+        ${sy.rows.filter((r) => r.system === g).map((r) => `<tr><td>${esc(r.label)}${r.is_example ? ' <span class="badge example">EX</span>' : ""}</td>
+          <td class="num"><b>${r.value == null ? "—" : fmt(r.value, r.value < 10 ? 2 : 1)}</b></td><td>${esc(r.unit)}</td>
+          <td><input name="${esc(r.name)}" type="number" step="any" min="0" style="width:90px" value="${r.source === "typed by you" ? r.value : ""}" /></td>
+          <td class="note"><code>${esc(r.formula)}</code><br/>${inputs(r)}${r.why ? `<br/><i>${esc(r.why)}</i>` : ""}</td>
+          <td class="note">${r.source.startsWith("formula") ? "formula" : `<b>${esc(r.source)}</b>`}</td></tr>`).join("")}
+        ${sy.checks.filter((c) => c.system === g).map((c) => `<tr><td colspan="6">${c.ok === true ? '<span class="badge status">ok</span>'
+          : c.ok === false ? '<span class="badge missing">check</span>' : '<span class="badge">not checked</span>'} <code>${esc(c.formula)}</code>
+          ${c.message ? ` ${esc(c.message)}` : ""}</td></tr>`).join("")}</tbody></table></div>`).join("")}
+      ${t.gates && t.gates.length ? `<p class="note">Gates placed: ${t.gates.length} (${esc([...new Set(t.gates.map((g) => g.kind))].join(", "))}).</p>` : ""}
+      <div class="dialog-actions"><button type="submit" class="btn btn-primary small">Save my values and design again</button></div>
+      <p class="status msStatus"></p></form></details>`;
+}
+
+document.addEventListener("submit", async (e) => {
+  if (!e.target.classList || !e.target.classList.contains("msForm")) return;
+  e.preventDefault();
+  const values = Object.fromEntries([...new FormData(e.target)].map(([k, v]) => [k, v === "" ? null : v]));
+  const st = e.target.querySelector(".msStatus");
+  try {
+    status(st, "Saving and designing again…");
+    await api(`/api/parts/${part.id}/mould-systems`, { method: "PUT", body: JSON.stringify({ values }) });
+    toolDesignLoad();
+  } catch (err) { status(st, err.message, "error"); }
+});
 
 // supplier production data: stock, weight, operations and cost share per tool part (stage 45)
 async function productionDataLoad() {
@@ -1826,7 +1898,9 @@ function flowBox(p) {
       every run is saved with its PDF report and video. For the tool release of a critical part, also attach the report of Moldflow / MAGMA / ProCAST.</p>
     <form id="flowForm" class="toolbar">
       <label>Gates <input type="number" name="gates" min="1" max="8" value="1" style="width:4em" /></label>
-      <label>Gate point x, y, z (mm) <input name="gate_point" placeholder="empty = found by the solver" size="22" /></label>
+      <label>Gate <select name="gate_from"><option value="design">of the mould design (Mould systems)</option>
+        <option value="auto">found by the solver</option></select></label>
+      <label>or gate point x, y, z (mm) <input name="gate_point" placeholder="empty = as chosen" size="22" /></label>
       <label class="check"><input type="checkbox" name="video" checked /> Video</label>
       <button type="submit" class="btn btn-primary small">Run flow simulation</button>
     </form>
@@ -1895,6 +1969,9 @@ function flowResult(r) {
   return `${r.is_example ? '<p class="note"><b>Uses EXAMPLE flow data / rules.</b></p>' : ""}
     <h4>${s.corrections.length ? "Corrections required" : "No corrections required"}</h4>
     <ul>${s.corrections.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+    ${s.gate_design ? `<p><b>Designed gate</b> ${fmt(s.gate_design.width_mm, 2)} × ${fmt(s.gate_design.thk_mm, 2)} mm, ${s.gate_design.per_cavity} per cavity:
+      shear ${fmt(s.gate_design.shear_1_s, 0)} 1/s${s.gate_design.max_shear_1_s ? ` (material limit ${fmt(s.gate_design.max_shear_1_s, 0)})` : ""}${s.gate_design.freeze_s != null
+      ? ` · gate freezes after ${fmt(s.gate_design.freeze_s, 1)} s (needed ${fmt(s.gate_design.freeze_needed_s, 1)} s)` : ""}</p>` : ""}
     <p>Gate ${s.gates.map((g) => `(${g.at_mm.join(", ")})`).join(", ") || "-"} mm · ${esc(s.gate_note)} · machine <b>${esc(s.machine?.machine_id || (x.clamp_t ? "none large enough" : "-"))}</b>
       ${s.machine?.tonnage_t ? ` (${fmt(s.machine.tonnage_t)} t)` : ""}</p>
     <div class="table-wrap"><table class="cost-table"><tbody>
@@ -1917,7 +1994,7 @@ $("panelBody").addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = e.target.elements;
     const gp = f.gate_point.value.trim();
-    const body = { gates: Number(f.gates.value || 1), video: f.video.checked,
+    const body = { gates: Number(f.gates.value || 1), video: f.video.checked, gate_from: f.gate_from.value,
                    gate_point: gp ? gp.split(/[,;\s]+/).filter(Boolean).map(Number) : null };
     if (body.gate_point && (body.gate_point.length !== 3 || body.gate_point.some((v) => !Number.isFinite(v)))) {
       $("flowJob").innerHTML = '<p class="status error">Gate point: three numbers x, y, z in mm (or leave it empty).</p>';

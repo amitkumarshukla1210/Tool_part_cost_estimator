@@ -23,6 +23,7 @@ import math
 
 import cadquery as cq
 
+from . import mould_systems
 from .tool_design import Comp, _line
 
 
@@ -63,7 +64,7 @@ def cut(comps: list, names, tool, label: str = "") -> int:
         x, y, z = c.locs[0]
         c.shape = c.shape.cut(tool.translate(cq.Vector(-x, -y, -z)))
         if label and label not in c.notes:
-            c.notes.append(label)
+            c.notes = list(c.notes) + [label]          # plates share one notes list: a cut is noted on the part it cuts only
         n += 1
     return n
 
@@ -87,6 +88,8 @@ def _box(x0, y0, z0, x1, y1, z1):
 def apply(ctx: dict) -> None:
     """Add the process features to ctx['comps'] and ctx['notes'] (in place)."""
     pt = ctx["part_type"]
+    if pt in ("plastic", "die_casting", "blow"):
+        _cooling(ctx)
     if pt in ("plastic", "die_casting"):
         _gating(ctx)
         _slides(ctx)
@@ -95,6 +98,127 @@ def apply(ctx: dict) -> None:
         _eps(ctx)
     elif pt == "blow":
         _blow(ctx)
+
+
+# ---------- cooling circuits (stage 46) ----------
+
+def cooling_plan(chans, part, cells, il, iw, cd, L, pocket_l, xd: float | None = None) -> list[dict]:
+    """The cooling circuits of the mould from the channels drilled in the inserts (chans: (half, y, z, cylinder) in insert
+    coordinates). Per insert half and row of cavities: the two channels run through every insert of the row; a cross channel
+    drilled from the side of the last insert turns the water back (U-turn) so IN and OUT are both on the -X side of the mould.
+    When the cross channel would hit the part, each channel is its own straight circuit (IN on -X, OUT on +X)."""
+    xd = xd or cd
+    rows = {}
+    for cx, cy in cells:
+        rows.setdefault(round(cy, 3), []).append(cx)
+    out = []
+    for half in ("cavity", "core"):
+        hc = [c for c in chans if c[0] == half]
+        if not hc:
+            continue
+        z = hc[0][2]
+        ys = sorted(c[1] for c in hc)
+        for ry, xs in sorted(rows.items()):
+            xs = sorted(xs)
+            through = len(xs) * il + (xs[-1] - xs[0] - (len(xs) - 1) * il) + (L / 2 - (xs[0] - il / 2))   # inserts, gaps, plate on -X
+            x_u = None
+            if len(ys) == 2:
+                for xu in (il / 2 - 1.5 * cd, il / 2 - cd):
+                    cyl = cq.Solid.makeCylinder(xd / 2, iw / 2 + 0.5 - ys[0] + xd, cq.Vector(xu, iw / 2 + 0.5, z), cq.Vector(0, -1, 0))
+                    if cyl.intersect(part).Volume() <= 1e-6:
+                        x_u = xu
+                        break
+            if x_u is not None:
+                out.append({"half": half, "row_y": ry, "z": z, "ys": ys, "uturn": True, "x_u": x_u, "xs": xs,
+                            "len_mm": round(2 * (through - (il / 2 - x_u)) + (ys[1] - ys[0]), 1),
+                            "in": (-L / 2, ry + ys[0], z), "out": (-L / 2, ry + ys[1], z)})
+            else:
+                for y in ys:
+                    out.append({"half": half, "row_y": ry, "z": z, "ys": [y], "uturn": False, "x_u": None, "xs": xs,
+                                "len_mm": round(through + (L / 2 - (xs[-1] + il / 2)), 1),
+                                "in": (-L / 2, ry + y, z), "out": (L / 2, ry + y, z)})
+    for i, c in enumerate(out, start=1):
+        c["no"] = i
+    return out
+
+
+def _plate_at(ctx, z):
+    """Name of the plate that holds height z (the water passes through it to the insert)."""
+    pl, ta, tb, tc = ctx["pl"], ctx["ta"], ctx["tb"], ctx["tc"]
+    if z > pl:
+        return "A plate" if z < pl + ta else "Top clamp plate"
+    return "B plate" if z > pl - tb else "Support plate"
+
+
+def _cooling(ctx):
+    """Build the circuits of ctx['cooling']: plate channels to the -X (and +X) side, bridge tubes between inserts, U-turn
+    cross channel with plugs in the last insert, O-rings at the insert faces, IN / OUT nipples on the plate side."""
+    plan = ctx.get("cooling") or []
+    if not plan:
+        return
+    R, comps, L, il, iw = ctx["rules"], ctx["comps"], ctx["L"], ctx["il"], ctx["iw"]
+    cd = R("cooling_d_mm")
+    nd, nl, pg = R("nipple_d_mm", 13), R("nipple_len_mm", 35), R("plug_len_mm", 10)
+    xd = cd + R("cooling_cross_extra_mm", 1)          # equal drills crossing at 90° touch along their sides (no clean solid)
+    pocket_l = ctx.get("pocket_l") or il
+    tube, plugs, rings, nip_in, nip_out = [], [], [], [], []
+    for c in plan:
+        z, xs = c["z"], c["xs"]
+        for y in c["ys"]:
+            wy = c["row_y"] + y
+            # plate channel from the -X side face into the pocket
+            cut(comps, (_plate_at(ctx, z),), _bar((-L / 2 - 1, wy, z), (-pocket_l / 2 + 1, wy, z), cd), f"Cooling Ø{cd:g} to the inserts")
+            rings.append((xs[0] - il / 2, wy, z))
+            if not c["uturn"]:
+                cut(comps, (_plate_at(ctx, z),), _bar((pocket_l / 2 - 1, wy, z), (L / 2 + 1, wy, z), cd), f"Cooling Ø{cd:g} to the inserts")
+                rings.append((xs[-1] + il / 2, wy, z))
+            # bridge tubes between the inserts of the row (and between the pocket wall and the first / last insert)
+            edges = [(-pocket_l / 2, xs[0] - il / 2)] + [(a + il / 2, b - il / 2) for a, b in zip(xs, xs[1:])]
+            if not c["uturn"]:
+                edges.append((xs[-1] + il / 2, pocket_l / 2))
+            tube += [(x0, x1, wy, z) for x0, x1 in edges if x1 - x0 > 0.5]
+        if c["uturn"]:
+            xu = xs[-1] + c["x_u"]
+            ylo, yhi = c["row_y"] + c["ys"][0], c["row_y"] + iw / 2 + 0.5
+            cut(comps, ("Cavity insert" if c["half"] == "cavity" else "Core insert",), _bar((xu, ylo - xd, z), (xu, yhi, z), xd),
+                f"Cooling cross channel Ø{xd:g} (U-turn), plugged")
+            plugs += [(xs[-1] + il / 2, c["row_y"] + y, z, "x") for y in c["ys"]] + [(xu, c["row_y"] + iw / 2, z, "y")]
+        nip_in.append(c["in"])
+        nip_out.append(c["out"])
+    if tube:
+        g = {}
+        for x0, x1, y, z in tube:
+            g.setdefault(round(x1 - x0, 1), []).append((x0, y, z))
+        for ln, locs in g.items():
+            comps.append(Comp(f"Cooling bridge tube Ø{cd + 4:g} × {ln:g}", cq.Solid.makeCylinder((cd + 4) / 2, ln, cq.Vector(0, 0, 0), cq.Vector(1, 0, 0)),
+                              locs, kind="std", std=f"Bridge tube OD {cd + 4:g} × {ln:g} with 2 O-rings", size=(ln, cd + 4, cd + 4), color="std", drawing="none"))
+    if rings:
+        ring = cq.Solid.makeCylinder(cd / 2 + 3, 2, cq.Vector(-1, 0, 0), cq.Vector(1, 0, 0)).cut(cq.Solid.makeCylinder(cd / 2, 4, cq.Vector(-2, 0, 0), cq.Vector(1, 0, 0)))
+        comps.append(Comp(f"O-ring {cd:g} × 2.5", ring, rings, kind="std", std=f"O-ring ID {cd:g} × 2.5 (Viton, 200 °C)",
+                          size=(2, cd + 6, cd + 6), color="std", drawing="none"))
+    if plugs:
+        comps.append(Comp(f"Cooling plug Ø{cd:g}", cq.Solid.makeCylinder(cd / 2, pg, cq.Vector(-pg, 0, 0), cq.Vector(1, 0, 0)),
+                          [(x, y, z) for x, y, z, d in plugs if d == "x"], kind="std", std=f"Pressure plug for Ø{cd:g} (brass, taper thread)",
+                          size=(pg, cd, cd), color="std", drawing="none"))
+        side = [(x, y, z) for x, y, z, d in plugs if d == "y"]
+        if side:
+            comps.append(Comp(f"Cooling plug Ø{xd:g} (cross channel)", cq.Solid.makeCylinder(xd / 2, pg, cq.Vector(0, -pg, 0), cq.Vector(0, 1, 0)),
+                              side, kind="std", std=f"Pressure plug for Ø{xd:g} (brass, taper thread)", size=(xd, pg, xd), color="std", drawing="none"))
+    comps.append(Comp(f"Cooling nipple IN Ø{nd:g}", cq.Solid.makeCylinder(nd / 2, nl, cq.Vector(-nl, 0, 0), cq.Vector(1, 0, 0)), nip_in, kind="std",
+                      std=f"Quick-coupling nipple Ø{nd:g} marked IN (blue)", size=(nl, nd, nd), color="std", drawing="none"))
+    outs_l = [p for p in nip_out if p[0] < 0]
+    outs_r = [p for p in nip_out if p[0] > 0]
+    if outs_l:
+        comps.append(Comp(f"Cooling nipple OUT Ø{nd:g}", cq.Solid.makeCylinder(nd / 2, nl, cq.Vector(-nl, 0, 0), cq.Vector(1, 0, 0)), outs_l, kind="std",
+                          std=f"Quick-coupling nipple Ø{nd:g} marked OUT (red)", size=(nl, nd, nd), color="std", drawing="none"))
+    if outs_r:
+        comps.append(Comp(f"Cooling nipple OUT Ø{nd:g} (far side)", cq.Solid.makeCylinder(nd / 2, nl, cq.Vector(0, 0, 0), cq.Vector(1, 0, 0)), outs_r,
+                          kind="std", std=f"Quick-coupling nipple Ø{nd:g} marked OUT (red)", size=(nl, nd, nd), color="std", drawing="none"))
+    row_no = {y: i for i, y in enumerate(sorted({x["row_y"] for x in plan}), start=1)}
+    ctx["notes"].append("Cooling circuits: " + "; ".join(
+        f"C{c['no']} {c['half']} side{' row ' + str(row_no[c['row_y']]) if len(row_no) > 1 else ''}: IN y {c['in'][1]:.0f} / OUT "
+        f"{'same side' if c['uturn'] else 'far side'} y {c['out'][1]:.0f}, z {c['z'] - ctx['pl']:+.0f} from the parting plane, {c['len_mm']:.0f} mm"
+        for c in plan) + ".")
 
 
 # ---------- gates, runners, hot runner, shot sleeve, overflows ----------
@@ -138,14 +262,18 @@ def _gating(ctx):
             locs.append((cx, cy, ztop))
             tool = _bar((cx, cy, ztop - 0.01), (cx, cy, z_tc + 5), nd + 2)
             cut(comps, ("A plate", "Cavity insert"), tool, "Hot-runner nozzle bore")
+        ctx["gates"] = [{"cell": (cx, cy), "x": 0.0, "y": 0.0, "z": z, "kind": "hot-runner nozzle"} for cx, cy, z in locs]
         nl = z_tc + 5 - min(z for _, _, z in locs)
         comps.append(Comp(f"Hot runner nozzle Ø{nd:g}", cq.Solid.makeCylinder(nd / 2, nl), locs, kind="std", make=nz_line.get("make") or "",
                           std=" ".join(v for v in (nz_line.get("std_part") or "", nz_line.get("part_number") or "") if v) or
                           f"Hot runner nozzle Ø{nd:g} × {nl:.0f}", size=(nd, nd, nl), color="std", drawing="none"))
         notes.append(f"Hot runner: manifold plate {mp:g} mm, {len(cells)} nozzle(s) gating on the top of the part.")
         return
-    rd = R("runner_d_mm", 6)
-    gw, gh = R("gate_w_mm", 3), R("gate_h_mm", 1.2)
+    # stage 46: sizes from the Mould systems formulas (typed values win), else the Design rules
+    sv = lambda k, d: mould_systems.value(ctx.get("systems"), k, d)
+    rd = sv("runner_dia", R("runner_d_mm", 6))
+    gw, gh = sv("gate_width", R("gate_w_mm", 3)), sv("gate_thk", R("gate_h_mm", 1.2))
+    ngate = max(1, int(round(sv("gates", 1))))
     if pt == "die_casting":
         ssd = R("shot_sleeve_d_mm", 80)
         hx, hy = 0.0, -(ctx["pocket_w"] / 2 + ssd * 0.75)
@@ -168,24 +296,32 @@ def _gating(ctx):
                 gd = R("sprue_bush_d_mm") * 0.375
                 cut(comps, ("Cavity insert",), _bar((0, 0, max(zs) - 0.01), (0, 0, pl + ctx["ha"] + 1), gd), "Direct sprue gate")
                 notes.append(f"Gate: direct sprue gate Ø{gd:g} on the top of the part.")
+                ctx["gates"] = [{"cell": cells[0], "x": 0.0, "y": 0.0, "z": max(zs), "kind": "direct sprue"}]
                 return
+    gates = []
     for cx, cy in cells:
         ux, uy = _gate_side(cx, cy, hx, hy)
         ex = cx + ux * (bb.xlen / 2)
         ey = cy + uy * (bb.ylen / 2)
-        out = (ex + ux * 3, ey + uy * 3)
-        runner = _bar((hx, hy, pl), (out[0], out[1], pl), rd)
-        cut(comps, ("A plate", "B plate", "Cavity insert", "Core insert"), runner, f"Runner Ø{rd:g} on the parting plane")
-        gx0, gx1 = sorted((ex - ux * 0.5, out[0]))
-        gy0, gy1 = sorted((ey - uy * 0.5, out[1]))
-        if ux:
-            gate = _box(gx0, cy - gw / 2, pl, gx1, cy + gw / 2, pl + gh)
-        else:
-            gate = _box(cx - gw / 2, gy0, pl, cx + gw / 2, gy1, pl + gh)
-        cut(comps, ("Cavity insert", "Core insert"), gate, f"Edge gate {gw:g} × {gh:g}")
+        side = bb.ylen if ux else bb.xlen                    # length of the side the gates are on
+        for g in range(ngate):
+            f = (g + 1) / (ngate + 1) - 0.5 if ngate > 1 else 0.0
+            gx_, gy_ = (ex, cy + f * side) if ux else (cx + f * side, ey)
+            out = (gx_ + ux * 3, gy_ + uy * 3)
+            runner = _bar((hx, hy, pl), (out[0], out[1], pl), rd)
+            cut(comps, ("A plate", "B plate", "Cavity insert", "Core insert"), runner, f"Runner Ø{rd:.1f} on the parting plane")
+            gx0, gx1 = sorted((gx_ - ux * 0.5, out[0]))
+            gy0, gy1 = sorted((gy_ - uy * 0.5, out[1]))
+            if ux:
+                gate = _box(gx0, gy_ - gw / 2, pl, gx1, gy_ + gw / 2, pl + gh)
+            else:
+                gate = _box(gx_ - gw / 2, gy0, pl, gx_ + gw / 2, gy1, pl + gh)
+            cut(comps, ("Cavity insert", "Core insert"), gate, f"Edge gate {gw:.1f} × {gh:.1f}")
+            gates.append({"cell": (cx, cy), "x": gx_ - cx, "y": gy_ - cy, "z": pl + gh / 2, "kind": "edge"})
         if pt == "die_casting":
-            n = int(R("overflows", 3))
-            ow, olen, oh = R("overflow_w_mm", 12), R("overflow_l_mm", 20), R("overflow_h_mm", 6)
+            n = max(1, int(round(sv("overflows", R("overflows", 3)))))
+            ow, oh = R("overflow_w_mm", 12), R("overflow_h_mm", 6)
+            olen = sv("overflow_len", R("overflow_l_mm", 20))
             for k in range(n):
                 f = (k + 1) / (n + 1) - 0.5
                 if ux:
@@ -203,11 +339,12 @@ def _gating(ctx):
                                 max(py + uy * olen / 2, cy - uy * bb.ylen / 2), pl + 0.01)
                     vent = _box(px - 4, min(py, cy - uy * ctx["iw"] / 2), pl - 0.3, px + 4, max(py, cy - uy * ctx["iw"] / 2), pl + 0.01)
                 cut(comps, ("Core insert",), ov.fuse(link).fuse(vent), "Overflows with vacuum vents")
+    ctx["gates"] = gates
     if pt == "die_casting":
-        notes.append(f"Shot sleeve Ø{R('shot_sleeve_d_mm', 80):g} with biscuit beside the cavities, runner Ø{rd:g} and gate "
-                     f"{gw:g} × {gh:g} to each cavity, {int(R('overflows', 3))} overflows with vacuum vents per cavity.")
+        notes.append(f"Shot sleeve Ø{R('shot_sleeve_d_mm', 80):g} with biscuit beside the cavities, runner Ø{rd:.1f} and gate "
+                     f"{gw:.1f} × {gh:.1f} to each cavity, {n} overflow(s) {ow:g} × {olen:.0f} × {oh:g} with vacuum vents per cavity.")
     else:
-        notes.append(f"Cold runner Ø{rd:g} on the parting plane from the sprue, edge gate {gw:g} × {gh:g} to each cavity.")
+        notes.append(f"Cold runner Ø{rd:.1f} on the parting plane from the sprue, {ngate} edge gate(s) {gw:.1f} × {gh:.1f} to each cavity.")
 
 
 # ---------- slides and lifters ----------
@@ -312,10 +449,14 @@ def _eps(ctx):
     for name, z in (("Steam chamber back plate (cavity side)", z_top + ch), ("Steam chamber back plate (core side)", z_bot - ch - back)):
         comps.append(Comp(name, _box(0, 0, 0, L, W, back), [(-L / 2, -W / 2, z)], material=ctx["base_mat"], color="shoe",
                           size=(L, W, back), drawing="solid"))
-    nfill = int(_line(ctx["lines"], "Fill gun").get("quantity") or len(cells))
-    per = max(1, round(nfill / max(len(cells), 1)))
+    guns = mould_systems.value(ctx.get("systems"), "fill_guns", None)       # stage 46: fill guns per cavity by formula
+    if guns is None:
+        nfill = int(_line(ctx["lines"], "Fill gun").get("quantity") or len(cells))
+        per = max(1, round(nfill / max(len(cells), 1)))
+    else:
+        per = max(1, int(round(guns)))
     idd = R("injector_d_mm", 20)
-    locs = []
+    locs, gates = [], []
     for cx, cy in cells:
         cols_ = max(1, int(math.ceil(math.sqrt(per))))
         for k in range(per):
@@ -328,11 +469,38 @@ def _eps(ctx):
             zt = max(zs)
             cut(comps, ("Cavity insert", "A plate"), _bar((x, y, zt - 0.01), (x, y, z_top + 0.01), idd + 1), "Fill injector bore")
             locs.append((x, y, zt))
+            gates.append({"cell": (cx, cy), "x": x - cx, "y": y - cy, "z": zt, "kind": "fill gun"})
+    ctx["gates"] = gates
     fl = _line(ctx["lines"], "Fill gun")
     if locs:
         h = z_top + ch - min(z for _, _, z in locs)
         comps.append(Comp(f"Fill injector Ø{idd:g}", cq.Solid.makeCylinder(idd / 2, h), locs, kind="std", make=fl.get("make") or "",
                           std=f"EPS fill injector (fill gun) Ø{idd:g}", size=(idd, idd, h), color="std", drawing="none"))
+    # stage 46: pneumatic ejectors from the core-side chamber to the part (count and stroke: Mould systems)
+    nej = mould_systems.value(ctx.get("systems"), "eps_ejectors", None)
+    if nej:
+        per = max(1, int(round(nej)))
+        ed = R("ejector_pin_d_mm", 20)
+        cols_ = max(1, int(math.ceil(math.sqrt(per))))
+        rows_ = max(1, math.ceil(per / cols_))
+        elocs = []
+        for cx, cy in cells:
+            for k in range(per):
+                x = ((k % cols_) + 0.5) / cols_ - 0.5
+                y = ((k // cols_) + 0.5) / rows_ - 0.5
+                x, y = x * bb.xlen * 0.7, y * bb.ylen * 0.7
+                zs = _hits(s, x, y)
+                if not zs:
+                    continue
+                zb = min(zs)
+                cut(comps, ("Core insert", "B plate"), _bar((cx + x, cy + y, z_bot - 0.01), (cx + x, cy + y, zb + 0.01), ed + 1), "Pneumatic ejector bore")
+                elocs.append((cx + x, cy + y, zb))
+        if elocs:
+            h = min(z for _, _, z in elocs) - (z_bot - ch / 2)
+            comps.append(Comp(f"Pneumatic ejector Ø{ed:g}", cq.Solid.makeCylinder(ed / 2, h), [(x, y, z - h) for x, y, z in elocs], kind="std",
+                              std=f"Pneumatic ejector Ø{ed:g}, stroke {mould_systems.value(ctx.get('systems'), 'eject_stroke', 0):.0f} mm, with air ejection",
+                              size=(ed, ed, h), color="std", drawing="none"))
+            ctx["notes"].append(f"EPS ejection: {len(elocs)} pneumatic ejector(s) Ø{ed:g} from the core-side chamber, air ejection through the vents.")
     vd, vp = R("vent_d_mm", 8), R("vent_pitch_mm", 25)
     vlocs = []
     for cx, cy in cells:

@@ -30,7 +30,10 @@ FACTS = {"made_parts": "Made parts in the tool", "std_parts": "Bought-out standa
          "cool_wanted": "Cooling lines tried in the inserts", "cool_placed": "Cooling lines placed clear of the part",
          "screws": "Socket head screws in the tool", "dowels": "Dowels / gauge pins in the tool",
          "fea_targets": "Load-carrying parts to check by FEA (Design rules → fea_parts)", "fea_checked": "Of those, checked by FEA on this revision",
-         "fea_bad": "Of those, over the deflection or stress limit"}
+         "fea_bad": "Of those, over the deflection or stress limit",
+         # stage 46: Mould systems
+         "systems_bad": "Mould systems checks (gate, overflow, ejection, cooling) that fail",
+         "systems_unchecked": "Mould systems checks that could not be worked out (data missing)"}
 MOULD = ("plastic", "die_casting", "foundry", "eps", "blow")
 AUTO = (
     ("Every made part has a material", "no_material == 0", "Some made parts have no material: set it in the tool BOM.", 1),
@@ -49,6 +52,8 @@ INTERNALS = (       # stage 45: added as new rows; existing rows are never chang
 FEA_ROWS = tuple((pt, "Strength check (FEA) of the load-carrying parts is within its limits", "fea_checked >= fea_targets and fea_bad == 0",
                   "The FEA was not run on this revision, or a part is over its deflection / stress limit: run it under Tool design → Strength check.", 0)
                  for pt in ("plastic", "die_casting", "foundry", "eps", "blow", "sheet_metal"))
+SYSTEM_ROWS = tuple((pt, "Mould systems checks pass (gate, overflow, ejection, cooling)", "systems_bad == 0",
+                     "A Mould systems check fails: see Tool design → Mould systems.", 0) for pt in ("plastic", "die_casting", "foundry", "eps", "blow"))
 SIM = ("A flow simulation of the part is saved", "sim_runs >= 1", "No flow simulation is saved for this part: run one on the part page.", 0)
 MANUAL = {
     "mould": ("Toolmaker: steel grades and hardness suit the part material and the run",
@@ -69,7 +74,7 @@ def seed_rows() -> list[dict]:
         for step, (item, chk, msg, blocking) in enumerate(items, start=1):
             rows.append({"part_type": pt, "step": step, "item": item, "rule": chk, "message": msg, "blocking": bool(blocking),
                          "is_example": True, "notes": EXAMPLE})
-    for i, (pt, item, chk, msg, blocking) in enumerate(INTERNALS + FEA_ROWS, start=1):
+    for i, (pt, item, chk, msg, blocking) in enumerate(INTERNALS + FEA_ROWS + SYSTEM_ROWS, start=1):
         rows.append({"part_type": pt, "step": 100 + i, "item": item, "rule": chk, "message": msg, "blocking": bool(blocking),
                      "is_example": True, "notes": EXAMPLE})
     return rows
@@ -123,7 +128,10 @@ def facts(part_id: int, des: dict, machine: dict | None, rev: str = "") -> dict:
             "no_material": float(sum(1 for c in made if c.material in empty)), "no_hardness": float(sum(1 for c in made if c.hardness in empty)),
             "rules_example": 1.0 if des.get("rules_are_examples") else 0.0,
             "machine_typed": 1.0 if (machine or {}).get("spec") else 0.0, "machine_bad": float(len(bad)),
-            "sim_runs": float(sims), "shut_height": float(des.get("shut_height") or 0)} | {k: float(v) for k, v in internals(des).items()} \
+            "sim_runs": float(sims), "shut_height": float(des.get("shut_height") or 0),
+            "systems_bad": float(sum(1 for c in (des.get("systems") or {}).get("checks", []) if c["ok"] is False)),
+            "systems_unchecked": float(sum(1 for c in (des.get("systems") or {}).get("checks", []) if c["ok"] is None))} \
+        | {k: float(v) for k, v in internals(des).items()} \
         | fea.facts(part_id, rev, des)
 
 

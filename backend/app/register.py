@@ -3378,9 +3378,13 @@ def _tool_designs_build(part_id: int, key: str | None = None) -> tuple[dict, dic
         axis = _concept_inputs(part_id)[5]["opening_axis"]
     except Exception:
         axis = "z"
+    from . import mould_systems
+    density, _ = _density(d["material"])
+    info = d | {"wall_mm": (rev.get("geometry") or {}).get("wall_mm"), "density_g_cm3": density,
+                "mould_typed": mould_systems.typed(part_id)}         # stage 46: facts and typed values of the Mould systems
     try:
-        des = (mould_design.foundry_design(d | {"wall_mm": (rev.get("geometry") or {}).get("wall_mm")}, shape, tr, axis)
-               if part_type == "foundry" else mould_design.mould_design(d, shape, tr, part_type, axis))
+        des = (mould_design.foundry_design(info, shape, tr, axis)
+               if part_type == "foundry" else mould_design.mould_design(info, shape, tr, part_type, axis))
     except tool_design.DesignError as exc:
         raise RegisterError(str(exc)) from None
     from . import drawing_data
@@ -3398,6 +3402,7 @@ def tool_design_summary(part_id: int) -> dict:
     return {"part_id": part_id, "rev": rev["rev"], "tools": [
         {"stage": k, "key": des["key"], "name": des["name"], "notes": des["notes"], "shut_height": des["shut_height"],
          "die_set": des["die_set"], "rules_are_examples": des["rules_are_examples"], "internals": _internals(des),
+         "systems": des.get("systems"), "gates": [{k: v for k, v in g.items() if k != "cell"} for g in des.get("gates") or []],
          "components": [{"no": c.no, "name": c.name, "qty": c.qty, "kind": c.kind, "material": c.material, "hardness": c.hardness,
                          "std": c.std or c.make, "size": [round(v, 1) for v in c.size]} for c in des["components"] if c.kind != "ref"]}
         for k, des in designs]}
@@ -3626,17 +3631,48 @@ def _save_sim_run(part_id: int, rev: str, kind: str, title: str, summary: dict, 
     return rid
 
 
-def flow_simulation_run(part_id: int, gates: int = 1, gate_point: list | None = None, video: bool = True, progress=None) -> int:
-    """Flow simulation of the part's current revision (flow_sim.py) with its PDF report and video, saved as a run."""
+def design_gates(part_id: int) -> dict | None:
+    """Stage 46: the gates of the mould design (first cavity) in the coordinates of the part model, with the designed gate
+    size (Mould systems), for the flow simulation; None when there is no mould design with gates."""
+    from . import mould_design, mould_systems
+    try:
+        _, _, designs = tool_designs(part_id)
+    except (RegisterError, ToolNotApplicable, ValueError):
+        return None
+    des = designs[0][1] if designs else {}
+    gates, ops = des.get("gates") or [], des.get("ops")
+    if not gates or not ops:
+        return None
+    first = gates[0]["cell"]
+    pts = [[round(v, 2) for v in mould_design.to_model((g["x"], g["y"], g["z"]), ops)] for g in gates if g["cell"] == first]
+    sy = des.get("systems")
+    pt = des.get("part_type") or ""
+    share = (mould_db.design_rules(pt).get("gate_freeze_share") or {}).get("value")
+    return {"points": pts, "kinds": sorted({g["kind"] for g in gates}), "per_cavity": len(pts),
+            "thk_mm": mould_systems.value(sy, "gate_thk"), "width_mm": mould_systems.value(sy, "gate_width"),
+            "freeze_share": float(share) if share not in (None, "") else None,
+            "source": f"gate(s) of the mould design ({', '.join(sorted({g['kind'] for g in gates}))}, Mould systems)"}
+
+
+def flow_simulation_run(part_id: int, gates: int = 1, gate_point: list | None = None, video: bool = True, progress=None,
+                        gate_from: str = "design") -> int:
+    """Flow simulation of the part's current revision (flow_sim.py) with its PDF report and video, saved as a run.
+    gate_from 'design' (stage 46): the gates and gate size of the mould design, when there is one and no point is typed."""
     from . import flow_sim, machine_spec, process_params
     from .pdf_report import flow_pdf
     say = progress or (lambda pct, text: None)
     say(1, "Reading the 3D model")
     d, rev, part_type, verts, tris, cres, facts = _concept_inputs(part_id)
     density = _density(d["material"])[0]
+    gd = None
+    if gate_point is None and gate_from == "design" and part_type in ("plastic", "die_casting", "eps"):
+        say(3, "Taking the gates of the mould design")
+        gd = design_gates(part_id)
+        if gd:
+            gate_point, gates = gd["points"], max(gates, len(gd["points"]))
     try:
         res = flow_sim.run(verts, tris, part_type, flow_sim.material(d["material"]), process_params.window(d["material"]),
-                           facts | {"density_g_cm3": density}, cres["opening_axis"], gates, gate_point, say)
+                           facts | {"density_g_cm3": density}, cres["opening_axis"], gates, gate_point, say, gate_design=gd)
     except flow_sim.FlowError as exc:
         raise ToolNotApplicable(str(exc)) from None
     try:
@@ -3649,7 +3685,7 @@ def flow_simulation_run(part_id: int, gates: int = 1, gate_point: list | None = 
         if spec["tonnage_t"] < need:
             res["corrections"].append(f"The production machine (stage 33, {spec['tonnage_t']:g} t) is smaller than the {need:.0f} t "
                                       "needed: a bigger machine, fewer cavities, or the remedies above.")
-    res["settings"] = {"gates": gates, "gate_point": gate_point}
+    res["settings"] = {"gates": gates, "gate_point": gate_point, "gate_from": "design" if gd else ("typed" if gate_point else "found by the solver")}
     say(81, "Writing the PDF report")
     pub = flow_sim.public(res)
     pdf = flow_pdf(pub, flow_sim.pictures(res), d, rev["rev"])

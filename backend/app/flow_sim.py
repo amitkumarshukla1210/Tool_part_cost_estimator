@@ -436,9 +436,11 @@ def _clusters(flag: np.ndarray, a: np.ndarray, b: np.ndarray, cen: np.ndarray, a
 # ---------- the solver ----------
 
 def run(vertices, triangles, part_type: str, mat: dict, window: dict, facts: dict, opening_axis: str, gates: int = 1,
-        gate_point: list | None = None, progress=None) -> dict:
+        gate_point: list | None = None, progress=None, gate_design: dict | None = None) -> dict:
     """Flow simulation of one part (see the module text). facts: wall_mm, part_l / part_w / part_h, volume_cm3, part_weight_g,
-    cavities, projected_area_cm2, density_g_cm3; window: melt_c, mould_c, eject_c (Process windows)."""
+    cavities, projected_area_cm2, density_g_cm3; window: melt_c, mould_c, eject_c (Process windows).
+    gate_point: one point [x, y, z] or several [[x, y, z], ...] (stage 46: the gates of the mould design); gate_design:
+    {source, thk_mm, width_mm, per_cavity, freeze_share} - the designed gate size, checked for shear and freezing."""
     say = progress or (lambda pct, text: None)
     if part_type not in PART_TYPES:
         raise FlowError(f"No flow simulation for {part_type.replace('_', ' ')} parts (plastic, die casting, foundry, EPS, blow moulding).")
@@ -532,9 +534,11 @@ def run(vertices, triangles, part_type: str, mat: dict, window: dict, facts: dic
         pred = np.full(m, -9999)
         _, pred = csgraph.dijkstra(geo_g, indices=gate_faces, min_only=True, return_predecessors=True)[:2]
     else:
-        if gate_point:
-            gate_faces = [int(np.argmin(np.linalg.norm(cen - np.asarray(gate_point, float), axis=1)))]
-            gate_note = f"typed gate point {', '.join(f'{x:g}' for x in gate_point)} mm"
+        pts = [gate_point] if gate_point and not isinstance(gate_point[0], (list, tuple)) else list(gate_point or [])
+        if pts:
+            gate_faces = list(dict.fromkeys(int(np.argmin(np.linalg.norm(cen - np.asarray(g, float), axis=1))) for g in pts))
+            gate_note = ((gate_design or {}).get("source") or "typed gate point") + ": " + "; ".join(
+                ", ".join(f"{x:.1f}" for x in g) for g in pts) + " mm"
         else:
             cand = np.nonzero((np.abs(n[:, ax]) > 0.9) & (area > 0))[0]
             if not len(cand):
@@ -546,7 +550,7 @@ def run(vertices, triangles, part_type: str, mat: dict, window: dict, facts: dic
             best = int(np.lexsort((worst, -reached))[0])
             gate_faces = [int(pick[best])]
             gate_note = "found: least flow resistance to the last point to fill"
-        for _ in range(max(1, int(gates)) - 1):                          # more gates: where the resistance is highest
+        for _ in range(max(1, int(gates)) - len(gate_faces)):            # more gates: where the resistance is highest
             d = csgraph.dijkstra(flow_g, indices=gate_faces, min_only=True)
             gate_faces.append(int(np.argmax(np.where(np.isfinite(d), d, -1))))
         R, pred = csgraph.dijkstra(flow_g, indices=gate_faces, min_only=True, return_predecessors=True)[:2]
@@ -728,6 +732,26 @@ def run(vertices, triangles, part_type: str, mat: dict, window: dict, facts: dic
             "clusters": clusters,
             "_faces": {"tri": tri, "pred": pred, "geo": geo_len, "h": hf, "t": t, "p": p_end, "T": T_front, "solid": solid, "shear": gamma, **maps}}
     out["corrections"] = _corrections(part_type, out, env)
+    if gate_design and part_type in ("plastic", "die_casting") and gate_design.get("thk_mm") and gate_design.get("width_mm"):
+        # stage 46: the designed gate in the simulation: shear rate through it (rectangular gate γ = 6Q / (W h²)) and when it freezes
+        h, w = float(gate_design["thk_mm"]), float(gate_design["width_mm"])
+        per = max(1, int(gate_design.get("per_cavity") or 1))
+        q = shot_cm3 * 1000 / max(cav, 1) / per / max(t_fill, 1e-9)                    # mm³/s through one gate
+        g = {"thk_mm": h, "width_mm": w, "per_cavity": per, "flow_mm3_s": q, "shear_1_s": 6 * q / (w * h * h),
+             "max_shear_1_s": float(mat.get("max_shear_1_s") or 0) or None, "source": gate_design.get("source", "")}
+        if g["max_shear_1_s"] and g["shear_1_s"] > g["max_shear_1_s"]:
+            out["corrections"].append(f"Shear in the designed gate {g['shear_1_s']:,.0f} 1/s is above the material limit "
+                                      f"{g['max_shear_1_s']:,.0f} 1/s: a wider / thicker gate or a slower fill (Mould systems).")
+        if part_type == "plastic" and mat.get("diffusivity_mm2_s") and window.get("melt_c") is not None:
+            tm, tw = float(window.get("melt_c") or 0), float(window.get("mould_c") or 0)
+            tnf = float(mat.get("no_flow_c") or window.get("eject_c") or tm - 50)
+            g["freeze_s"] = h * h / (np.pi ** 2 * float(mat["diffusivity_mm2_s"])) * float(np.log(max(4 / np.pi * (tm - tw) / max(tnf - tw, 1), 1.0001)))
+            need = float(gate_design.get("freeze_share") or 0) * float(res.get("cooling_s") or 0)
+            g["freeze_needed_s"] = need
+            if need and g["freeze_s"] < need:
+                out["corrections"].append(f"The designed gate ({h:.2f} mm) freezes after {g['freeze_s']:.1f} s, before the part is packed "
+                                          f"({need:.1f} s): a thicker gate, else sink marks (Mould systems gate_thk).")
+        out["gate_design"] = g
     out["is_example"] = bool(mat.get("is_example")) or any(s["is_example"] for s in steps)
     say(80, "Result ready")
     return out
