@@ -1200,6 +1200,21 @@ def parts_machine_save(part_id: int, data: dict):
     return _design_error(lambda: machine_spec.save(part_id, data.get("spec"), bool(data.get("skipped"))))
 
 
+# ---------- cavities asked before the mould design (roadmap stage 46) ----------
+
+@app.get("/api/parts/{part_id}/cavities")
+def parts_cavities(part_id: int):
+    from . import cavity_spec
+    return _design_error(lambda: cavity_spec.get(part_id))
+
+
+@app.put("/api/parts/{part_id}/cavities")
+def parts_cavities_save(part_id: int, data: dict):
+    """data: {cavities: 1-256 | null (= the recommended number of Stage C)}."""
+    from . import cavity_spec
+    return _design_error(lambda: cavity_spec.save(part_id, data.get("cavities")))
+
+
 @app.get("/api/parts/{part_id}/machine-check")
 def parts_machine_check(part_id: int):
     """Each tool against the typed machine (tool needs / machine has / ok), or the recommended machine."""

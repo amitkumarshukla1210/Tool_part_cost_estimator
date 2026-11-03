@@ -383,8 +383,9 @@ function toolBlock(p) {
         pillars, bushes, standard parts, screws; an assembly drawing and a detail drawing of every made part with tolerances,
         material, hardness and your logo. A first-cut design by the Design rules (Master data) for your tool designer to check and release.</p>
       <button type="button" class="btn btn-primary small" id="tdRun">Make the tool design</button>
+      ${tr.dies ? "" : '<button type="button" class="btn btn-outline small" id="tdCavities">Cavities…</button>'}
       <button type="button" class="btn btn-outline small" id="tdMachine">Production machine…</button> <span class="status" id="tdStatus"></span>
-      <div id="mcBox"></div><div id="tdOut"></div></details>`;
+      <div id="cvBox"></div><div id="mcBox"></div><div id="tdOut"></div></details>`;
   }
   if (tr?.lines) html += bomEditor(p, tr);
   const typed = p.tool_inputs || {};
@@ -743,7 +744,8 @@ $("panelBody").addEventListener("click", async (e) => {
     finally { button.disabled = false; }
     return;
   }
-  if (e.target.id === "tdRun") return machineFirst();
+  if (e.target.id === "tdRun") return cavitiesFirst();
+  if (e.target.id === "tdCavities") return cavitiesForm(false);
   if (e.target.id === "tdMachine") return machineForm(false);
   if (e.target.id === "fixOpen") return fixPreview(true);
   if (e.target.id === "fixRefresh") return fixPreview(false);
@@ -1461,6 +1463,36 @@ async function fixPreview(first) {
   } catch (err) {
     box.innerHTML = `<p class="status error">${esc(err.message)}</p>`;
   }
+}
+
+// cavities of the mould (stage 46): asked before the first mould design, then the production machine
+async function cavitiesFirst() {
+  let c = null;
+  try { c = await api(`/api/parts/${part.id}/cavities`); } catch { return machineFirst(); }   // a die or no mould: no cavities to ask
+  if (!c.asked) return cavitiesForm(true, c);
+  return machineFirst();
+}
+
+async function cavitiesForm(thenDesign, c = null) {
+  const box = $("cvBox");
+  try { c = c || await api(`/api/parts/${part.id}/cavities`); } catch (err) { status($("tdStatus"), err.message, "error"); return; }
+  box.innerHTML = `<form class="card grid2" id="cvForm"><h4 class="span2">How many cavities will this mould have?</h4>
+    <p class="note span2">Recommended by Stage C of the tool cost: <b>${c.recommended ?? "—"}</b> cavit${c.recommended === 1 ? "y" : "ies"}
+      (${fmt(c.needed, 2)} needed${c.limited_by ? `, limited by ${esc(c.limited_by)}` : ""}).<br/><span class="note">${esc(c.stage_c_note)}</span></p>
+    <label>Cavities per tool <input name="cavities" type="number" min="1" max="256" step="1" value="${c.typed ?? ""}" placeholder="${c.recommended ?? ""}" /></label>
+    <p class="note">Empty = take the recommended number (it follows the volume). A typed number is used by the tool cost, the layout, the mould base and the 3D design.</p>
+    <div class="span2 dialog-actions"><button type="button" class="btn btn-outline small" id="cvTake">Take the recommended ${c.recommended ?? ""}</button>
+      <button type="submit" class="btn btn-primary small">Save cavities${thenDesign ? " and go on" : ""}</button></div><p class="status span2" id="cvStatus"></p></form>`;
+  const done = async (cavities) => {
+    try {
+      status($("cvStatus"), "Saving… (the tool cost is worked out again)");
+      await api(`/api/parts/${part.id}/cavities`, { method: "PUT", body: JSON.stringify({ cavities }) });
+      box.innerHTML = "";
+      if (thenDesign) machineFirst(); else status($("tdStatus"), "Cavities saved: make the tool design again to see them.");
+    } catch (err) { status($("cvStatus"), err.message, "error"); }
+  };
+  $("cvTake").addEventListener("click", () => done(null));
+  $("cvForm").addEventListener("submit", (e) => { e.preventDefault(); done(new FormData(e.target).get("cavities") || null); });
 }
 
 // the production machine of the tool (stage 33): asked before the first tool design, checked, or recommended
