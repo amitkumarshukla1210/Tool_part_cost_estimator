@@ -240,7 +240,7 @@ def design_pdf(part: dict, design: dict, stage: int, rev: str = "", only: str | 
             rows += [("Heat treatment", tech["heat_treatment"]), ("Surface treatment", tech["surface_treatment"])]
         story += [drawing_style.pdf_header(st, "DETAIL DRAWING", f"{c.no} · {c.name}"),
                   Table([[views, side]], colWidths=[dw + 4 * mm, 92 * mm], style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))]
-        if len(c.holes) > SIDE_HOLES:
+        if c.holes and not _holes_at_side(c):
             story += [Paragraph("Hole table (datum 0,0 = lower-left corner)", st["k"]),
                       _hole_table(c, theme, tol, [14 * mm, 24 * mm, 24 * mm, 16 * mm, 300 * mm])]
         rel, hist = _meta(part, design, c)
@@ -301,6 +301,19 @@ def _hole_table(c, theme, tol, widths):
     return t
 
 
+def _holes_at_side(c) -> bool:
+    """The hole table fits next to the views: SIDE_HOLES rows less what the technical data, the ISO 2768 tables and the
+    opening notes take of the same column (a 2-cavity B / support plate with its technical data overflowed the page)."""
+    if not c.holes:
+        return False
+    room = SIDE_HOLES - len(c.openings)
+    tech = getattr(c, "tech", None)
+    if tech:
+        t = tech.get("tables") or {}
+        room -= 9 + max(len(t.get("linear") or []), len(t.get("angular") or []))
+    return len(c.holes) <= room
+
+
 def _detail_side(c, theme, tol):
     """Hole table (if short) and opening notes next to the views."""
     from reportlab.lib.styles import ParagraphStyle
@@ -308,10 +321,10 @@ def _detail_side(c, theme, tol):
     from reportlab.platypus import Paragraph, Table, TableStyle
     small = ParagraphStyle("s", fontSize=6.5, leading=8)
     out = []
-    if c.holes and len(c.holes) <= SIDE_HOLES:
+    if _holes_at_side(c):
         out.append([_hole_table(c, theme, tol, [8 * mm, 13 * mm, 13 * mm, 9 * mm, 47 * mm])])
     elif c.holes:
-        out.append([Paragraph(f"<b>{len(c.holes)} holes</b>: hole table under the views.", small)])
+        out.append([Paragraph(f"<b>{len(c.holes)} holes</b>: hole table under the views.", small)])     # not _holes_at_side
     dims = getattr(c, "dims", None)
     for k, o in enumerate(c.openings, start=1):
         tol_txt = dims["openings"][f"O{k}"]["size"]["text"] if dims else o.get("tol")

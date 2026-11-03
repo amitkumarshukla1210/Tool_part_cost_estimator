@@ -64,3 +64,17 @@ def test_work_instruction_and_example_files_are_served():
         assert client.get(f"/static/docs/example/{f}").status_code == 200
     help_page = client.get("/help").text
     assert "DTC_Work_Instruction.pdf" in help_page and "every category" in help_page
+
+
+def test_two_cavity_mould_drawing_set_builds_and_cuts_are_noted_on_their_part():
+    """A 2-cavity mould: the B / support plate hole table and the technical data overflowed the page (LayoutError);
+    the cut labels (runner, cooling) were added to every plate through the shared notes list."""
+    from backend.app import register
+    from tests.test_rm_cost import add_part, project
+    pid = add_part(project("DW2C"), "plastic_cover.step", "ABS", "injection_moulding", "DW2C-1")
+    client.put(f"/api/parts/{pid}/cavities", json={"cavities": 2})
+    r = client.get(f"/api/parts/{pid}/tool-design.pdf")
+    assert r.status_code == 200 and r.content[:4] == b"%PDF"
+    des = register.tool_designs(pid)[2][0][1]
+    notes = {c.name: c.notes for c in des["components"]}
+    assert not any("Runner" in n for n in notes["Support plate"]) and not any("Runner" in n for n in notes["Bottom clamp plate"])

@@ -1602,7 +1602,7 @@ function mouldSystemsHtml(t) {
           <td class="num"><b>${r.value == null ? "—" : fmt(r.value, r.value < 10 ? 2 : 1)}</b></td><td>${esc(r.unit)}</td>
           <td><input name="${esc(r.name)}" type="number" step="any" min="0" style="width:90px" value="${r.source === "typed by you" ? r.value : ""}" /></td>
           <td class="note"><code>${esc(r.formula)}</code><br/>${inputs(r)}${r.why ? `<br/><i>${esc(r.why)}</i>` : ""}</td>
-          <td class="note">${esc(r.source)}</td></tr>`).join("")}
+          <td class="note">${r.source.startsWith("formula") ? "formula" : `<b>${esc(r.source)}</b>`}</td></tr>`).join("")}
         ${sy.checks.filter((c) => c.system === g).map((c) => `<tr><td colspan="6">${c.ok === true ? '<span class="badge status">ok</span>'
           : c.ok === false ? '<span class="badge missing">check</span>' : '<span class="badge">not checked</span>'} <code>${esc(c.formula)}</code>
           ${c.message ? ` ${esc(c.message)}` : ""}</td></tr>`).join("")}</tbody></table></div>`).join("")}

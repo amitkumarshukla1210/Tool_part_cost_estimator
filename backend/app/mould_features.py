@@ -64,7 +64,7 @@ def cut(comps: list, names, tool, label: str = "") -> int:
         x, y, z = c.locs[0]
         c.shape = c.shape.cut(tool.translate(cq.Vector(-x, -y, -z)))
         if label and label not in c.notes:
-            c.notes.append(label)
+            c.notes = list(c.notes) + [label]          # plates share one notes list: a cut is noted on the part it cuts only
         n += 1
     return n
 
