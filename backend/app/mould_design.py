@@ -181,6 +181,13 @@ def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -
     ta, tb = float(b.get("a_plate_mm") or ha), float(b.get("b_plate_mm") or hb)
     tc, ts = float(b.get("clamp_plates_mm") or 0), float(b.get("support_plate_mm") or 0)
     tsp, tej = float(b.get("spacer_block_mm") or 0), float(b.get("ejector_plates_mm") or 0)
+    if tsp and tej and part_type in ("plastic", "die_casting"):
+        # stage 46: the spacer blocks give the ejector stroke the part needs (Mould systems → spacer_used)
+        need = mould_systems.value(systems, "spacer_used", tsp)
+        if need > tsp + 1e-6:
+            notes.append(f"Spacer blocks raised from {tsp:g} to {need:.0f} mm: ejector stroke "
+                         f"{mould_systems.value(systems, 'eject_stroke', 0):.0f} mm pushes the part off the core.")
+            tsp = round(need, 1)
     pocket_l, pocket_w = val("v:pocket_l", il), val("v:pocket_w", iw)
     da = min(ha, ta)
     dbk = min(hb, tb)
@@ -354,12 +361,20 @@ def mould_design(part: dict, shape, tr: dict, part_type: str, axis: str = "z") -
     # the moulded part (reference)
     comps.append(Comp("Moulded part (reference)", s, [(x, y, 0.0) for x, y in cells], kind="ref", size=(bb.xlen, bb.ylen, bb.zlen),
                       color="ref", drawing="none"))
-    des = _finish(comps, notes, chans, cd, depth, ctx["stack"], cells, H, b, L, W, rules, part_type)
+    des = _finish(comps, notes, chans, cd, depth, ctx["stack"], cells, H, b, L, W, rules, part_type,
+                  mould_systems.value(systems, "opening_stroke", 2 * H + 20))
     # stage 45: what the rules wanted and what fitted (per cavity): ejector pin grid points vs pins under the part,
     # cooling lines tried (2 per insert half) vs lines placed clear of the part
     des["internals"] = {"pins_wanted": (nx * ny) if ejection else 0, "pins_placed": len(pins), "cool_wanted": tried, "cool_placed": len(chans)}
     des["systems"] = systems
     des["gates"] = ctx.get("gates") or []
+    # stage 46: how the mould opens and ejects (3D viewer): the fixed half lifts by the opening stroke, then the ejector
+    # system and the part move by the ejector stroke
+    eject = mould_systems.value(systems, "eject_stroke", None)
+    des["motion"] = {"parting_z": pl, "opening_mm": round(mould_systems.value(systems, "opening_stroke", 2 * H + 20), 1),
+                     "eject_mm": round(eject, 1) if eject and (ejection or part_type == "eps") else 0.0,
+                     "eject_names": ["Ejector plate", "Ejector retainer plate", "Ejector pin", "Return pin", "Lifter", "Pneumatic ejector"],
+                     "stay_names": ["Guide pillar"]}
     des["notes"] += mould_systems.notes(systems)
     return des
 
@@ -387,13 +402,13 @@ def _clamp_screws(comps, sd, se, tc, L, W, z_tc):
                       kind="std", std=f"ISO 4762 M{sd:g} × {Ls:g} - 12.9", size=(1.5 * sd, 1.5 * sd, Ls + sd), color="screw", drawing="none"))
 
 
-def _finish(comps, notes, chans, cd, depth, stack, cells, H, b, L, W, rules, part_type):
+def _finish(comps, notes, chans, cd, depth, stack, cells, H, b, L, W, rules, part_type, opening=None):
     order = [c for c in comps if c.kind == "made"] + [c for c in comps if c.kind == "std"] + [c for c in comps if c.kind == "ref"]
     for i, c in enumerate(order, start=1):
         c.no = f"{i:02d}" if c.kind != "ref" else "REF"
     if chans:
         notes.append(f"Cooling: {len(chans)} channel(s) Ø{cd:g} per cavity in the inserts, {depth:g} mm from the moulding faces.")
-    notes.append(f"Mould height {stack:.0f} mm, {len(cells)} cavit{'y' if len(cells) == 1 else 'ies'}, opening stroke ≥ {2 * H + 20:.0f} mm.")
+    notes.append(f"Mould height {stack:.0f} mm, {len(cells)} cavit{'y' if len(cells) == 1 else 'ies'}, opening stroke ≥ {opening if opening is not None else 2 * H + 20:.0f} mm.")
     return {"name": f"Mould · {len(cells)} cavit{'y' if len(cells) == 1 else 'ies'}", "key": "mould", "components": order,
             "notes": notes, "shut_height": round(stack, 1), "die_set": f"{b.get('series', '')} {b.get('size_code', '')} {L:.0f} × {W:.0f}",
             "rules_are_examples": rules.is_example, "part_type": part_type}

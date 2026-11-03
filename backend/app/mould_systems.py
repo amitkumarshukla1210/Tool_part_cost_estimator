@@ -70,6 +70,11 @@ RULES = [
     ("foundry", "ingate_thk_factor", 0.5, "-", "Ingate thickness = factor × wall (stage 46)"),
     ("foundry", "ingate_thk_min_mm", 4, "mm", "Smallest ingate thickness (stage 46)"),
     ("foundry", "riser_modulus_factor", 1.2, "-", "Riser modulus = factor × casting modulus; riser Ø = 6 × riser modulus (H = Ø) (stage 46)"),
+] + [(pt, "eject_extra_mm", 10, "mm", "Ejector stroke beyond the part height, so the part is clear of the core (stage 46)")
+     for pt in ("plastic", "die_casting", "eps")] + [(pt, "stop_disc_mm", 5, "mm", "Stop discs under the ejector plate: stroke lost (stage 46)")
+                                                    for pt in ("plastic", "die_casting")] + [
+    ("eps", "eps_cm2_per_ejector", 150, "cm²", "Projected part area pushed off by one pneumatic ejector (stage 46)"),
+    ("eps", "eps_ejector_stroke_mm", 100, "mm", "Stroke of the pneumatic ejectors of the EPS machine / mould (stage 46)"),
 ]
 
 # part type, system, name, formula, unit, meaning (or warning of a check), why, kind
@@ -125,7 +130,31 @@ GATE_ROWS = [
     ("foundry", "gate", "riser_dia", "6 * riser_modulus_factor * part_modulus_mm", "mm", "Riser diameter (height = diameter)",
      "modulus method: riser modulus = factor × casting modulus", V),
 ]
-SEED_ROWS = GATE_ROWS
+EJECT_ROWS = [r for pt in ("plastic", "die_casting") for r in (
+    (pt, "ejection", "eject_stroke", "part_h + eject_extra_mm", "mm", "Ejector stroke needed",
+     "the part is pushed fully off the core: part height + eject_extra_mm", V),
+    (pt, "ejection", "base_stroke", "spacer_block_mm - ejector_plates_mm - stop_disc_mm", "mm", "Ejector stroke of the catalogue mould base",
+     "spacer block − ejector plates − stop discs", V),
+    (pt, "ejection", "spacer_used", "max(spacer_block_mm, eject_stroke + ejector_plates_mm + stop_disc_mm)", "mm", "Spacer block height used",
+     "raised above the catalogue size when the stroke is short (the mould gets higher)", V),
+    (pt, "ejection", "opening_stroke", "rec_stroke_factor * part_h + rec_stroke_extra_mm", "mm", "Mould opening stroke needed",
+     "the part is taken out between the halves (Design rules rec_stroke_*)", V),
+    (pt, "ejection", "chk_stroke", "eject_stroke <= spacer_used - ejector_plates_mm - stop_disc_mm", "",
+     "The ejector stroke ({eject_stroke:.0f} mm) is shorter than the part needs: it cannot come off the core. Raise the spacer blocks.", "", C),
+    (pt, "ejection", "chk_base", "base_stroke >= eject_stroke", "",
+     "The catalogue mould base gives {base_stroke:.0f} mm of ejector stroke; the part needs {eject_stroke:.0f} mm: spacer blocks raised to "
+     "{spacer_used:.0f} mm (special spacer blocks, mould {spacer_used - spacer_block_mm:.0f} mm higher).", "", C))] + [
+    ("eps", "ejection", "eps_ejectors", "max(2, ceil(projected_area_cm2 / eps_cm2_per_ejector))", "", "Pneumatic ejectors per cavity",
+     "one per eps_cm2_per_ejector of projected area, at least 2; air ejection through the steam vents helps", V),
+    ("eps", "ejection", "eject_stroke", "part_h + eject_extra_mm", "mm", "Ejector stroke needed", "part height + eject_extra_mm", V),
+    ("eps", "ejection", "opening_stroke", "rec_stroke_factor * part_h + rec_stroke_extra_mm", "mm", "Mould opening stroke needed",
+     "Design rules rec_stroke_*", V),
+    ("eps", "ejection", "chk_stroke", "eject_stroke <= eps_ejector_stroke_mm", "",
+     "The pneumatic ejectors ({eps_ejector_stroke_mm:.0f} mm) are shorter than the part needs ({eject_stroke:.0f} mm): longer-stroke ejectors.", "", C),
+    ("blow", "ejection", "opening_stroke", "rec_stroke_factor * part_h + rec_stroke_extra_mm", "mm", "Mould opening stroke needed",
+     "the bottle is taken out between the halves (no ejector pins)", V),
+]
+SEED_ROWS = GATE_ROWS + EJECT_ROWS
 
 
 def seed() -> dict:
@@ -286,7 +315,13 @@ def compute(part_type: str, facts: dict, material: str = "", typed_values: dict 
                 continue
             src = "formula (Mould & die database → Mould systems)"
         if r["kind"] == "check":
-            checks.append({"system": r["system"], "name": r["name"], "ok": bool(v), "message": "" if v else r["label"],
+            msg = ""
+            if not v:
+                try:
+                    msg = r["label"].format(**env)
+                except (KeyError, ValueError, IndexError, AttributeError):
+                    msg = r["label"]
+            checks.append({"system": r["system"], "name": r["name"], "ok": bool(v), "message": msg,
                            "formula": r["formula"], "inputs": inputs, "is_example": bool(r["is_example"])})
             continue
         env[r["name"]] = v

@@ -352,6 +352,31 @@ def _eps(ctx):
         h = z_top + ch - min(z for _, _, z in locs)
         comps.append(Comp(f"Fill injector Ø{idd:g}", cq.Solid.makeCylinder(idd / 2, h), locs, kind="std", make=fl.get("make") or "",
                           std=f"EPS fill injector (fill gun) Ø{idd:g}", size=(idd, idd, h), color="std", drawing="none"))
+    # stage 46: pneumatic ejectors from the core-side chamber to the part (count and stroke: Mould systems)
+    nej = mould_systems.value(ctx.get("systems"), "eps_ejectors", None)
+    if nej:
+        per = max(1, int(round(nej)))
+        ed = R("ejector_pin_d_mm", 20)
+        cols_ = max(1, int(math.ceil(math.sqrt(per))))
+        rows_ = max(1, math.ceil(per / cols_))
+        elocs = []
+        for cx, cy in cells:
+            for k in range(per):
+                x = ((k % cols_) + 0.5) / cols_ - 0.5
+                y = ((k // cols_) + 0.5) / rows_ - 0.5
+                x, y = x * bb.xlen * 0.7, y * bb.ylen * 0.7
+                zs = _hits(s, x, y)
+                if not zs:
+                    continue
+                zb = min(zs)
+                cut(comps, ("Core insert", "B plate"), _bar((cx + x, cy + y, z_bot - 0.01), (cx + x, cy + y, zb + 0.01), ed + 1), "Pneumatic ejector bore")
+                elocs.append((cx + x, cy + y, zb))
+        if elocs:
+            h = min(z for _, _, z in elocs) - (z_bot - ch / 2)
+            comps.append(Comp(f"Pneumatic ejector Ø{ed:g}", cq.Solid.makeCylinder(ed / 2, h), [(x, y, z - h) for x, y, z in elocs], kind="std",
+                              std=f"Pneumatic ejector Ø{ed:g}, stroke {mould_systems.value(ctx.get('systems'), 'eject_stroke', 0):.0f} mm, with air ejection",
+                              size=(ed, ed, h), color="std", drawing="none"))
+            ctx["notes"].append(f"EPS ejection: {len(elocs)} pneumatic ejector(s) Ø{ed:g} from the core-side chamber, air ejection through the vents.")
     vd, vp = R("vent_d_mm", 8), R("vent_pitch_mm", 25)
     vlocs = []
     for cx, cy in cells:

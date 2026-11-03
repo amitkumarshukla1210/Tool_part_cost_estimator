@@ -98,8 +98,55 @@ def test_failed_checks_reach_the_toolmaker_review():
     client.put(f"/api/parts/{pid}/cavities", json={"cavities": 1})
     client.put(f"/api/parts/{pid}/mould-systems", json={"values": {"gates": 3}})       # one cavity, three gates: a direct sprue cannot
     des = _design(pid)
-    bad = [c for c in des["systems"]["checks"] if c["ok"] is False]
+    bad = [c for c in des["systems"]["checks"] if c["ok"] is False and c["system"] == "gate"]
     assert [c["name"] for c in bad] == ["chk_one_cavity"] and "3-plate" in bad[0]["message"]
     rv = client.get(f"/api/parts/{pid}/tool-review").json()
     row = next(r for t in rv["tools"] for r in t["rows"] if r["item"].startswith("Mould systems checks pass"))
     assert row["status"] != "ok" and any("3-plate" in n for n in des["notes"])
+
+
+# ---------- ejection (stage 46, 3/5) ----------
+
+def test_ejector_stroke_raises_spacer_blocks_and_part_comes_off():
+    pid = add_part(project("MSE1"), "large_plastic_tub.step", "PP (polypropylene)", "injection_moulding", "MSE1-1")
+    des = _design(pid)
+    r, f = _rows(des), des["systems"]["facts"]
+    assert r["eject_stroke"]["value"] == round(f["part_h"] + 10, 6)
+    assert r["base_stroke"]["value"] == f["spacer_block_mm"] - f["ejector_plates_mm"] - 5
+    sb = next(c for c in des["components"] if c.name == "Spacer block")
+    assert abs(sb.size[2] - max(f["spacer_block_mm"], r["spacer_used"]["value"])) < 0.2
+    chk = {c["name"]: c for c in des["systems"]["checks"]}
+    assert chk["chk_stroke"]["ok"] is True                                       # the designed stroke always clears the part
+    if r["base_stroke"]["value"] < r["eject_stroke"]["value"]:
+        assert chk["chk_base"]["ok"] is False and "raised" in chk["chk_base"]["message"]
+        assert any(n.startswith("Spacer blocks raised from") for n in des["notes"])
+    # the ejector plate + pins move up by the stroke in the 3D viewer, the A side lifts by the opening stroke
+    assert des["motion"]["eject_mm"] == round(r["eject_stroke"]["value"], 1) and des["motion"]["opening_mm"] == round(r["opening_stroke"]["value"], 1)
+    html = client.get(f"/api/parts/{pid}/tool-design.html").text
+    assert 'id="motion"' in html and '"moves":' in html and '"eject_mm":' in html
+    from backend.app import outputs3d
+    data = outputs3d.viewer_data({"part_code": "X"}, des, "A")
+    mv = {p["name"]: set(p["moves"]) for p in data["parts"]}
+    assert mv["Ejector plate"] == {"eject"} and mv["Moulded part (reference)"] == {"eject"} and mv["A plate (cavity side)"] == {"open"}
+    assert mv["B plate (core side)"] == {""} and data["motion"]["eject_mm"] > 0
+
+
+def test_machine_check_uses_the_ejector_stroke_of_the_mould_systems():
+    pid = add_part(project("MSE2"), "plastic_cover.step", "ABS", "injection_moulding", "MSE2-1")
+    stroke = _rows(_design(pid))["eject_stroke"]["value"]
+    client.put(f"/api/parts/{pid}/machine", json={"spec": {"ejector_stroke_mm": round(stroke) - 1}})
+    r = client.get(f"/api/parts/{pid}/machine-check").json()
+    row = next(c for c in r["check"] if c["what"] == "Ejector stroke")
+    assert row["needs"] == f"{round(stroke):g} mm" and not row["ok"]
+    assert r["recommended"]["values"]["ejector_stroke_mm"] == round(stroke)
+
+
+def test_eps_pneumatic_ejectors_and_blow_opening(tmp_path):
+    pid = add(tmp_path, eps_tray(), "eps2.step", "EPS bead grade S (20 kg/m3)", "eps_moulding", "MSE3")
+    des = _design(pid)
+    n = _rows(des)["eps_ejectors"]["value"]
+    ej = next(c for c in des["components"] if c.name.startswith("Pneumatic ejector"))
+    assert n >= 2 and 1 <= len(ej.locs) <= n * des["systems"]["facts"]["cavities"] and des["motion"]["eject_mm"] > 0
+    pid = add(tmp_path, bottle(), "bottle4.step", "PET bottle grade (IV 0.80)", "stretch_blow_moulding", "MSE4")
+    des = _design(pid)
+    assert des["motion"]["eject_mm"] == 0 and des["motion"]["opening_mm"] == round(_rows(des)["opening_stroke"]["value"], 1)
