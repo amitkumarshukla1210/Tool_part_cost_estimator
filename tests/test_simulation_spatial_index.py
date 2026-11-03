@@ -105,9 +105,9 @@ def test_simulation_result_is_reused_for_same_inputs(monkeypatch):
 
     calls = []
     d, rev, concept_result, facts = {}, {"geometry": {"projected_area_mm2": {}}}, {}, {}
-    monkeypatch.setattr(register, "_SIMULATION_CACHE_KEY", None)
-    monkeypatch.setattr(register, "_SIMULATION_CACHE_VALUE", None)
-    monkeypatch.setattr(register, "_simulation_key", lambda part_id: "same-inputs")
+    from collections import OrderedDict
+    monkeypatch.setattr(register, "_SIMULATION_CACHE", OrderedDict())
+    monkeypatch.setattr(register, "_simulation_key", lambda part_id: f"inputs-{part_id}")
     monkeypatch.setattr(register, "_concept_inputs", lambda part_id: (d, rev, "plastic", [], [], concept_result, facts))
     monkeypatch.setattr(simulation, "run", lambda *args: calls.append(args) or {"result": True})
 
@@ -116,3 +116,6 @@ def test_simulation_result_is_reused_for_same_inputs(monkeypatch):
 
     assert first is second
     assert len(calls) == 1
+
+    third = register._simulate(2)                       # another part: its own result ...
+    assert len(calls) == 2 and register._simulate(1) is first and len(calls) == 2   # ... and the first part is still kept
