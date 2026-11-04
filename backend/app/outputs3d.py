@@ -20,7 +20,7 @@ from . import render3d, tool_design
 
 
 def comp_mesh(c):
-    return render3d.mesh(c.shape, tol=max(0.3, max(c.size) / 150 if c.size else 0.4))
+    return render3d.comp_mesh(c)
 
 
 def stl_bytes(meshes, name: str = "tool") -> bytes:
@@ -57,9 +57,12 @@ def assembly_stl(design: dict) -> bytes:
 
 
 def part_png(c, size=(700, 520)) -> bytes:
-    v, t = comp_mesh(c)
-    rgb = tool_design.COLORS.get(c.color, (0.6, 0.6, 0.6))
-    return render3d.png(render3d.render([(v, t, rgb)], size=size))
+    kept = render3d.kept(c, "pictures")          # drawn once per kept design (release pack, part picture download)
+    if tuple(size) not in kept:
+        v, t = comp_mesh(c)
+        rgb = tool_design.COLORS.get(c.color, (0.6, 0.6, 0.6))
+        kept[tuple(size)] = render3d.png(render3d.render([(v, t, rgb)], size=size))
+    return kept[tuple(size)]
 
 
 def part_step(c) -> bytes:

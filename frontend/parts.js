@@ -1565,24 +1565,64 @@ async function toolDesignLoad() {
         <p class="downloads"><a class="btn btn-outline small" href="/api/parts/${part.id}/tool-design.html${q}" target="_blank">🧊 Open 3D viewer</a> ·
           <a class="link" href="/api/parts/${part.id}/tool-design.stl${q}">⬇ Assembly STL</a> ·
           <a class="link" href="/api/parts/${part.id}/tool-design.step${q}">⬇ Assembly 3D (STEP)</a> ·
-          <a class="link" href="/api/parts/${part.id}/tool-design.pdf${q}">⬇ Drawing set (PDF)</a> ·
-          <a class="btn btn-primary small" href="/api/parts/${part.id}/tool-design.zip${q}">⬇ Release pack (3D + PDF + DXF + BOM)</a></p>
+          <a class="link dl-wait" href="/api/parts/${part.id}/tool-design.pdf${q}">⬇ Drawing set (PDF)</a> ·
+          <a class="btn btn-primary small dl-wait" href="/api/parts/${part.id}/tool-design.zip${q}">⬇ Release pack (3D + PDF + DXF + BOM)</a>
+          <span class="note dl-status"></span></p>
         <div class="table-wrap"><table class="cost-table"><thead><tr><th>Item</th><th>Qty</th><th>Part</th><th>Material</th>
           <th>Hardness</th><th>Make / standard part</th><th>Size (mm)</th></tr></thead><tbody>
           ${t.components.map((c) => `<tr><td>${esc(c.no)}</td><td class="num">${c.qty}</td><td>${esc(c.name)}</td><td>${esc(c.material || "—")}</td>
             <td>${esc(c.hardness || "—")}</td><td>${esc(c.std || "—")}</td><td>${c.size.map((v) => fmt(v, 1)).join(" × ")}</td></tr>`).join("")}
           </tbody></table></div></div>`;
-    }).join("") + (r.tools.length > 1 ? `<p><a class="btn btn-primary" href="/api/parts/${part.id}/tool-design.zip">⬇ Release pack of all ${r.tools.length} tools</a></p>` : "")
+    }).join("") + (r.tools.length > 1 ? `<p class="downloads"><a class="btn btn-primary dl-wait" href="/api/parts/${part.id}/tool-design.zip">⬇ Release pack of all ${r.tools.length} tools</a>
+        <span class="note dl-status"></span></p>` : "")
       + `<div id="pdBox" class="card"></div><div id="feBox" class="card"></div><div id="ddBox" class="card"></div><div id="rvBox" class="card"></div>`;
-    productionDataLoad();
-    feaLoad();
-    drawingDataLoad();
-    toolReviewLoad();
-    machineCheck();
+    // once every block of the panel has loaded, the server makes the drawing set and the release pack in the
+    // background, so they are ready when clicked (it never slows the panel itself)
+    const partId = part.id;
+    Promise.allSettled([productionDataLoad(), feaLoad(), drawingDataLoad(), toolReviewLoad(), machineCheck()])
+      .then(() => { if (part && part.id === partId) fetch(`/api/parts/${partId}/tool-design/prepare`).catch(() => {}); });
   } catch (err) {
     status($("tdStatus"), err.message, "error");
   }
 }
+
+// Drawing set / release pack: downloaded with a running "Preparing …" note instead of a page that seems to do nothing
+document.addEventListener("click", async (e) => {
+  const a = e.target.closest("a.dl-wait");
+  if (!a || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  e.preventDefault();
+  if (a.dataset.busy) return;
+  const note = a.closest("p").querySelector(".dl-status");
+  const what = a.textContent.replace("⬇", "").trim();
+  const t0 = Date.now();
+  const tick = () => { note.textContent = `Preparing ${what} … ${Math.round((Date.now() - t0) / 1000)} s`; };
+  a.dataset.busy = "1";
+  tick();
+  const timer = setInterval(tick, 1000);
+  try {
+    const res = await fetch(a.href);
+    if (!res.ok) {
+      let msg = res.statusText;
+      try { const j = await res.json(); msg = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail); } catch { /* not JSON */ }
+      throw new Error(msg);
+    }
+    const name = ((res.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/) || [])[1] || a.href.split("/").pop();
+    const url = URL.createObjectURL(await res.blob());
+    const save = document.createElement("a");
+    save.href = url;
+    save.download = name;
+    document.body.appendChild(save);
+    save.click();
+    save.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    note.textContent = `${what}: ready (${Math.round((Date.now() - t0) / 1000)} s)`;
+  } catch (err) {
+    note.textContent = `${what}: ${err.message}`;
+  } finally {
+    clearInterval(timer);
+    delete a.dataset.busy;
+  }
+});
 
 // Mould systems (stage 46): gate, runner, overflow, ejection and cooling worked out by the master-data formulas; type over a value
 const SYSTEM_TITLES = { gate: "Gate and runner", overflow: "Overflows", ejection: "Ejection", cooling: "Cooling (water)" };

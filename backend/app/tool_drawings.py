@@ -45,6 +45,18 @@ def drawing_no(part: dict, stage: int, comp_no: str) -> str:
 # ---------- views ----------
 
 def _render_png(design, size, az, el, explode=0.0, section=False, skip_ref=False) -> bytes:
+    """A shaded picture of the assembly; kept with the design (register.tool_designs keeps the design until anything it
+    depends on changes), so the drawing set and the release pack draw each picture once."""
+    if not design.get("components"):
+        return _render_png_now(design, size, az, el, explode, section, skip_ref)
+    kept = render3d.kept(design["components"][0], "assembly_pictures")
+    key = (tuple(size), az, el, explode, section, skip_ref)
+    if key not in kept:
+        kept[key] = _render_png_now(design, size, az, el, explode, section, skip_ref)
+    return kept[key]
+
+
+def _render_png_now(design, size, az, el, explode=0.0, section=False, skip_ref=False) -> bytes:
     import cadquery as cq
     items = render3d.design_items(design, tool_design.COLORS, explode=explode, skip_ref=skip_ref)
     if section:   # cut away everything in front of the middle plane (y < 0)
@@ -600,8 +612,8 @@ def bom_xlsx(part: dict, design: dict, stage: int) -> bytes:
     return buf.getvalue()
 
 
-def release_files(part: dict, design: dict, stage: int, rev: str = "") -> dict:
-    """Every file of one tool for release: {path: bytes}."""
+def release_files(part: dict, design: dict, stage: int, rev: str = "", pdf: bytes | None = None) -> dict:
+    """Every file of one tool for release: {path: bytes}; pdf = the drawing set when already made."""
     stem = f"{part['part_code']}_T{stage:02d}_{_safe(design['key'])}"
     files = {}
     files[f"3D/{stem}_assembly.step"] = tool_design.step_bytes(tool_design.assembly(design, stem))
@@ -609,7 +621,7 @@ def release_files(part: dict, design: dict, stage: int, rev: str = "") -> dict:
         if c.kind == "ref":
             continue
         files[f"3D/parts/{c.no}_{_safe(c.name)}.step"] = tool_design.step_bytes(c.shape)
-    files[f"2D/PDF/{stem}_drawing_set.pdf"] = design_pdf(part, design, stage, rev)
+    files[f"2D/PDF/{stem}_drawing_set.pdf"] = pdf or design_pdf(part, design, stage, rev)
     files[f"2D/DXF/{stem}_00_assembly.dxf"] = assembly_dxf(part, design, stage, rev)
     for c in design["components"]:
         if c.kind == "made" and c.drawing != "none":
@@ -626,8 +638,10 @@ def release_files(part: dict, design: dict, stage: int, rev: str = "") -> dict:
     return files
 
 
-def release_zip(part: dict, designs: list[tuple[int, dict]], rev: str = "", extra: dict | None = None) -> bytes:
-    """ZIP with the release files of every tool given (one folder per tool), plus README."""
+def release_zip(part: dict, designs: list[tuple[int, dict]], rev: str = "", extra: dict | None = None,
+                pdfs: dict | None = None) -> bytes:
+    """ZIP with the release files of every tool given (one folder per tool), plus README; pdfs = {stage: drawing set}
+    already made."""
     buf = io.BytesIO()
     readme = [f"{drawing_style.settings()['company']} - tool design release for {part['part_code']} {part['name']}",
               f"Made {date.today().isoformat()}", "",
@@ -644,7 +658,7 @@ def release_zip(part: dict, designs: list[tuple[int, dict]], rev: str = "", extr
                           f"shut height {design.get('shut_height', 0):g} mm")
             for n in design.get("notes", []):
                 readme.append(f"    - {n}")
-            for path, data in release_files(part, design, stage, rev).items():
+            for path, data in release_files(part, design, stage, rev, (pdfs or {}).get(stage)).items():
                 z.writestr(f"{folder}/{path}", data)
         for path, data in (extra or {}).items():
             z.writestr(path, data)

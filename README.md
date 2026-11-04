@@ -1080,6 +1080,14 @@ World Bank WDI consumer price index (indexation). The others in the table are no
 - **Drawings** (`tool_drawings.py`): drawing set PDF (assembly sheet with iso, exploded and section views and the BOM; a detail sheet
   per made part with views, overall dimensions, hole table from the datum corner with fits and depths, tolerances, material,
   hardness, heat treatment, finish) and DXF of every sheet at 1:1. **Release pack** ZIP: assembly STEP, STEP per part, PDF, DXF, BOM.
+  **One page per drawing:** the title block sits at the foot of every sheet. A long hole table (a B plate with 48 ejector-pin holes)
+  goes under the views in up to 4 blocks side by side. The views and the assembly pictures take the height that is left.
+  Anything still too large is scaled down to fit the sheet; it never runs on to the next page.
+  **Faster downloads:** pictures, meshes and finished files are made once and kept until the design or the drawing settings change.
+  The release pack uses the drawing set already made. Once the tool-design panel has loaded, the server makes the drawing set and
+  the release pack in the background (`GET …/tool-design/prepare`), so they are usually ready when you click. While a download is
+  being made, the link shows *Preparing … n s*. Large mould on the test PC: drawing set 6.4 s → 4.7 s the first time and 0.1 s after;
+  release pack 13 s → 6 s, and 0.3 s once kept.
 - **Drawing frame** (`drawing_style.py`): logo, company, drawing number, revision, general tolerance, projection symbol, scale,
   sheet, drawn / checked / approved and notes on every drawing (part, tool concept, tool design, blank and strip DXF). Set on
   **Admin → Drawings** (upload your logo); in DXF the logo is drawn as hatches so it stays inside the file.

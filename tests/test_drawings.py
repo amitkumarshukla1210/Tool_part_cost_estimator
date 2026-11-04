@@ -105,3 +105,33 @@ def test_every_drawing_of_a_large_mould_is_one_sheet_and_the_hole_table_stays_on
             assert all(f"H{i}" in text for i in range(1, len(c.holes) + 1)), c.name
     assert max(len(c.holes) for c in made) > 22                                     # the case that overflowed is in it
 
+
+def test_drawing_set_and_release_pack_are_made_once_and_the_pack_reuses_the_drawing_set(monkeypatch):
+    from backend.app import drawing_style, register, tool_drawings
+    pid = add_part(project("DW1C"), "plastic_cover.step", "ABS", "injection_moulding", "DW1C-1")
+    made = []
+    pdf = tool_drawings.design_pdf
+    monkeypatch.setattr(tool_drawings, "design_pdf", lambda *a, **k: made.append(1) or pdf(*a, **k))
+    register.clear_design_cache()
+    first = client.get(f"/api/parts/{pid}/tool-design.pdf").content
+    assert client.get(f"/api/parts/{pid}/tool-design.pdf").content == first and len(made) == 1     # second click: kept
+    z = zipfile.ZipFile(io.BytesIO(client.get(f"/api/parts/{pid}/tool-design.zip").content))
+    inside = next(n for n in z.namelist() if n.endswith("_drawing_set.pdf"))
+    assert z.read(inside) == first and len(made) == 1                              # the pack uses the drawing set made
+    # anything the drawings show changes: made again (company name in the drawing settings)
+    s = drawing_style.settings()
+    monkeypatch.setattr(drawing_style, "settings", lambda: s | {"company": "Other Co"})
+    assert client.get(f"/api/parts/{pid}/tool-design.pdf").content != first and len(made) == 2
+
+
+def test_downloads_are_prepared_in_the_background():
+    from backend.app import register
+    pid = add_part(project("DW1P"), "plastic_cover.step", "ABS", "injection_moulding", "DW1P-1")
+    register.clear_design_cache()
+    r = client.get(f"/api/parts/{pid}/tool-design/prepare")
+    assert r.status_code == 200 and r.json()["queued"] is True
+    register._PREP_POOL.submit(lambda: None).result(timeout=600)                    # the background work has finished
+    with register._FILE_CACHE_LOCK:
+        kinds = {k[1][1] for k in register._FILE_CACHE if k[0] == pid and k[1][0] == "tool_design"}
+    assert {"pdf", "zip"} <= kinds
+    assert client.get("/api/parts/999999/tool-design/prepare").status_code in (400, 404)

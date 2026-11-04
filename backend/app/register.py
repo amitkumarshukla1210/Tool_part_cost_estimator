@@ -3305,6 +3305,7 @@ def _design_copy(d: dict, rev: dict, designs: list) -> tuple[dict, dict, list]:
 def clear_design_cache() -> None:
     with _DESIGN_CACHE_LOCK:
         _DESIGN_CACHE.clear()
+    clear_file_cache()
 
 
 def tool_designs(part_id: int, key: str | None = None) -> tuple[dict, dict, list]:
@@ -3427,9 +3428,105 @@ def tool_part_file(part_id: int, item: str, kind: str, key: str | None = None) -
     raise RegisterError(f"Unknown tool part download '{kind}'.")
 
 
+# ---------- downloads of the tool design made once (drawing set, release pack …) ----------
+# The drawing set PDF and the release pack ZIP of a large mould took a long time on every click. A finished download
+# is kept until anything it depends on changes: the design fingerprint, the drawing settings (company, logo, drawn by =
+# the login user), and the date (the title block shows it). The release pack uses the drawing set already made, and
+# prepare_downloads() makes both in the background once the tool-design panel has loaded.
+_FILE_CACHE: OrderedDict = OrderedDict()
+_FILE_CACHE_LOCK = threading.Lock()
+_FILE_LOCKS: dict = {}
+FILE_CACHE_LIMIT = 8                     # downloads kept (a release pack of a large mould is a few MB)
+FILE_CACHE_MAX_BYTES = 64 * 1024 * 1024  # larger files are not kept
+
+
+def _download_stamp() -> str:
+    from datetime import date
+    from . import drawing_style
+    return json.dumps([drawing_style.settings(), _file_stamp(drawing_style.logo_path()), date.today().isoformat()],
+                      default=str, sort_keys=True)
+
+
+def _kept_file(part_id: int, name: tuple, build):
+    """build() once per state of the part (fingerprint) and of the drawing settings; requests for the same file wait for
+    the one being made instead of making their own."""
+    fp = _design_fingerprint(part_id)
+    ck = (part_id, name, fp, _download_stamp())
+    with _FILE_CACHE_LOCK:
+        lock = _FILE_LOCKS.setdefault((part_id, name), threading.Lock())
+    with lock:
+        with _FILE_CACHE_LOCK:
+            hit = _FILE_CACHE.get(ck)
+            if hit is not None:
+                _FILE_CACHE.move_to_end(ck)
+        if hit is not None:
+            return hit
+        value = build()
+        data = value[0] if isinstance(value, tuple) else value
+        if len(data) <= FILE_CACHE_MAX_BYTES and _design_fingerprint(part_id) == fp:
+            with _FILE_CACHE_LOCK:
+                _FILE_CACHE[ck] = value
+                while len(_FILE_CACHE) > FILE_CACHE_LIMIT:
+                    _FILE_CACHE.popitem(last=False)
+        return value
+
+
+def clear_file_cache() -> None:
+    with _FILE_CACHE_LOCK:
+        _FILE_CACHE.clear()
+
+
+def _drawing_set(part_id: int, d: dict, des: dict, stage: int, rev: dict) -> bytes:
+    """The drawing set PDF of one tool (with the notes it carries), made once for the drawing set download and the
+    release pack."""
+    from . import tool_drawings
+    return _kept_file(part_id, ("drawing_set", des["key"], stage, tuple(des.get("notes", []))),
+                      lambda: tool_drawings.design_pdf(d, des, stage, rev["rev"]))
+
+
 def tool_design_file(part_id: int, kind: str, key: str | None = None) -> tuple[bytes, str, str]:
     """(content, media type, file name) of a tool design download: zip (release pack), step (assembly), pdf (drawing
-    set) or png (iso picture)."""
+    set) or png (iso picture). Made once per state of the part (_kept_file)."""
+    return _kept_file(part_id, ("tool_design", kind, key), lambda: _tool_design_file_build(part_id, kind, key))
+
+
+_PREP_POOL = None
+_PREP_PENDING: set = set()
+
+
+def prepare_downloads(part_id: int, key: str | None = None) -> dict:
+    """Make the drawing set and the release pack in the background (one at a time), so the download is ready when
+    clicked. The browser asks for it after the tool-design panel has loaded, so it never slows the panel."""
+    global _PREP_POOL
+    from concurrent.futures import ThreadPoolExecutor
+    from . import auth
+    tool_designs(part_id, key)                   # the part exists and has a tool design (else the error is shown)
+    job = (part_id, key)
+    with _FILE_CACHE_LOCK:
+        if job in _PREP_PENDING:
+            return {"queued": False, "part_id": part_id}
+        _PREP_PENDING.add(job)
+        if _PREP_POOL is None:
+            _PREP_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dtc-downloads")
+    who = auth.current()
+
+    def work():
+        token = auth.set_current(who) if who else None
+        try:
+            tool_design_file(part_id, "pdf", key)
+            tool_design_file(part_id, "zip", key)
+        except Exception:                        # the download itself shows the error when clicked
+            pass
+        finally:
+            if token is not None:
+                auth.reset(token)
+            with _FILE_CACHE_LOCK:
+                _PREP_PENDING.discard(job)
+    _PREP_POOL.submit(work)
+    return {"queued": True, "part_id": part_id}
+
+
+def _tool_design_file_build(part_id: int, kind: str, key: str | None = None) -> tuple[bytes, str, str]:
     from . import machine_spec, render3d, tool_design, tool_drawings
     d, rev, designs = tool_designs(part_id, key)
     code = d["part_code"]
@@ -3448,7 +3545,8 @@ def tool_design_file(part_id: int, kind: str, key: str | None = None) -> tuple[b
         tag = f"_{tool_drawings._safe(key)}" if key else ""
         extra = {f"T{k:02d}_{tool_drawings._safe(des['name'])}/{code}_T{k:02d}_{tool_drawings._safe(des['key'])}_3D_viewer.html":
                  outputs3d.viewer_html(outputs3d.viewer_data(d, des, rev["rev"], prod.get(des["key"]))).encode("utf-8") for k, des in designs}
-        return tool_drawings.release_zip(d, designs, rev["rev"], extra), "application/zip", f"{code}_tool_design{tag}.zip"
+        pdfs = {k: _drawing_set(part_id, d, des, k, rev) for k, des in designs}
+        return tool_drawings.release_zip(d, designs, rev["rev"], extra, pdfs), "application/zip", f"{code}_tool_design{tag}.zip"
     k, des = designs[0]
     stem = f"{code}_T{k:02d}_{tool_drawings._safe(des['key'])}"
     if kind == "html":
@@ -3460,7 +3558,7 @@ def tool_design_file(part_id: int, kind: str, key: str | None = None) -> tuple[b
     if kind == "step":
         return tool_design.step_bytes(tool_design.assembly(des, stem)), "application/step", f"{stem}_assembly.step"
     if kind == "pdf":
-        return tool_drawings.design_pdf(d, des, k, rev["rev"]), "application/pdf", f"{stem}_drawing_set.pdf"
+        return _drawing_set(part_id, d, des, k, rev), "application/pdf", f"{stem}_drawing_set.pdf"
     if kind == "png":
         img = render3d.render(render3d.design_items(des, tool_design.COLORS), size=(900, 650))
         return render3d.png(img), "image/png", f"{stem}.png"

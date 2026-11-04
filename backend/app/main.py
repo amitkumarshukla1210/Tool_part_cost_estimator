@@ -1065,6 +1065,13 @@ def parts_tool_design_file(part_id: int, kind: str, die: Optional[str] = None):
     return Response(data, media_type=media, headers={"Content-Disposition": f'{disp}; filename="{name}"'})
 
 
+@app.get("/api/parts/{part_id}/tool-design/prepare")
+def parts_tool_design_prepare(part_id: int, die: Optional[str] = None):
+    """Make the drawing set and the release pack in the background, so the download is ready when clicked (GET: it changes
+    no data, so a viewer gets it too)."""
+    return _design_error(lambda: register.prepare_downloads(part_id, die))
+
+
 # ---------- toolmaker review of the tool design (roadmap stage 43) ----------
 
 @app.get("/api/parts/{part_id}/tool-review")
