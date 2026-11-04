@@ -78,3 +78,30 @@ def test_two_cavity_mould_drawing_set_builds_and_cuts_are_noted_on_their_part():
     des = register.tool_designs(pid)[2][0][1]
     notes = {c.name: c.notes for c in des["components"]}
     assert not any("Runner" in n for n in notes["Support plate"]) and not any("Runner" in n for n in notes["Bottom clamp plate"])
+
+
+def _pages(pdf: bytes) -> list[str]:
+    import pdfplumber
+    with pdfplumber.open(io.BytesIO(pdf)) as doc:
+        return [p.extract_text() or "" for p in doc.pages]
+
+
+def test_every_drawing_of_a_large_mould_is_one_sheet_and_the_hole_table_stays_on_it():
+    """A large PP mould: the B plate (48 holes), support and ejector retainer plates ran their hole table and title block on
+    to the next page (17 pages for 11 drawings). Now one sheet per drawing; every hole and the title block are on it."""
+    from backend.app import register
+    pid = add_part(project("DW1S"), "large_plastic_tub.step", "PP (polypropylene)", "injection_moulding", "DW1S-1")
+    r = client.get(f"/api/parts/{pid}/tool-design.pdf")
+    assert r.status_code == 200
+    des = register.tool_designs(pid)[2][0][1]
+    made = [c for c in des["components"] if c.kind == "made" and c.drawing != "none"]
+    pages = _pages(r.content)
+    assert len(pages) == 1 + len(made)
+    assert "TOOL ASSEMBLY" in pages[0] and f"1 / {len(pages)}" in pages[0]
+    for k, c in enumerate(made, start=2):
+        text = pages[k - 1]
+        assert f"{c.no} · {c.name}" in text and f"{k} / {len(pages)}" in text and "General" in text, c.name     # title block on it
+        if len(c.holes) > 22:                                                       # hole table under the views
+            assert all(f"H{i}" in text for i in range(1, len(c.holes) + 1)), c.name
+    assert max(len(c.holes) for c in made) > 22                                     # the case that overflowed is in it
+
