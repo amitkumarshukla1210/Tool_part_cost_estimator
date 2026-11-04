@@ -2,7 +2,7 @@
 
 Run from the repository root:
     uvicorn backend.app.main:app --reload
-then open http://127.0.0.1:8000 in a browser.
+then open http://127.0.0.1:8100 in a browser.
 """
 
 from __future__ import annotations

@@ -12,7 +12,7 @@ This file and the DTC_*.bat files live in the folder ABOVE the app (the "base fo
         venv\\                       the Python libraries (kept between updates, so no 200 MB download each time)
         dtc_settings.ini            port, GitHub, backup copy folder, ...
 
-    python dtc_manager.py start      backup once a day, then run the app on http://127.0.0.1:8000
+    python dtc_manager.py start      backup once a day, then run the app on http://127.0.0.1:8100
     python dtc_manager.py update     backup, new version (GitHub or a ZIP), merge master data, install
     python dtc_manager.py backup     backup now
     python dtc_manager.py restore    put a backup back (yours now is backed up first)
@@ -61,7 +61,7 @@ DEFAULT_SETTINGS = """\
 ; the app folder next to this file
 app_folder = Tool_part_cost_estimator
 ; the app runs on http://127.0.0.1:<port>
-port = 8000
+port = 8100
 ; where new versions come from
 github_repo = amitkumarshukla1210/Tool_part_cost_estimator
 branch = main
@@ -151,7 +151,7 @@ def app_env() -> dict:
 
 
 def port() -> int:
-    return int(cfg().get("port") or 8000)
+    return int(cfg().get("port") or 8100)
 
 
 def running(p: int | None = None) -> bool:

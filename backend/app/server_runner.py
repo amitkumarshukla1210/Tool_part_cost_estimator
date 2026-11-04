@@ -12,7 +12,7 @@ from .main import app
 
 
 async def run() -> None:
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=int(os.environ.get("DTC_PORT", "8000"))))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=int(os.environ.get("DTC_PORT", "8100"))))
 
     async def watch_shutdown() -> None:
         while not server.should_exit:

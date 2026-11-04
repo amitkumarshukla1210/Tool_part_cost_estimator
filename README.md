@@ -787,7 +787,7 @@ export DTC_ADMIN_PASSWORD='a long first password'                 # optional: cr
 export DATABASE_URL='postgresql+psycopg://user:password@dbhost/dtc'
 export DTC_STORAGE_FOLDER=/srv/dtc-files                          # shared folder for CAD files and thumbnails (or set it in Master data → Register settings)
 export DTC_COOKIE_SECURE=1                                        # when served over HTTPS
-uvicorn backend.app.main:app --host 0.0.0.0 --port 8000           # put an HTTPS reverse proxy (nginx, Caddy, IIS) in front
+uvicorn backend.app.main:app --host 0.0.0.0 --port 8100           # put an HTTPS reverse proxy (nginx, Caddy, IIS) in front
 ```
 
 - **Logins and roles**: everybody, including admins, logs in; the admin adds users and manages role defaults and per-user overrides on **Admin → Users, roles & permissions** (user ID, role, active, groups). **viewer** reads; **engineer** changes projects, parts, costs and master data; **approver** also approves rates; **admin** also manages users. The last admin cannot be removed. Admins can reset a password but cannot view one; passwords are stored as scrypt hashes, sessions expire after 12 hours,
@@ -923,7 +923,7 @@ python update.py                         # backup, then git pull
 
 There is no limit on the number of corrections; each one is a new pull request. With PostgreSQL (server mode) back up the database with `pg_dump` as well.
 
-## Install and update on Windows (ZIP download, local http://127.0.0.1:8000)
+## Install and update on Windows (ZIP download, local http://127.0.0.1:8100)
 
 The `windows/` folder holds an update kit: `dtc_manager.py` and six double-click files. They live in the folder **above**
 the app (the *base folder*, e.g. `D:\DTC\`). Your data is kept **outside** the app folder, so the app folder can be
@@ -947,7 +947,7 @@ D:\DTC\                           base folder (any name)
 
 | Double-click | What it does |
 |---|---|
-| `DTC_Start.bat` | Backup if the last one is older than a day, then the app on **http://127.0.0.1:8000** (the browser opens). Keep the window open; close it to stop the app. |
+| `DTC_Start.bat` | Backup if the last one is older than a day, then the app on **http://127.0.0.1:8100** (the browser opens). Keep the window open; close it to stop the app. |
 | `DTC_Update.bat` | 1) checks the app is stopped, 2) **backup**, 3) new version: **download from GitHub** or **a ZIP you downloaded**, 4) installs the libraries and test-starts the new version: if that fails, nothing is changed, 5) old app folder → `DTC_Old\`, new one in place, 6) **merges the new master data into yours** (below), 7) writes a report to `DTC_Data\logs\`. Each update uses a fresh `_dtc_new_*` staging folder, so a leftover `_dtc_new` from an older update cannot block it; stale staging folders can be deleted later after closing Explorer or other programs using them. |
 | `DTC_Backup.bat` | Backup now (`DTC_Backups\dtc-backup-<time>.zip`, plus the copy folder if set). |
 | `DTC_Restore.bat` | Lists the backups; pick one and choose: everything, only projects + CAD files, or only master data. What is there now is backed up first. Backups made by `backup.py` work too. |
@@ -976,7 +976,7 @@ version shipped: `backend/app/shipped_rows.json` holds a fingerprint of every ro
 (`keep_backups`). Set `backup_copy_to` in `dtc_settings.ini` to a OneDrive / Google Drive / network folder so every backup also leaves the laptop.
 To move to a new laptop: copy the base folder, or set up the kit there and restore the newest backup with `DTC_Restore.bat`.
 
-**Settings (`dtc_settings.ini`, created on first use).** `port` (8000), `github_repo` and `branch` (main), `github_token` (only if the repository is
+**Settings (`dtc_settings.ini`, created on first use).** `port` (8100), `github_repo` and `branch` (main), `github_token` (only if the repository is
 private: a fine-grained token for this repository with *Contents: read-only*; otherwise download the ZIP in the browser and choose 2), `backup_copy_to`,
 `keep_backups`, `auto_backup_days`, `storage_folder` (empty = `DTC_Data\storage`), `python` (the Python that creates `venv\`; CadQuery needs 3.10–3.12,
 the kit prefers 3.12 → 3.11 → 3.10 through the `py` launcher).
@@ -1508,7 +1508,7 @@ On Windows, use *Command Prompt* or *PowerShell*.
    ```bash
    uvicorn backend.app.main:app --reload
    ```
-6. **Open** http://127.0.0.1:8000 in your browser (the tab shows "Design to Cost — Part Cost Estimator"). Upload a STEP file and click **Analyse part**.
+6. **Open** http://127.0.0.1:8100 in your browser (the tab shows "Design to Cost — Part Cost Estimator"). Upload a STEP file and click **Analyse part**.
    Sample parts to try are in the `samples/` folder.
 7. To stop the server, press `Ctrl + C` in the terminal.
 
@@ -1595,7 +1595,7 @@ them first), `GET /api/parts/{id}/tool-cost/trace?version=`, `…/export.xlsx`, 
 Example checklist: `GET /api/examples`, `GET /api/examples/export.xlsx`, `POST /api/examples/rate` (`rate_id`, optional `value`)
 and `POST /api/examples/row` (`set`, `table`, `key`, optional `value`).
 `…/download` and `…/upload` move them to and from Excel.
-Interactive API docs are at http://127.0.0.1:8000/docs while the server runs.
+Interactive API docs are at http://127.0.0.1:8100/docs while the server runs.
 
 ---
 
