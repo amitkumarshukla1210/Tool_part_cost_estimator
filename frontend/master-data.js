@@ -33,6 +33,8 @@ const DATASETS = {
           { key: "recommended", label: "Recommended grade of its type", kind: "yesno" },
           { key: "density_g_cm3", label: "Density (g/cm³)", kind: "number" },
           { key: "notes", label: "Notes", kind: "wide" },
+          { key: "scrap_reuse_pct", label: "Scrap used again (%) · blank = Parameters", kind: "optnumber" },
+          { key: "scrap_rate_pct_of_rm", label: "Scrap rate (% of RM rate) · blank = Parameters", kind: "optnumber" },
         ],
       },
     },
@@ -181,6 +183,7 @@ function cell(col, row, i) {
     case "bool":
       return `<label class="flag"><input type="checkbox" ${attrs} ${v ? "checked" : ""} />${v ? (col.key === "is_example" ? "Example" : "Yes") : ""}</label>`;
     case "number":
+    case "optnumber":                         // a number that may stay blank (blank = take the default)
       return `<input type="number" step="any" ${attrs} value="${escapeHtml(display(v))}" />`;
     case "formula":
       return `<input type="text" class="formula" spellcheck="false" ${attrs} value="${escapeHtml(display(v))}" />`;
@@ -247,7 +250,7 @@ function edited(e) {
   const kind = cols().find((c) => c.key === k).kind;
   const v = e.target.value;
   if (kind === "bool") row[k] = e.target.checked;
-  else row[k] = kind === "number" && v !== "" ? Number(v) : v;
+  else row[k] = (kind === "number" || kind === "optnumber") && v !== "" ? Number(v) : v;
   // A row you have changed is no longer a placeholder (tick it again if it still is).
   if (k !== "is_example" && "is_example" in row && row.is_example) {
     row.is_example = false;

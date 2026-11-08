@@ -226,9 +226,14 @@ function rmBlock(p) {
       <tr><td>Material yield</td><td class="calc num">${amount("calc:material_yield_pct", "%", 1)}</td></tr>
       ${has("in:blanks_per_sheet") ? `<tr><td>Blanks per sheet</td><td class="calc num">${amount("in:blanks_per_sheet", "pcs", 0)}</td></tr>` : ""}
       ${has("calc:stock_volume_cm3") ? `<tr><td>Bar stock${tr.stock ? ` (${esc(tr.stock.label)})` : ""}</td><td class="calc num">${amount("calc:stock_volume_cm3", "cm³", 1)}</td></tr>` : ""}
+      ${has("calc:virgin_g") ? `<tr><td>Scrap used again (${fmt(node("in:scrap_reuse_pct").value, 1)} % of the scrap)</td><td class="calc num">${amount("calc:reused_g", "g")}</td></tr>
+      <tr><td>Virgin material bought per part</td><td class="calc num">${amount("calc:virgin_g", "g")}</td></tr>
+      <tr><td>Scrap left to sell</td><td class="calc num">${amount("calc:sold_g", "g")}</td></tr>` : ""}
       <tr><td>Material rate (${esc(tr.country)}, ${esc(tr.as_of)})</td><td class="calc num">${amount("in:material_rate", cur + "/kg")}</td></tr>
-      <tr><td>RM cost (material used × rate)</td><td class="calc num">${amount("calc:rm_cost", cur)}</td></tr>
-      <tr><td>Scrap credit</td><td class="calc num">${amount("calc:scrap_credit", cur)}</td></tr>
+      <tr><td>RM cost (${has("calc:virgin_g") ? "virgin" : "material used"} × rate)</td><td class="calc num">${amount("calc:rm_cost", cur)}</td></tr>
+      ${has("calc:scrap_value") ? `<tr><td>Scrap selling rate (${node("in:scrap_rate_pct_of_rm").value > 0
+        ? `${fmt(node("in:scrap_rate_pct_of_rm").value, 1)} % of the RM rate` : "fixed rate"})</td><td class="calc num">${amount("calc:scrap_value", cur + "/kg")}</td></tr>` : ""}
+      <tr><td>Scrap credit${has("calc:sold_g") ? " (scrap sold)" : ""}</td><td class="calc num">${amount("calc:scrap_credit", cur)}</td></tr>
       <tr class="total"><td>Net RM cost per part · version ${v.version}${example}</td>
         <td class="calc num">${tv(tr.root, `${fmt(v.net_rm_cost, 2)} ${esc(cur)}`)}${cur !== "INR" ? `<div class="note">${fmt(v.net_rm_cost_inr, 2)} INR</div>` : ""}</td></tr>
     </tbody></table></div>
