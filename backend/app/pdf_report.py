@@ -323,8 +323,9 @@ def piece_cost_pdf(tr: dict, part: dict, steps: list, inputs: list, rts: list, k
                        + f" · {date.today().isoformat()}", note)]
     if tr["is_example"]:
         story += [Spacer(1, 2 * mm), _example_banner(ss)]
-    story += [Paragraph("Result", h2), _table([["", tr["currency"], "INR"], [result_label, num(tr["value"]), num(tr["value_inr"])]],
-                                              theme, [80 * mm, 40 * mm, 40 * mm]),
+    result = ([["", tr["currency"]], [result_label, num(tr["value"])]] if tr["currency"] == "INR"     # not "INR | INR"
+              else [["", tr["currency"], "INR"], [result_label, num(tr["value"]), num(tr["value_inr"])]])
+    story += [Paragraph("Result", h2), _table(result, theme, [80 * mm, 40 * mm, 40 * mm][:len(result[0])]),
               Paragraph("Calculation steps", h2),
               _table([["Step", "Formula", "Value", "Unit"]] + [[wrap(a), wrap(b), num(c), dd] for a, b, c, dd in steps], theme,
                      [60 * mm, 130 * mm, 35 * mm, 25 * mm],
