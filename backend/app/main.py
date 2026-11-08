@@ -1357,6 +1357,36 @@ def parts_country_comparison_pdf(part_id: int, countries: Optional[str] = None, 
                     headers={"Content-Disposition": f'attachment; filename="country_comparison_{part_id}.pdf"'})
 
 
+def _versus(part_id: int, mode: str, use_fta: bool) -> dict:
+    from . import landed
+    try:
+        return landed.versus(part_id, mode, use_fta)
+    except (ValueError, register.RegisterError) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/vs-country")
+def parts_vs_country(part_id: int, mode: str = "sea", use_fta: bool = True):
+    """Every line of the tool and part cost next to the same line in the comparison country (Register settings
+    compare_country, CN unless changed), in its currency and INR, and both landed at the factory (roadmap stage 48)."""
+    return _versus(part_id, mode, use_fta)
+
+
+@app.get("/api/parts/{part_id}/vs-country/export.{kind}")
+def parts_vs_country_export(part_id: int, kind: str, mode: str = "sea", use_fta: bool = True):
+    from . import landed
+    if kind not in ("xlsx", "pdf"):
+        raise HTTPException(404, "xlsx or pdf")
+    v = _versus(part_id, mode, use_fta)
+    if v["error"]:
+        raise HTTPException(400, f"{v['name']}: {v['error']}")
+    name = landed.versus_filename(v, kind)
+    if kind == "xlsx":
+        return _xlsx(landed.versus_excel(v, {}), name)
+    return Response(landed.versus_pdf(v, {}, register.part_detail(part_id, with_rm=False)), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
 @app.get("/api/parts/{part_id}/simulation")
 def parts_simulation(part_id: int):
     """Simulation & analysis v1: maps, cycle time, clamp force, machine, corrections required (roadmap stage 6)."""

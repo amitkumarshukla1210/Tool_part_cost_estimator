@@ -123,8 +123,14 @@ async function openPart(id) {
     p.piecePending = false;
     p.piece = r;
     const box = $("pieceBox");
-    if (part === p && box) box.innerHTML = pieceBlock(p);
+    if (part === p && box) { box.innerHTML = pieceBlock(p); applyVersus(p); }
   }) : Promise.resolve();
+  // stage 48: every tool / part cost line next to the comparison country (China unless changed); fills in when ready
+  p.vs = null;
+  if (wantPiece) api(`/api/parts/${id}/vs-country`).catch((err) => ({ problem: err.message })).then((r) => {
+    p.vs = r;
+    if (part === p) applyVersus(p);
+  });
   return p.piecePromise;
 }
 
@@ -359,15 +365,15 @@ function toolBlock(p) {
     </tbody></table></div>
     ${tr.dies ? diesTable(tr) : ""}
     <h4 class="block-title">Cost build-up</h4>
-    <div class="table-wrap"><table class="cost-table"><tbody>
+    <div class="table-wrap"><table class="cost-table" data-vsblock="tool"><tbody>
       <tr><td>Cavities · tools over the programme</td><td class="calc num">${tv("v:cavities", tr.cavities)} · ${tv("tools_count", tr.tools_count)}</td></tr>
       <tr><td>Mould base · tool weight</td><td class="calc num">${esc(b.series)} ${esc(b.size_code)} · ${tv("tool_weight", `${fmt(tr.nodes.tool_weight.value, 0)} kg`)}</td></tr>
       <tr><td>Try-out machine (clamp force)</td><td class="calc num">${tr.trial.machine ? tv("trial:machine", esc(tr.trial.machine.machine_id)) : "—"}
         (${tv(tr.trial.force_node, `${fmt(tr.trial.force_t, 0)} t`)})</td></tr>
-      ${tr.groups.map((g) => `<tr><td>${esc(g.label)}</td><td class="calc num">${money(g.node, cur)}</td></tr>`).join("")}
-      <tr><td>Tool steel</td><td class="calc num">${money(tr.totals.material_cost, cur)}</td></tr>
-      <tr><td>Mould base &amp; standard parts</td><td class="calc num">${money(tr.totals.bought_out_cost, cur)}</td></tr>
-      ${steps.map((s) => `<tr class="${s.is_result || s.name === "tool_capex" ? "total" : ""}"><td>${esc(s.n.label)}</td>
+      ${tr.groups.map((g) => `<tr data-vsnode="${esc(g.node)}"><td>${esc(g.label)}</td><td class="calc num">${money(g.node, cur)}</td></tr>`).join("")}
+      <tr data-vsnode="${esc(tr.totals.material_cost)}"><td>Tool steel</td><td class="calc num">${money(tr.totals.material_cost, cur)}</td></tr>
+      <tr data-vsnode="${esc(tr.totals.bought_out_cost)}"><td>Mould base &amp; standard parts</td><td class="calc num">${money(tr.totals.bought_out_cost, cur)}</td></tr>
+      ${steps.map((s) => `<tr data-vsnode="${esc(s.node)}" class="${s.is_result || s.name === "tool_capex" ? "total" : ""}"><td>${esc(s.n.label)}</td>
         <td class="calc num">${money(s.node, cur)}${s.is_result ? inrNote(tr.value_inr) : ""}${s.name === "tool_capex" ? inrNote(tr.capex_inr) : ""}</td></tr>`).join("")}
     </tbody></table></div>
     <p class="note">${stored ? "" : "<b>Live preview, not stored yet.</b> "}Tool country ${esc(tr.country)} · rates of ${esc(tr.as_of)}. Click any value for its formula,
@@ -569,7 +575,51 @@ function renderPart() {
     <div class="table-wrap"><table class="cost-table"><thead><tr><th>When</th><th>Who</th><th>What</th><th>Details</th></tr></thead><tbody>
       ${p.history.map((h) => `<tr><td>${esc(h.at.slice(0, 16).replace("T", " "))}</td><td>${esc(h.user)}</td><td>${esc(h.action.replace("_", " "))}</td>
         <td>${historyText(h.detail)}</td></tr>`).join("")}</tbody></table></div>`;
+  applyVersus(part);
 }
+
+// India vs the comparison country (stage 48): two columns added to the tool and part cost tables, landed rows under them
+function applyVersus(p) {
+  const v = p.vs;
+  if (!v) return;
+  const f = (x) => (x == null ? "—" : fmt(x, Math.abs(x) >= 1000 ? 0 : 4));
+  for (const block of ["tool", "piece"]) {
+    const table = document.querySelector(`table[data-vsblock="${block}"]`);
+    if (!table || table.dataset.vsDone) continue;
+    table.dataset.vsDone = "1";
+    const body = table.tBodies[0];
+    if (v.problem || v.error || !v.rows) {
+      (table.closest(".table-wrap") || table).insertAdjacentHTML("afterend", `<p class="note">${esc(v.name || "Comparison country")}: ${esc(v.problem || v.error || "not available")}</p>`);
+      continue;
+    }
+    const rows = Object.fromEntries(v.rows[block].map((r) => [r.node, r]));
+    const cell = (r) => r && r.local != null
+      ? `<td class="calc num"><button type="button" class="tv" data-vstrace="${block}" data-node="${esc(r.node)}">${f(r.local)}</button></td>
+         <td class="calc num">${r.inr != null ? f(r.inr) : `<span class="note">${esc(r.unit)}</span>`}</td>` : "<td></td><td></td>";
+    body.insertAdjacentHTML("afterbegin", `<tr class="vs-head"><th>Line</th><th class="num">${esc(v.home_name)}</th>
+      <th class="num">${esc(v.name)} (${esc(v.currency)})</th><th class="num">${esc(v.name)} (INR)</th></tr>`);
+    for (const tr of body.rows) {
+      if (tr.classList.contains("vs-head")) continue;
+      tr.insertAdjacentHTML("beforeend", cell(rows[tr.dataset.vsnode]));
+    }
+    body.insertAdjacentHTML("beforeend", `<tr class="vs-head"><th colspan="4">Landed at the factory (${v.mode === "sea" ? "sea" : "air"} freight; IGST shown, its credit taken)</th></tr>`
+      + v.rows[block].filter((r) => r.landed).map((r) => `<tr class="${r.node === "landed:landed" ? "total" : ""}"><td>${esc(r.label)}</td>
+        <td class="calc num">${f(r.home)}</td><td class="calc num">${f(r.local)}</td><td class="calc num">${f(r.inr)}</td></tr>`).join(""));
+    const save = v.saving_inr ? v.saving_inr[block] : null;
+    (table.closest(".table-wrap") || table).insertAdjacentHTML("afterend", `<p class="note vs-note">${v.is_example ? '<span class="badge badge-example">EXAMPLE</span> ' : ""}
+      <b>${esc(v.name)}</b> with its approved rates of ${esc(v.as_of)} · 1 ${esc(v.currency)} = ${fmt(v.fx_inr_per_unit, 4)} INR${save != null
+        ? ` · ${esc(v.name)} landed is <b>${f(Math.abs(save))} INR ${save > 0 ? "dearer" : "cheaper"}</b> than ${esc(v.home_name)}` : ""}.
+      Click a ${esc(v.name)} value for its formula and rates. Comparison country: Part register setup → Register settings <code>compare_country</code>.
+      <a class="link" href="/api/parts/${p.id}/vs-country/export.xlsx">⬇ ${esc(v.home_name)} vs ${esc(v.name)} (Excel)</a> ·
+      <a class="link" href="/api/parts/${p.id}/vs-country/export.pdf">PDF</a></p>`);
+  }
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-vstrace]");
+  if (!b || !part?.vs) return;
+  const trace = b.dataset.vstrace === "tool" ? part.vs.tool_trace : part.vs.piece_trace;
+  if (trace && trace.nodes[b.dataset.node]) window.TracePanel.open(trace, b.dataset.node);
+});
 
 // Saved files (stage 47): asked for when the block is opened, so the panel never waits for it
 async function savedFilesLoad() {
@@ -1120,8 +1170,8 @@ function pieceBlock(p) {
   const v = (n) => `<span class="clickable calc" data-piecetrace="${esc(n)}">${fmt(tr.nodes[n].value, 4)}</span>`;
   html += `${tr.is_example ? '<p class="note"><span class="badge badge-example">EXAMPLE</span> Uses example rates – not for negotiation.</p>' : ""}
     ${s.outdated ? `<p class="note"><b>${esc(s.outdated)}</b></p>` : ""}
-    <div class="table-wrap"><table class="cost-table"><tbody>
-      ${tr.steps.map((x) => `<tr class="${x.is_result ? "total" : ""}"><td>${esc(tr.nodes[x.node].label)}</td><td class="num">${v(x.node)} ${esc(tr.nodes[x.node].unit)}</td></tr>`).join("")}
+    <div class="table-wrap"><table class="cost-table" data-vsblock="piece"><tbody>
+      ${tr.steps.map((x) => `<tr data-vsnode="${esc(x.node)}" class="${x.is_result ? "total" : ""}"><td>${esc(tr.nodes[x.node].label)}</td><td class="num">${v(x.node)} ${esc(tr.nodes[x.node].unit)}</td></tr>`).join("")}
       <tr class="total"><td>Part cost per piece (INR)</td><td class="num">${v("result:inr")}</td></tr></tbody></table></div>
     <p class="note">Machine ${esc(tr.machine)} · operator grade ${esc(tr.grade)} · RM version ${tr.rm_version} · tool version ${tr.tool_version} ·
       ${esc(tr.country)} · ${esc(tr.as_of)}. Click any value for its formula, inputs and rate versions.

@@ -261,6 +261,8 @@ def run(part_id: int, country: str | None = None) -> dict:
             "revision": {"id": rev_id, "rev": d["rev"]}, "rm_version": rm["version"], "tool_version": tool["version"],
             "steps": [{"name": r["name"], "node": f"calc:{r['name']}", "is_result": bool(r["is_result"])} for r in order],
             "inputs": [{"variable": k, "node": v} for k, v in names.items()]}
+    if "trace" in tool:                          # country run: the tool worked out in that country (stage 48 line by line)
+        out["_tool_trace"] = tool_tr
     out["tool_summary"] = {"value": tool_tr["value"], "value_inr": tool_tr["value_inr"], "capex_inr": tool_tr.get("capex_inr"),
                            "currency": tool_tr["currency"], "weight_kg": tool_tr["nodes"]["tool_weight"]["value"]
                            if "tool_weight" in tool_tr["nodes"] else 0.0}
