@@ -1518,6 +1518,24 @@ the names follow it (e.g. `_India_vs_Vietnam`). The China rates, duties and frei
 `requirements.txt`. It is now, and `DTC_Update.bat` installs it. A test checks that every PDF, Excel and ZIP of a part carries the logo
 and *Design to Cost*, and another that every library the code imports is in `requirements.txt`.
 
+## Scrap used again and scrap rate as % of the RM price (stage 49)
+
+For **plastic, die casting, foundry, EPS and blow moulding** (sheet metal and machined parts are as before) the RM cost now follows
+how the shop floor works. Scrap = gross − net weight (runner, sprue, biscuit, overflows, gating). A share of it is used again in
+production (regrind / remelt), so only the **virgin** material is bought. The scrap left is **sold** at the scrap rate:
+
+    scrap used again   = scrap × scrap_reuse_pct / 100
+    virgin material    = material used (gross + purge / melt loss) − scrap used again        → RM cost = virgin kg × RM rate
+    scrap left to sell = scrap − scrap used again                                             → scrap credit = − kg × scrap rate
+    scrap rate         = RM rate × scrap_rate_pct_of_rm / 100 when that % is above 0, else the fixed scrap rate (rate library)
+
+Example: gross 2 kg, net 1.4 kg → scrap 0.6 kg; 20 % used again = 0.12 kg → virgin 1.88 kg; 0.48 kg sold.
+
+Both % come from the **part** (RM inputs, traced as your input), else the **material** (Master data → Materials, new columns
+`scrap_reuse_pct`, `scrap_rate_pct_of_rm`; blank = not set), else the **family** (Master data → Parameters). The starting values are
+**0 % and 0**, so RM costs stay as before until you enter your values. The new steps are Cost formula rows (`reused_g`, `virgin_g`,
+`sold_g`, `scrap_value`) and every step is traced. Your own edited formula rows are kept on update.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:
