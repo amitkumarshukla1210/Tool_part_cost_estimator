@@ -537,6 +537,9 @@ function renderPart() {
     ${insertsBlock(p)}
     ${mouldedIntoBlock(p)}
 
+    <details class="card" id="sfBox"><summary><b>Saved files</b> · every file made for this part, kept with its revisions
+      (opens at once, also after a restart; made again only when its data changed)</summary><div id="sfOut"></div></details>
+
     <h3 class="block-title">Revisions</h3>
     <div class="table-wrap"><table class="cost-table">
       <thead><tr><th>Compare</th><th>Rev</th><th>File</th><th>What changed</th><th>Source</th><th class="num">Volume (cm³)</th><th>By / when</th></tr></thead><tbody>
@@ -567,6 +570,27 @@ function renderPart() {
       ${p.history.map((h) => `<tr><td>${esc(h.at.slice(0, 16).replace("T", " "))}</td><td>${esc(h.user)}</td><td>${esc(h.action.replace("_", " "))}</td>
         <td>${historyText(h.detail)}</td></tr>`).join("")}</tbody></table></div>`;
 }
+
+// Saved files (stage 47): asked for when the block is opened, so the panel never waits for it
+async function savedFilesLoad() {
+  const out = $("sfOut");
+  if (!out) return;
+  out.innerHTML = '<p class="note">Loading…</p>';
+  try {
+    const r = await api(`/api/parts/${part.id}/saved-files`);
+    const kb = (b) => (b >= 1048576 ? `${fmt(b / 1048576, 1)} MB` : `${fmt(b / 1024, 0)} kB`);
+    out.innerHTML = r.files.length ? `<p class="note">${r.files.length} file(s), ${kb(r.total_bytes)} with all revisions. <b>Out of date</b> = the data changed
+      after it was made: the next revision is made when you download it again. Earlier revisions stay here.</p>
+      <div class="table-wrap"><table class="cost-table"><thead><tr><th>File</th><th>Rev</th><th>State</th><th>What changed</th><th>By / when</th><th class="num">Size</th></tr></thead><tbody>
+      ${r.files.map((f) => f.revisions.map((v, i) => `<tr${i ? ' class="muted"' : ""}><td>${i ? "" : `<b>${esc(f.label)}</b><br/>`}
+          <a class="link" href="/api/parts/${part.id}/saved-files/${v.id}">⬇ ${esc(v.filename)}</a></td><td>${v.rev_no}</td>
+        <td>${i ? '<span class="note">earlier</span>' : v.current ? '<span class="badge status">up to date</span>' : '<span class="badge missing">out of date</span>'}</td>
+        <td>${esc(v.changed)}</td><td>${esc(v.created_by)} · ${esc(String(v.created_at).slice(0, 16).replace("T", " "))}</td>
+        <td class="num">${kb(v.size_bytes)}</td></tr>`).join("")).join("")}</tbody></table></div>`
+      : '<p class="note">No file made yet: every drawing, tool design, cost sheet, report or video you download is saved here.</p>';
+  } catch (err) { out.innerHTML = `<p class="status error">${esc(err.message)}</p>`; }
+}
+document.addEventListener("toggle", (e) => { if (e.target.id === "sfBox" && e.target.open) savedFilesLoad(); }, true);
 
 function historyText(d) {
   return Object.entries(d || {}).map(([k, v]) =>

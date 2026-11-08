@@ -428,6 +428,28 @@ tool_fea_runs = Table(
     Index("ix_tool_fea_runs_part", "part_id"),
 )
 
+# Saved files (roadmap stage 47): every file made for a part (drawings, tool design, release pack, cost sheets, simulation
+# reports and videos …) is kept with a revision number. The latest revision is handed out again while the data it was made
+# from has not changed (state_hash); after a change the next revision is made when asked for, the earlier ones stay.
+saved_files = Table(
+    "saved_files", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),
+    Column("file_key", String(400), nullable=False),     # the download path after /api/parts/{id}/ with its query
+    Column("rev_no", Integer, nullable=False),
+    Column("filename", String(300), default=""),
+    Column("media_type", String(120), default=""),
+    Column("disposition", String(20), default="attachment"),
+    Column("file_id", ForeignKey("files.id"), nullable=False),
+    Column("size_bytes", Integer, default=0),
+    Column("state_hash", String(64), nullable=False),
+    Column("state", JSON),                               # hash of each input group, to say what changed
+    Column("changed", String(500), default=""),
+    Column("created_by", String(100), default=""),
+    Column("created_at", DateTime, default=now),
+    Index("ix_saved_files_part_key", "part_id", "file_key"),
+)
+
 # Simulation runs saved with their reports (roadmap stage 39): flow simulation, analysis video, attached reports of other programs.
 sim_runs = Table(
     "sim_runs", meta,

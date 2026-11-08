@@ -2354,7 +2354,12 @@ def _simulate(part_id: int):
         if key in _SIMULATION_CACHE:                     # kept for the last parts opened, not only the last one
             _SIMULATION_CACHE.move_to_end(key)
             return _SIMULATION_CACHE[key]
-        value = calculate()
+        from . import saved_files
+        value = saved_files.disk_get("simulation", key)          # stage 47: kept on disk across restarts
+        if value is None:
+            value = calculate()
+            if _simulation_key(part_id) == key:
+                saved_files.disk_put("simulation", key, value)
         if _simulation_key(part_id) == key:
             _SIMULATION_CACHE[key] = value
             while len(_SIMULATION_CACHE) > _SIMULATION_CACHE_LIMIT:
@@ -3326,7 +3331,12 @@ def tool_designs(part_id: int, key: str | None = None) -> tuple[dict, dict, list
         if full and any(des["key"] == key for _, des in full[2]):
             d, rev, designs = full
             return _design_copy(d, rev, [(k, des) for k, des in designs if des["key"] == key])
-        value = _tool_designs_build(part_id, key)
+        from . import saved_files
+        value = saved_files.disk_get("tool_design", ck)          # stage 47: kept on disk, so a restart does not design again
+        if value is None:
+            value = _tool_designs_build(part_id, key)
+            if _design_fingerprint(part_id) == fp:
+                saved_files.disk_put("tool_design", ck, value)
         if _design_fingerprint(part_id) == fp:       # nothing changed while designing: keep it
             with _DESIGN_CACHE_LOCK:
                 _DESIGN_CACHE[ck] = value
