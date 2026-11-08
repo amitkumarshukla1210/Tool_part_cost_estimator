@@ -1475,6 +1475,49 @@ cavity), mapped back to the part model, and the designed gate size: the shear ra
 (Flow materials `max_shear_1_s`), and when the gate freezes against `gate_freeze_share` × the part cooling time (plastic). Both give a
 correction when they fail, on the screen and in the PDF. Choose *found by the solver* or type a gate point for the solver's own gate.
 
+## Saved files with revisions (stage 47)
+
+Every file the software makes for a part is **saved in the database** the first time it is made: drawings, the tool design (picture,
+3D viewer, STEP, STL, drawing set, release pack), RM / part / tool cost sheets, country comparison and *India vs China*, simulation
+reports and videos, PO pack, production data, drawing data and the rest. Asked for again, the saved file comes back at once, **also
+after you close and open the app**, while the data it was made from has not changed. The bytes are in the storage folder, so
+`DTC_Backup.bat` backs them up and `DTC_Restore.bat` brings them back. This works for every part type: plastic, die casting, foundry,
+sheet metal, EPS, blow moulding and machined.
+
+- **When the data changes**, the saved file is marked **out of date**. The next revision is made when you open or download it again,
+  and saved next to the earlier ones. A change of the part, its project, revisions, tool cost, inserts, drawing data, review, cavities,
+  machine, mould systems, simulation runs, master data / rates, drawing settings (logo, company, checked / approved by) or the
+  software version all count. Each group is hashed on its own, so every revision says **what changed**.
+- **Part panel → Saved files**: every file with its revisions (newest first), *up to date* / *out of date*, what changed, by whom and
+  when, and size. Every revision can still be downloaded (the file name gets `_rev<n>`).
+- **The slow calculations behind the panels** (3D tool design, simulation) are kept on disk too (`storage/kept`), so after a restart
+  the panel opens without designing or simulating again. A software update makes them once more (the kept ones belong to the old
+  version).
+- The saved-file step runs inside the login and tool-group checks and outside the logo stamp, so a saved file carries the logo and a
+  user only gets files of his tool groups. Query parameters a page adds only to get a fresh picture (`t`) do not make new files.
+- API: `GET /api/parts/{id}/saved-files`, `GET /api/parts/{id}/saved-files/{rev id}`; every saved download answers with the header
+  `X-DTC-Saved: rev n …`.
+
+## India vs China on every tool and part cost line (stage 48)
+
+The **Tool cost** and **Part cost** tables of the part panel get two more columns: the same line worked out in the **comparison
+country** (Part register setup → Register settings `compare_country`, **CN** unless you change it; any code of Master data → Countries
+other than IN), in its currency (**CNY**) and in **INR** (approved forex). The values come from the same RM, tool-cost and part-cost
+engines as India, with that country's approved rates; nothing new is calculated. Click a China value for its formula, inputs and rates.
+
+Under each table are the **landed rows** for India and China: ex-works, freight (sea / air per kg), insurance, CIF, BCD (by HS code and
+origin, FTA rate when available), SWS, **IGST shown with its credit taken** (Parameters `igst_claimable`), clearance, inland transport,
+and the **landed cost at the factory**. These are the same rules and approved `duty`, `freight` and `import` rates as the country
+comparison (stage 11). A note says how much China landed is dearer or cheaper than India.
+
+Downloads: **⬇ India vs China (Excel / PDF)** under the tables, `<part>_cost_India_vs_China.xlsx / .pdf`, with a tool cost sheet, a part
+cost sheet (India | unit | China CNY | China INR per line, then the landed rows) and the rates used. With another comparison country
+the names follow it (e.g. `_India_vs_Vietnam`). The China rates, duties and freight are EXAMPLE values until you replace them.
+
+**Logo and company name**: PDFs had no logo on a fresh Windows install, because the stamp needs `pypdf`, which was not in
+`requirements.txt`. It is now, and `DTC_Update.bat` installs it. A test checks that every PDF, Excel and ZIP of a part carries the logo
+and *Design to Cost*, and another that every library the code imports is in `requirements.txt`.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:
