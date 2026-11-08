@@ -78,3 +78,60 @@ def test_two_cavity_mould_drawing_set_builds_and_cuts_are_noted_on_their_part():
     des = register.tool_designs(pid)[2][0][1]
     notes = {c.name: c.notes for c in des["components"]}
     assert not any("Runner" in n for n in notes["Support plate"]) and not any("Runner" in n for n in notes["Bottom clamp plate"])
+
+
+def _pages(pdf: bytes) -> list[str]:
+    import pdfplumber
+    with pdfplumber.open(io.BytesIO(pdf)) as doc:
+        return [p.extract_text() or "" for p in doc.pages]
+
+
+def test_every_drawing_of_a_large_mould_is_one_sheet_and_the_hole_table_stays_on_it():
+    """A large PP mould: the B plate (48 holes), support and ejector retainer plates ran their hole table and title block on
+    to the next page (17 pages for 11 drawings). Now one sheet per drawing; every hole and the title block are on it."""
+    from backend.app import register
+    pid = add_part(project("DW1S"), "large_plastic_tub.step", "PP (polypropylene)", "injection_moulding", "DW1S-1")
+    r = client.get(f"/api/parts/{pid}/tool-design.pdf")
+    assert r.status_code == 200
+    des = register.tool_designs(pid)[2][0][1]
+    made = [c for c in des["components"] if c.kind == "made" and c.drawing != "none"]
+    pages = _pages(r.content)
+    assert len(pages) == 1 + len(made)
+    assert "TOOL ASSEMBLY" in pages[0] and f"1 / {len(pages)}" in pages[0]
+    for k, c in enumerate(made, start=2):
+        text = pages[k - 1]
+        assert f"{c.no} · {c.name}" in text and f"{k} / {len(pages)}" in text and "General" in text, c.name     # title block on it
+        if len(c.holes) > 22:                                                       # hole table under the views
+            assert all(f"H{i}" in text for i in range(1, len(c.holes) + 1)), c.name
+    assert max(len(c.holes) for c in made) > 22                                     # the case that overflowed is in it
+
+
+def test_drawing_set_and_release_pack_are_made_once_and_the_pack_reuses_the_drawing_set(monkeypatch):
+    from backend.app import drawing_style, register, tool_drawings
+    pid = add_part(project("DW1C"), "plastic_cover.step", "ABS", "injection_moulding", "DW1C-1")
+    made = []
+    pdf = tool_drawings.design_pdf
+    monkeypatch.setattr(tool_drawings, "design_pdf", lambda *a, **k: made.append(1) or pdf(*a, **k))
+    register.clear_design_cache()
+    first = client.get(f"/api/parts/{pid}/tool-design.pdf").content
+    assert client.get(f"/api/parts/{pid}/tool-design.pdf").content == first and len(made) == 1     # second click: kept
+    z = zipfile.ZipFile(io.BytesIO(client.get(f"/api/parts/{pid}/tool-design.zip").content))
+    inside = next(n for n in z.namelist() if n.endswith("_drawing_set.pdf"))
+    assert z.read(inside) == first and len(made) == 1                              # the pack uses the drawing set made
+    # anything the drawings show changes: made again (company name in the drawing settings)
+    s = drawing_style.settings()
+    monkeypatch.setattr(drawing_style, "settings", lambda: s | {"company": "Other Co"})
+    assert client.get(f"/api/parts/{pid}/tool-design.pdf").content != first and len(made) == 2
+
+
+def test_downloads_are_prepared_in_the_background():
+    from backend.app import register
+    pid = add_part(project("DW1P"), "plastic_cover.step", "ABS", "injection_moulding", "DW1P-1")
+    register.clear_design_cache()
+    r = client.get(f"/api/parts/{pid}/tool-design/prepare")
+    assert r.status_code == 200 and r.json()["queued"] is True
+    register._PREP_POOL.submit(lambda: None).result(timeout=600)                    # the background work has finished
+    with register._FILE_CACHE_LOCK:
+        kinds = {k[1][1] for k in register._FILE_CACHE if k[0] == pid and k[1][0] == "tool_design"}
+    assert {"pdf", "zip"} <= kinds
+    assert client.get("/api/parts/999999/tool-design/prepare").status_code in (400, 404)

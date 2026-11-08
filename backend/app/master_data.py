@@ -36,10 +36,15 @@ PART_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow",
 # Sheet name -> columns, and which columns must be numbers.
 SHEETS = {
     "Parameters": ["part_type", "parameter", "value", "unit", "description"],
-    "Materials": ["part_type", "material", "material_type", "recommended", "density_g_cm3", "notes"],
+    "Materials": ["part_type", "material", "material_type", "recommended", "density_g_cm3", "notes", "scrap_reuse_pct",
+                  "scrap_rate_pct_of_rm"],
 }
 # Columns added in later versions (roadmap stage 29): an older workbook without them is read with them empty.
-OPTIONAL = {"Materials": {"material_type", "recommended"}}
+OPTIONAL = {"Materials": {"material_type", "recommended", "scrap_reuse_pct", "scrap_rate_pct_of_rm"}}
+# Optional numbers: blank = not set (stage 49: a material's own scrap reuse % / scrap rate % of RM price, else the Parameters value).
+OPTIONAL_NUMERIC = {"Materials": {"scrap_reuse_pct": (0, 100), "scrap_rate_pct_of_rm": (0, 1000)}}
+# Parameters a material may set for itself (a Materials column of the same name, when not blank); RM traces say which.
+MATERIAL_PARAMETERS = ("scrap_reuse_pct", "scrap_rate_pct_of_rm")
 NUMERIC = {
     "Materials": {"density_g_cm3"},
 }
@@ -174,6 +179,13 @@ def validate(raw: dict) -> dict:
             clean["part_type"] = pt
             for c in NUMERIC.get(sheet, ()):
                 clean[c] = _number(row.get(c), f"{sheet} row {i}, {c}")
+            for c, (lo, hi) in OPTIONAL_NUMERIC.get(sheet, {}).items():
+                if _text(row.get(c)) == "":
+                    clean[c] = None
+                else:
+                    clean[c] = _number(row.get(c), f"{sheet} row {i}, {c}")
+                    if not lo <= clean[c] <= hi:
+                        raise MasterDataError(f"{sheet} row {i}, {c}: {clean[c]:g} must be between {lo} and {hi} (blank = the Parameters value).")
 
             name_col = {"Parameters": "parameter", "Materials": "material"}[sheet]
             if not clean[name_col]:
@@ -237,7 +249,7 @@ def write(data: dict, p: Path | None = None) -> None:
             for c in columns:
                 v = row[c]
                 # ", " keeps Excel from reading "1,2,4" as the number 124.
-                values.append(", ".join(map(str, v)) if isinstance(v, list) else v)
+                values.append(", ".join(map(str, v)) if isinstance(v, list) else v)   # None stays an empty cell
             ws.append(values)
         for i, c in enumerate(columns, start=1):
             width = max([len(c)] + [len(str(r[c])) for r in clean[sheet]])

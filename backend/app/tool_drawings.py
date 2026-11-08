@@ -45,6 +45,18 @@ def drawing_no(part: dict, stage: int, comp_no: str) -> str:
 # ---------- views ----------
 
 def _render_png(design, size, az, el, explode=0.0, section=False, skip_ref=False) -> bytes:
+    """A shaded picture of the assembly; kept with the design (register.tool_designs keeps the design until anything it
+    depends on changes), so the drawing set and the release pack draw each picture once."""
+    if not design.get("components"):
+        return _render_png_now(design, size, az, el, explode, section, skip_ref)
+    kept = render3d.kept(design["components"][0], "assembly_pictures")
+    key = (tuple(size), az, el, explode, section, skip_ref)
+    if key not in kept:
+        kept[key] = _render_png_now(design, size, az, el, explode, section, skip_ref)
+    return kept[key]
+
+
+def _render_png_now(design, size, az, el, explode=0.0, section=False, skip_ref=False) -> bytes:
     import cadquery as cq
     items = render3d.design_items(design, tool_design.COLORS, explode=explode, skip_ref=skip_ref)
     if section:   # cut away everything in front of the middle plane (y < 0)
@@ -205,30 +217,33 @@ def design_pdf(part: dict, design: dict, stage: int, rev: str = "", only: str | 
     buf = io.BytesIO()
     doc = _doc(buf, f"{part['part_code']} {design['name']} drawings")
     width = 396 * mm
+    aw, ah = doc.width - 12, doc.height - 12 - 1            # inside the frame padding (6 pt each side)
     if only in (None, "ASM"):
+        rows = [("Part", f"{part['part_code']} · {part['name']}"), ("Tool", design["name"]),
+                ("Die set / base", design.get("die_set", "")), ("Shut height", f"{design.get('shut_height', 0):g} mm")]
+        header = drawing_style.pdf_header(st, "TOOL ASSEMBLY", f"{part['part_code']} · {design['name']}")
+        bom = _left(_table(_bom_rows(design), theme, [12 * mm, 10 * mm, 80 * mm, 62 * mm, 44 * mm, 128 * mm, 60 * mm]))
+        block = drawing_style.pdf_title_block(width, rows, pt, "as shown", f"1 / {sheets}", drawing_no(part, stage, "00"), rev,
+                                              design.get("notes", []) + _fit_notes(tol), *_meta(part, design))
+        # one sheet: the 3 pictures take what the header, BOM and title block leave (at most 93 mm high)
+        room = ah - _height(header, aw) - _height(bom, aw) - _height(block, aw) - 4 * mm - 12
+        ph = max(PIC_MIN_H, min(93 * mm, room))
+        pw = ph * 128 / 93
         iso = _render_png(design, (1100, 800), -50, 28)
         exp = _render_png(design, (1100, 800), -55, 20, explode=0.9)
         sec = _render_png(design, (1100, 800), -90, 0, section=True)
-        pics = Table([[_img(iso, 128 * mm, 93 * mm), _img(exp, 128 * mm, 93 * mm), _img(sec, 128 * mm, 93 * mm)],
+        pics = Table([[_img(iso, pw, ph), _img(exp, pw, ph), _img(sec, pw, ph)],
                       ["ISO VIEW (closed, bottom of stroke)", "EXPLODED VIEW", "SECTION A-A (through the middle, from the front)"]],
-                     colWidths=[132 * mm] * 3)
+                     colWidths=[pw + 4 * mm] * 3)
         pics.setStyle(TableStyle([("FONTSIZE", (0, 1), (-1, 1), 7), ("TEXTCOLOR", (0, 1), (-1, 1), theme["grey"]),
                                   ("BOX", (0, 0), (0, 0), 0.3, theme["border"]), ("BOX", (1, 0), (1, 0), 0.3, theme["border"]),
                                   ("BOX", (2, 0), (2, 0), 0.3, theme["border"])]))
-        rows = [("Part", f"{part['part_code']} · {part['name']}"), ("Tool", design["name"]),
-                ("Die set / base", design.get("die_set", "")), ("Shut height", f"{design.get('shut_height', 0):g} mm")]
-        story += [drawing_style.pdf_header(st, "TOOL ASSEMBLY", f"{part['part_code']} · {design['name']}"), pics,
-                  Spacer(1, 2 * mm), _left(_table(_bom_rows(design), theme, [12 * mm, 10 * mm, 80 * mm, 62 * mm, 44 * mm, 128 * mm, 60 * mm])),
-                  Spacer(1, 2 * mm),
-                  drawing_style.pdf_title_block(width, rows, pt, "as shown", f"1 / {sheets}", drawing_no(part, stage, "00"), rev,
-                                                design.get("notes", []) + _fit_notes(tol), *_meta(part, design))]
+        story.append(_one_sheet([header, pics, Spacer(1, 2 * mm), bom, Spacer(1, 2 * mm)], block, aw, ah))
     for k, c in enumerate(made, start=2):
         if only not in (None, c.no):
             continue
         if story:
             story.append(PageBreak())
-        dw, dh = 300 * mm, 170 * mm
-        views, sc = (_plate_views if c.drawing == "plate" else _solid_views)(c, theme, dw, dh)
         side = _detail_side(c, theme, tol)
         L, W, H = c.size
         tech = getattr(c, "tech", None)
@@ -238,16 +253,51 @@ def design_pdf(part: dict, design: dict, stage: int, rev: str = "", only: str | 
                 ("Finish", f"Ra {tech['finish_ra']:g} µm unless stated" if tech else tol.get("finish_general", ""))]
         if tech:
             rows += [("Heat treatment", tech["heat_treatment"]), ("Surface treatment", tech["surface_treatment"])]
-        story += [drawing_style.pdf_header(st, "DETAIL DRAWING", f"{c.no} · {c.name}"),
-                  Table([[views, side]], colWidths=[dw + 4 * mm, 92 * mm], style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))]
-        if c.holes and not _holes_at_side(c):
-            story += [Paragraph("Hole table (datum 0,0 = lower-left corner)", st["k"]),
-                      _hole_table(c, theme, tol, [14 * mm, 24 * mm, 24 * mm, 16 * mm, 300 * mm])]
+        header = drawing_style.pdf_header(st, "DETAIL DRAWING", f"{c.no} · {c.name}")
         rel, hist = _meta(part, design, c)
-        story += [drawing_style.pdf_title_block(width, rows, pt, _scale_text(sc), f"{k} / {sheets}", drawing_no(part, stage, c.no), rev,
-                                                c.notes, rel, hist, _gen_tol(c, tol))]
+
+        def block(sc):
+            return drawing_style.pdf_title_block(width, rows, pt, _scale_text(sc), f"{k} / {sheets}", drawing_no(part, stage, c.no),
+                                                 rev, c.notes, rel, hist, _gen_tol(c, tol))
+        # one sheet per drawing: the hole table goes under the views in as many side-by-side blocks as it needs,
+        # and the views take the height that is left (at most 170 mm)
+        room = ah - _height(header, aw) - _height(block(1.0), aw) - 3 * mm
+        side_h = _height(side, 92 * mm)
+        below = []
+        if c.holes and not _holes_at_side(c):
+            title = Paragraph("Hole table (datum 0,0 = lower-left corner)", st["k"])
+            for ncols in range(1, HOLE_BLOCKS_MAX + 1):
+                table = _hole_columns(c, theme, tol, aw, ncols)
+                used = _height(title, aw) + _height(table, aw)
+                if room - used >= max(VIEW_MIN_H, side_h):
+                    break
+            below, room = [title, table], room - used
+        dw, dh = 300 * mm, max(VIEW_MIN_H, min(170 * mm, room))
+        views, sc = (_plate_views if c.drawing == "plate" else _solid_views)(c, theme, dw, dh)
+        body = [header, Table([[views, side]], colWidths=[dw + 4 * mm, 92 * mm],
+                              style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))] + below
+        story.append(_one_sheet(body, block(sc), aw, ah))
     doc.build(story)
     return buf.getvalue()
+
+
+PIC_MIN_H = 50 * 2.834645669       # mm in points: the assembly pictures are never smaller than 50 mm (else the sheet shrinks)
+VIEW_MIN_H = 90 * 2.834645669      # the views of a detail drawing are never lower than 90 mm
+HOLE_BLOCKS_MAX = 4                # the hole table under the views in at most 4 side-by-side blocks
+
+
+def _height(flowable, width: float) -> float:
+    return flowable.wrap(width, 1e7)[1]
+
+
+def _one_sheet(body: list, title_block, aw: float, ah: float):
+    """Everything of one drawing on ONE page: the title block at the foot of the sheet; content that is still too
+    large (a very long note list) is scaled down to fit instead of running on to the next page (the title block of a
+    mould's B plate with 48 holes landed alone on the next page)."""
+    from reportlab.platypus import KeepInFrame, Spacer
+    used = sum(_height(f, aw) for f in body) + _height(title_block, aw)
+    fill = [Spacer(1, ah - used - 2)] if ah - used - 2 > 0 else []
+    return KeepInFrame(aw, ah, body + fill + [title_block], mode="shrink")
 
 
 def _left(t):
@@ -262,25 +312,46 @@ def _fit_notes(tol):
             + (f", punch {tol['fit_punch']}" if tol.get("fit_punch") else "")]
 
 
-SIDE_HOLES = 22      # more holes than this: the hole table goes full width under the views (and runs on to the next page)
+SIDE_HOLES = 22      # more holes than this: the hole table goes under the views (in side-by-side blocks, same sheet)
 
 
 def _widths7(widths):
     """The 5 column widths of the hole table spread over 7 columns (Ø tolerance and position added, stage 32)."""
     total = sum(widths)
     from reportlab.lib.units import mm
-    if total < 120 * mm:                        # side panel
+    if total < 190 * mm:                        # side panel or a narrow block of the hole table
         return [7 * mm, 11 * mm, 11 * mm, 7 * mm, 17 * mm, 13 * mm, total - 66 * mm]
     return [14 * mm, 24 * mm, 24 * mm, 16 * mm, 44 * mm, 24 * mm, total - 146 * mm]
 
 
-def _hole_table(c, theme, tol, widths):
+def _hole_columns(c, theme, tol, width: float, ncols: int):
+    """The hole table under the views in ncols blocks side by side (H1… in the first block, then on), so a plate with
+    many ejector-pin holes stays on one sheet."""
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Table, TableStyle
+    n = len(c.holes)
+    ncols = max(1, min(ncols, n))
+    per = -(-n // ncols)
+    gap = 3 * mm
+    w = (width - gap * (ncols - 1)) / ncols
+    five = [14 * mm, 24 * mm, 24 * mm, 16 * mm, w - 78 * mm] if w >= 190 * mm else [8 * mm, 13 * mm, 13 * mm, 9 * mm, w - 43 * mm]
+    blocks = [_hole_table(c, theme, tol, five, i * per, min(n, (i + 1) * per)) for i in range(ncols)]
+    if ncols == 1:
+        return blocks[0]
+    t = Table([blocks], colWidths=[w + gap] * (ncols - 1) + [w])
+    t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                           ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 0),
+                           ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]))
+    return t
+
+
+def _hole_table(c, theme, tol, widths, start: int = 0, stop: int | None = None):
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.platypus import Paragraph, Table, TableStyle
     small = ParagraphStyle("s", fontSize=6.5, leading=8)
     dims = getattr(c, "dims", None)
     rows = [["#", "X", "Y", "Ø", "Ø tol.", "Pos. ±", "Kind / fit"]] if dims else [["#", "X", "Y", "Ø", "Kind / fit"]]
-    for i, h in enumerate(c.holes, start=1):
+    for i, h in list(enumerate(c.holes, start=1))[start:stop]:
         kind = h["label"] or h["kind"]
         if h.get("depth"):
             kind += f", depth {h['depth']:g}" + ("" if h.get("top", True) else " from below")
@@ -541,8 +612,8 @@ def bom_xlsx(part: dict, design: dict, stage: int) -> bytes:
     return buf.getvalue()
 
 
-def release_files(part: dict, design: dict, stage: int, rev: str = "") -> dict:
-    """Every file of one tool for release: {path: bytes}."""
+def release_files(part: dict, design: dict, stage: int, rev: str = "", pdf: bytes | None = None) -> dict:
+    """Every file of one tool for release: {path: bytes}; pdf = the drawing set when already made."""
     stem = f"{part['part_code']}_T{stage:02d}_{_safe(design['key'])}"
     files = {}
     files[f"3D/{stem}_assembly.step"] = tool_design.step_bytes(tool_design.assembly(design, stem))
@@ -550,7 +621,7 @@ def release_files(part: dict, design: dict, stage: int, rev: str = "") -> dict:
         if c.kind == "ref":
             continue
         files[f"3D/parts/{c.no}_{_safe(c.name)}.step"] = tool_design.step_bytes(c.shape)
-    files[f"2D/PDF/{stem}_drawing_set.pdf"] = design_pdf(part, design, stage, rev)
+    files[f"2D/PDF/{stem}_drawing_set.pdf"] = pdf or design_pdf(part, design, stage, rev)
     files[f"2D/DXF/{stem}_00_assembly.dxf"] = assembly_dxf(part, design, stage, rev)
     for c in design["components"]:
         if c.kind == "made" and c.drawing != "none":
@@ -567,8 +638,10 @@ def release_files(part: dict, design: dict, stage: int, rev: str = "") -> dict:
     return files
 
 
-def release_zip(part: dict, designs: list[tuple[int, dict]], rev: str = "", extra: dict | None = None) -> bytes:
-    """ZIP with the release files of every tool given (one folder per tool), plus README."""
+def release_zip(part: dict, designs: list[tuple[int, dict]], rev: str = "", extra: dict | None = None,
+                pdfs: dict | None = None) -> bytes:
+    """ZIP with the release files of every tool given (one folder per tool), plus README; pdfs = {stage: drawing set}
+    already made."""
     buf = io.BytesIO()
     readme = [f"{drawing_style.settings()['company']} - tool design release for {part['part_code']} {part['name']}",
               f"Made {date.today().isoformat()}", "",
@@ -585,7 +658,7 @@ def release_zip(part: dict, designs: list[tuple[int, dict]], rev: str = "", extr
                           f"shut height {design.get('shut_height', 0):g} mm")
             for n in design.get("notes", []):
                 readme.append(f"    - {n}")
-            for path, data in release_files(part, design, stage, rev).items():
+            for path, data in release_files(part, design, stage, rev, (pdfs or {}).get(stage)).items():
                 z.writestr(f"{folder}/{path}", data)
         for path, data in (extra or {}).items():
             z.writestr(path, data)

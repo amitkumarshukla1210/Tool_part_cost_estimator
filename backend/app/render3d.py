@@ -14,11 +14,22 @@ import numpy as np
 from PIL import Image
 
 
+BOX_SIZES = (4, 8, 16)       # triangles up to this box (px) are filled box-wise; larger ones row by row (_fill_rows)
+
+
 def mesh(shape, tol: float = 0.4):
     verts, tris = shape.tessellate(tol, 0.3)
     v = np.array([p.toTuple() for p in verts], float)
     t = np.array(tris, int)
     return v, t
+
+
+def comp_mesh(c):
+    """Mesh of a tool design component, made once per kept design (pictures, STL and the 3D viewer all use it)."""
+    m = kept(c, "mesh")
+    if "m" not in m:
+        m["m"] = mesh(c.shape, tol=max(0.3, max(c.size) / 150 if c.size else 0.4))
+    return m["m"]
 
 
 def view_matrix(az_deg: float = -50, el_deg: float = 30):
@@ -83,7 +94,7 @@ def render(items, size=(1200, 800), az=-50, el=30, bg=(255, 255, 255), bounds=No
             zbuf[yi[front], xi[front]] = np.maximum(zbuf[yi[front], xi[front]], z[front])
             ids[yi[front], xi[front]] = obj
         rest = ok & ~tiny
-        for size in (4, 8, 16, 32, 64):           # small triangles: many at once, by the size of their box
+        for size in BOX_SIZES:                     # small triangles: many at once, by the size of their box
             pick = rest & (span < size - 1)
             if pick.any():
                 cols = np.clip(base[None, :] * shade[pick][:, None], 0, 255).astype(np.uint8)
@@ -93,29 +104,13 @@ def render(items, size=(1200, 800), az=-50, el=30, bg=(255, 255, 255), bounds=No
                     ids.flat[pix] = obj
                 _fill(T[pick], size, zbuf, write)
                 rest &= ~pick
-        for k in np.nonzero(rest)[0]:             # the few large ones, one by one
-            a_, b_, c_ = P[t[k]]
-            xmin, xmax = int(max(0, np.floor(min(a_[0], b_[0], c_[0])))), int(min(W - 1, np.ceil(max(a_[0], b_[0], c_[0]))))
-            ymin, ymax = int(max(0, np.floor(min(a_[1], b_[1], c_[1])))), int(min(H - 1, np.ceil(max(a_[1], b_[1], c_[1]))))
-            if xmin > xmax or ymin > ymax:
-                continue
-            den = (b_[1] - c_[1]) * (a_[0] - c_[0]) + (c_[0] - b_[0]) * (a_[1] - c_[1])
-            if abs(den) < 1e-12:
-                continue
-            xs = np.arange(xmin, xmax + 1)[None, :] + 0.5
-            ys = np.arange(ymin, ymax + 1)[:, None] + 0.5
-            w1 = ((b_[1] - c_[1]) * (xs - c_[0]) + (c_[0] - b_[0]) * (ys - c_[1])) / den
-            w2 = ((c_[1] - a_[1]) * (xs - c_[0]) + (a_[0] - c_[0]) * (ys - c_[1])) / den
-            w3 = 1 - w1 - w2
-            inside = (w1 >= -1e-6) & (w2 >= -1e-6) & (w3 >= -1e-6)
-            if not inside.any():
-                continue
-            z = w1 * a_[2] + w2 * b_[2] + w3 * c_[2]
-            zb = zbuf[ymin:ymax + 1, xmin:xmax + 1]
-            upd = inside & (z > zb)
-            zb[upd] = z[upd]
-            img[ymin:ymax + 1, xmin:xmax + 1][upd] = np.clip(base * shade[k], 0, 255).astype(np.uint8)
-            ids[ymin:ymax + 1, xmin:xmax + 1][upd] = obj
+        if rest.any():                             # the larger ones, row by row
+            cols = np.clip(base[None, :] * shade[rest][:, None], 0, 255).astype(np.uint8)
+
+            def write(pix, k, cols=cols, obj=obj):
+                img.reshape(-1, 3)[pix] = cols[k]
+                ids.flat[pix] = obj
+            _fill_rows(T[rest], zbuf, write)
     if edges:   # dark outline where the visible object changes
         e = np.zeros((H, W), bool)
         e[:, 1:] |= ids[:, 1:] != ids[:, :-1]
@@ -161,6 +156,69 @@ def _fill(T, size, zbuf, write):
         write(pix, k + s0)
 
 
+def _fill_rows(T, zbuf, write, max_pixels: int = 3_000_000):
+    """Rasterise large triangles (n × 3 × (x, y, z)) row by row: every pixel row of a triangle is one span between its
+    edges, so the work is the triangle's area, not its box (long thin triangles of a plate with many holes span the whole
+    picture: one by one over their box took most of the drawing-set time). Same rules as _fill: a pixel is painted when
+    its centre is inside the triangle and it is the nearest so far."""
+    H, W = zbuf.shape
+    if not len(T):
+        return
+    y0 = np.clip(np.floor(T[:, :, 1].min(1) - 0.5).astype(np.int64), 0, H - 1)
+    y1 = np.clip(np.ceil(T[:, :, 1].max(1) - 0.5).astype(np.int64), 0, H - 1)
+    a, b, c = T[:, 0], T[:, 1], T[:, 2]
+    # depth plane z = px * x + py * y + pz through the 3 corners
+    e1, e2 = b - a, c - a
+    nz = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
+    good = np.abs(nz) > 1e-12
+    nz = np.where(good, nz, 1.0)
+    nx = e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]
+    ny = e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2]
+    px, py = -nx / nz, -ny / nz
+    pz = a[:, 2] - px * a[:, 0] - py * a[:, 1]
+    rows = np.where(good, y1 - y0 + 1, 0)
+    start = 0
+    while start < len(T):                          # chunks of triangles so the pixel lists stay small
+        csum = np.cumsum(rows[start:] * (np.ceil(np.ptp(T[start:, :, 0], axis=1)) + 2))
+        stop = start + max(1, int(np.searchsorted(csum, max_pixels)))
+        idx = np.arange(start, stop)
+        nr = rows[idx]
+        tri = np.repeat(idx, nr)                   # one entry per (triangle, row)
+        if len(tri):
+            first = np.repeat(np.cumsum(nr) - nr, nr)
+            yy = y0[tri] + (np.arange(len(tri)) - first)
+            yc = yy + 0.5
+            xl = np.full(len(tri), np.inf)
+            xr = np.full(len(tri), -np.inf)
+            for p, q in ((a, b), (b, c), (c, a)):
+                py0, py1 = p[tri, 1], q[tri, 1]
+                dy = py1 - py0
+                ok = ((yc >= np.minimum(py0, py1)) & (yc <= np.maximum(py0, py1)) & (np.abs(dy) > 1e-12))
+                t = np.where(ok, (yc - py0) / np.where(ok, dy, 1.0), 0.0)
+                x = p[tri, 0] + t * (q[tri, 0] - p[tri, 0])
+                xl = np.where(ok, np.minimum(xl, x), xl)
+                xr = np.where(ok, np.maximum(xr, x), xr)
+            xa = np.clip(np.ceil(xl - 0.5 - 1e-6), 0, W).astype(np.int64)
+            xb = np.clip(np.floor(xr - 0.5 + 1e-6), -1, W - 1).astype(np.int64)
+            n = np.where(np.isfinite(xl), np.maximum(xb - xa + 1, 0), 0)
+            k = np.repeat(tri, n)
+            if len(k):
+                first = np.repeat(np.cumsum(n) - n, n)
+                xs = np.repeat(xa, n) + (np.arange(len(k)) - first)
+                ys = np.repeat(yy, n)
+                z = px[k] * (xs + 0.5) + py[k] * (ys + 0.5) + pz[k]
+                pix = ys * W + xs
+                order = np.lexsort((z, pix))       # nearest last for every pixel
+                pix, z, k = pix[order], z[order], k[order]
+                last = np.r_[pix[1:] != pix[:-1], True]
+                pix, z, k = pix[last], z[last], k[last]
+                front = z > zbuf.flat[pix]
+                pix, z, k = pix[front], z[front], k[front]
+                zbuf.flat[pix] = z
+                write(pix, k)
+        start = stop
+
+
 def face_view(tri: np.ndarray, size=(960, 540), az=-50, el=30, sphere=None, margin=0.06) -> dict:
     """Which triangle (index, -1 = background) and which shade every pixel shows, for one view of a mesh (m × 3 × 3).
     Drawn once per view; paint() then colours it for any map (wall, fill time, pressure …) without drawing again."""
@@ -197,13 +255,14 @@ def face_view(tri: np.ndarray, size=(960, 540), az=-50, el=30, sphere=None, marg
         zbuf[yi[front], xi[front]] = z[front]
         tid[yi[front], xi[front]] = k[front]
     rest = ok & (span >= 1.5)
-    for size_px in (4, 8, 16, 32, 64):
+    for size_px in BOX_SIZES:
         pick = np.nonzero(rest & (span < size_px - 1))[0]
         if len(pick):
             _fill(T[pick], size_px, zbuf, lambda pix, k, pick=pick: tid.flat.__setitem__(pix, pick[k]))
             rest[pick] = False
-    for k in np.nonzero(rest)[0]:                  # the few large ones, one by one
-        _fill(T[k:k + 1], int(np.ceil(span[k])) + 2, zbuf, lambda pix, _, k=k: tid.flat.__setitem__(pix, k))
+    big = np.nonzero(rest)[0]                      # the larger ones, row by row
+    if len(big):
+        _fill_rows(T[big], zbuf, lambda pix, k: tid.flat.__setitem__(pix, big[k]))
     return {"tid": tid, "shade": np.where(tid >= 0, shade[np.maximum(tid, 0)], 1.0), "size": (W, H)}
 
 
@@ -224,6 +283,15 @@ def paint(view: dict, face_rgb: np.ndarray, bg=(255, 255, 255), edges: bool = Tr
     return Image.fromarray(img)
 
 
+def kept(obj, name: str) -> dict:
+    """A dict kept on a design component (pictures drawn from it): the component lives as long as its design is kept,
+    so these go when the design is made again (anything it depends on changed)."""
+    d = obj.__dict__.get("_dtc_" + name)
+    if d is None:
+        d = obj.__dict__["_dtc_" + name] = {}
+    return d
+
+
 def png(img: Image.Image) -> bytes:
     buf = io.BytesIO()
     img.save(buf, "PNG", optimize=True)
@@ -242,7 +310,7 @@ def design_items(design: dict, colors: dict, explode: float = 0.0, skip_ref: boo
     for c in design["components"]:
         if skip_ref and c.kind == "ref":
             continue
-        v, t = mesh(c.shape, tol=max(0.3, max(c.size) / 150 if c.size else 0.4))
+        v, t = comp_mesh(c)
         rgb = colors.get(c.color, (0.6, 0.6, 0.6))
         for (x, y, z) in c.locs:
             items.append((v + np.array([x, y, z * (1 + explode)]), t, rgb))

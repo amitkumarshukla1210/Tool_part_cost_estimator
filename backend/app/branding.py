@@ -116,5 +116,7 @@ def stamp(data: bytes, name: str) -> bytes:
         return data
     try:
         return fn(data)
-    except Exception:
+    except Exception as exc:                     # say why in the server window (a missing library left PDFs without the logo)
+        import logging
+        logging.getLogger("dtc.branding").warning("Logo and name not added to %s: %s: %s", name, exc.__class__.__name__, exc)
         return data

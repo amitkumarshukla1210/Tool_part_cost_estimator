@@ -31,7 +31,7 @@ EXAMPLE = ROOT / "frontend" / "docs" / "example"
 
 # step texts: screenshot name -> (title, what you do, what you get / download)
 STEPS = {
-    "setup": ("First start: create the admin", ["Start the app with DTC_Start.bat; the browser opens http://127.0.0.1:8000.",
+    "setup": ("First start: create the admin", ["Start the app with DTC_Start.bat; the browser opens http://127.0.0.1:8100.",
               "With no user yet the app shows “First start”: enter the admin ID, full name and a password (10+ characters).",
               "Keep the password safe. A forgotten password is reset at the PC with DTC_ResetPassword.bat."], "Admin login."),
     "admin_users": ("Create the team's login IDs", ["Admin (menu, top right) → Users, roles & permissions → Create a login ID: user ID, name, role, first password.",

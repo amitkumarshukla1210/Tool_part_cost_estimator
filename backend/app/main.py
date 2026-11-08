@@ -2,12 +2,13 @@
 
 Run from the repository root:
     uvicorn backend.app.main:app --reload
-then open http://127.0.0.1:8000 in a browser.
+then open http://127.0.0.1:8100 in a browser.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime
 import tempfile
 from pathlib import Path
@@ -1048,6 +1049,26 @@ def _design_error(fn):
         raise HTTPException(400, str(exc)) from None
 
 
+@app.get("/api/parts/{part_id}/saved-files")
+def parts_saved_files(part_id: int):
+    """Every file made for the part (stage 47): revisions newest first, 'current' = made from the data as it is now."""
+    from . import saved_files
+    return saved_files.listing(part_id)
+
+
+@app.get("/api/parts/{part_id}/saved-files/{rid}")
+def parts_saved_file(part_id: int, rid: int):
+    """One saved revision, as it was made."""
+    from . import saved_files
+    hit = saved_files.revision(part_id, rid)
+    if not hit:
+        raise HTTPException(404, "This saved file does not exist (or its bytes are missing from the storage folder).")
+    row, data = hit
+    stem, dot, ext = row["filename"].rpartition(".")
+    name = f"{stem}_rev{row['rev_no']}.{ext}" if dot else f"{row['filename']}_rev{row['rev_no']}"
+    return Response(data, media_type=row["media_type"] or None, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
 @app.get("/api/parts/{part_id}/tool-design")
 def parts_tool_design(part_id: int):
     """Each tool (die stage or mould) designed in 3D: its parts with material, hardness, standard part."""
@@ -1063,6 +1084,13 @@ def parts_tool_design_file(part_id: int, kind: str, die: Optional[str] = None):
     data, media, name = _design_error(lambda: register.tool_design_file(part_id, kind, die))
     disp = "inline" if kind in ("png", "html") else "attachment"
     return Response(data, media_type=media, headers={"Content-Disposition": f'{disp}; filename="{name}"'})
+
+
+@app.get("/api/parts/{part_id}/tool-design/prepare")
+def parts_tool_design_prepare(part_id: int, die: Optional[str] = None):
+    """Make the drawing set and the release pack in the background, so the download is ready when clicked (GET: it changes
+    no data, so a viewer gets it too)."""
+    return _design_error(lambda: register.prepare_downloads(part_id, die))
 
 
 # ---------- toolmaker review of the tool design (roadmap stage 43) ----------
@@ -1327,6 +1355,36 @@ def parts_country_comparison_pdf(part_id: int, countries: Optional[str] = None, 
     res = _comparison(part_id, countries, mode, use_fta)
     return Response(landed.to_pdf(res, register.part_detail(part_id, with_rm=False)), media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="country_comparison_{part_id}.pdf"'})
+
+
+def _versus(part_id: int, mode: str, use_fta: bool) -> dict:
+    from . import landed
+    try:
+        return landed.versus(part_id, mode, use_fta)
+    except (ValueError, register.RegisterError) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/vs-country")
+def parts_vs_country(part_id: int, mode: str = "sea", use_fta: bool = True):
+    """Every line of the tool and part cost next to the same line in the comparison country (Register settings
+    compare_country, CN unless changed), in its currency and INR, and both landed at the factory (roadmap stage 48)."""
+    return _versus(part_id, mode, use_fta)
+
+
+@app.get("/api/parts/{part_id}/vs-country/export.{kind}")
+def parts_vs_country_export(part_id: int, kind: str, mode: str = "sea", use_fta: bool = True):
+    from . import landed
+    if kind not in ("xlsx", "pdf"):
+        raise HTTPException(404, "xlsx or pdf")
+    v = _versus(part_id, mode, use_fta)
+    if v["error"]:
+        raise HTTPException(400, f"{v['name']}: {v['error']}")
+    name = landed.versus_filename(v, kind)
+    if kind == "xlsx":
+        return _xlsx(landed.versus_excel(v, {}), name)
+    return Response(landed.versus_pdf(v, {}, register.part_detail(part_id, with_rm=False)), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @app.get("/api/parts/{part_id}/simulation")
@@ -1681,8 +1739,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
         finally:
             auth.reset(token)
 
-
-app.add_middleware(AuthMiddleware)
 
 
 @app.exception_handler(auth.AuthError)
@@ -2089,6 +2145,43 @@ async def brand_downloads(request: Request, call_next):
     headers = {k: v for k, v in response.headers.items() if k.lower() != "content-length"}
     return Response(body, status_code=200, headers=headers, media_type=response.headers.get("content-type"))
 
+
+@app.middleware("http")
+async def saved_part_files(request: Request, call_next):
+    """Every file made for a part is saved with a revision and handed out again while its data has not changed, also after
+    a restart (stage 47; saved_files.py). Outside the branding, so the saved file carries the logo; inside the login and
+    tool-group checks (AuthMiddleware is added last, so it runs first)."""
+    from starlette.concurrency import run_in_threadpool
+    from . import register, saved_files
+    m = saved_files.PART_PATH.match(request.url.path)
+    if request.method != "GET" or not m or not saved_files.is_saved_path(m.group(2)):
+        return await call_next(request)
+    pid, key = int(m.group(1)), saved_files.file_key(m.group(2), request.url.query)
+    hit = await run_in_threadpool(saved_files.find, pid, key)
+    if hit:
+        row, data = hit
+        return Response(data, media_type=row["media_type"] or None, headers={
+            "Content-Disposition": f'{row["disposition"]}; filename="{row["filename"]}"',
+            "X-DTC-Saved": f'rev {row["rev_no"]} of {row["created_at"]:%Y-%m-%d %H:%M}'})
+    response = await call_next(request)
+    media = response.headers.get("content-type") or ""
+    if response.status_code != 200 or media.startswith("application/json"):
+        return response
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    cd = response.headers.get("content-disposition") or ""
+    fm = re.search(r'filename="?([^";]+)"?', cd)
+    name = fm.group(1) if fm else m.group(2).rsplit("/", 1)[-1]
+    disp = "inline" if cd.startswith("inline") or not cd else "attachment"
+    user = register.user()
+    row = await run_in_threadpool(saved_files.save, pid, key, body, media, name, disp, user)
+    headers = {k: v for k, v in response.headers.items() if k.lower() != "content-length"}
+    if row:
+        headers["X-DTC-Saved"] = f'rev {row["rev_no"]} (new)'
+    return Response(body, status_code=200, headers=headers, media_type=media or None)
+
+
+# the login and the tool-group checks run before everything else (the last middleware added runs first)
+app.add_middleware(AuthMiddleware)
 
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 app.mount("/theme", StaticFiles(directory=THEME_DIR), name="theme")

@@ -67,3 +67,24 @@ def test_release_zip_holds_stl_pictures_and_the_offline_viewer():
         assert any(n.startswith(f"{t}/3D/STL/parts/") for n in names) and any(n.startswith(f"{t}/pictures/") for n in names)
         assert any(n.startswith(f"{t}/") and n.endswith("_3D_viewer.html") for n in names)
     assert "3D_viewer.html" in z.read("README.txt").decode()
+
+
+def test_row_fill_paints_the_same_pixels_as_the_box_fill():
+    """render3d._fill_rows (large triangles, row by row) gives the same picture as the box-wise fill it replaced."""
+    import numpy as np
+    from backend.app import render3d
+    rng = np.random.default_rng(7)
+    T = np.concatenate([rng.uniform(0, 300, (60, 3, 2)), rng.uniform(-5, 5, (60, 3, 1))], axis=2)
+    T[:10, :, :2] = rng.uniform(0, 300, (10, 3, 2)) * np.array([1, 0.02]) + np.array([0, 150])      # long thin ones
+    out = []
+    for fill in ("box", "rows"):
+        zbuf = np.full((300, 320), -np.inf)
+        ids = np.full((300, 320), -1)
+        write = lambda pix, k: ids.flat.__setitem__(pix, k)
+        if fill == "box":
+            for i in range(len(T)):
+                render3d._fill(T[i:i + 1], 302, zbuf, lambda pix, k, i=i: ids.flat.__setitem__(pix, i))
+        else:
+            render3d._fill_rows(T, zbuf, write)
+        out.append(ids)
+    assert (out[0] != out[1]).mean() < 0.002 and (out[1] >= 0).mean() > 0.3

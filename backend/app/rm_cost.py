@@ -63,6 +63,83 @@ def _parameter_row(family: str, name: str) -> dict | None:
             or next((r for r in rows if r["part_type"] == "all" and r["parameter"] == name), None))
 
 
+def _material_value(family: str, material: str, name: str) -> float | None:
+    """A parameter the material sets for itself (Materials column of the same name, not blank), else None."""
+    if name not in master_data.MATERIAL_PARAMETERS or not material:
+        return None
+    row = next((r for r in master_data.tables()["Materials"] if r["part_type"] == family and r["material"] == material), None)
+    v = (row or {}).get(name)
+    return float(v) if isinstance(v, (int, float)) else None
+
+
+# ---------- scrap reuse and scrap rate as % of the RM price (roadmap stage 49) ----------
+# Moulding and casting: part of the scrap (gross - net: runner, sprue, biscuit, overflows, gating) goes back into the
+# process; only the virgin material is bought, the scrap left is sold at the scrap rate - the fixed rate of the rate library,
+# or a % of the RM price when that % is set (above 0). Both % come from the part (typed), else the material (Materials
+# columns), else the family (Parameters). Starting values 0 % and 0 = the RM cost stays as before until you set yours.
+SCRAP_REUSE_FAMILIES = ("plastic", "die_casting", "foundry", "eps", "blow")
+SCRAP_PARAMETERS = [
+    ("scrap_reuse_pct", 0, "% of scrap", "Share of the scrap (gross - net weight) used again in production (regrind / remelt); "
+                                         "the rest is sold. A material can set its own (Materials), a part too (RM inputs)."),
+    ("scrap_rate_pct_of_rm", 0, "% of RM rate", "Scrap selling rate as % of the virgin RM rate; 0 = use the fixed scrap rate of "
+                                                "the rate library (material_scrap). A material can set its own, a part too."),
+]
+SCRAP_INPUTS = [("scrap_reuse_pct", "Scrap used again", "% of scrap"),
+                ("scrap_rate_pct_of_rm", "Scrap rate as % of RM rate (0 = fixed rate)", "% of RM rate")]
+SCRAP_FORMULAS = [
+    ("reused_g", "Scrap used again", "returns_g * scrap_reuse_pct / 100", "g",
+     "Scrap (gross - net) × share used again in production"),
+    ("virgin_g", "Virgin material bought per part", "input_g - reused_g", "g", "Material used per part less the scrap used again"),
+    ("sold_g", "Scrap left to sell", "returns_g - reused_g", "g", "Scrap not used again: sold at the scrap rate"),
+    ("scrap_value", "Scrap selling rate", "material_rate * scrap_rate_pct_of_rm / 100 if scrap_rate_pct_of_rm > 0 else scrap_rate",
+     "{cur}/kg", "% of the RM rate when that % is above 0, else the fixed scrap rate of the rate library"),
+]
+SCRAP_CHANGED = {   # formula rows that change, only when they still are as shipped before (yours stay)
+    "rm_cost": ("input_g / 1000 * material_rate", "virgin_g / 1000 * material_rate", "RM cost (virgin material × rate)"),
+    "scrap_credit": ("0 - returns_g / 1000 * scrap_rate", "0 - sold_g / 1000 * scrap_value", "Scrap credit (−) for the scrap sold"),
+}
+
+
+def seed_scrap_reuse() -> dict:
+    """Add the stage-49 rows (Parameters, Formula inputs, Cost formulas) that are missing; change the RM cost and scrap
+    credit formulas of the moulding / casting families only where they are still the shipped formula."""
+    added = {"parameters": 0, "inputs": 0, "formulas": 0, "changed": 0}
+    md = master_data.tables()
+    data = {k: [dict(r) for r in v] for k, v in md.items()}
+    have = {(r["part_type"], r["parameter"]) for r in data["Parameters"]}
+    for fam in SCRAP_REUSE_FAMILIES:
+        for name, value, unit, desc in SCRAP_PARAMETERS:
+            if (fam, name) not in have:
+                data["Parameters"].append({"part_type": fam, "parameter": name, "value": value, "unit": unit,
+                                           "description": desc + " EXAMPLE: replace with your value."})
+                added["parameters"] += 1
+    if added["parameters"]:
+        master_data.write(data)
+    setup = costing_setup.tables()
+    ins = {(r["scope"], r["variable"]) for r in setup["formula_inputs"]}
+    fms = {(r["scope"], r["name"]): r for r in setup["cost_formulas"]}
+    for fam in SCRAP_REUSE_FAMILIES:
+        sc = scope(fam)
+        for var, label, unit in SCRAP_INPUTS:
+            if (sc, var) not in ins:
+                setup["formula_inputs"].append({"scope": sc, "variable": var, "label": label, "source": "parameter", "category": "",
+                                                "item": var, "is_money": False, "unit": unit})
+                added["inputs"] += 1
+        for name, label, formula, unit, desc in SCRAP_FORMULAS:
+            if (sc, name) not in fms:
+                setup["cost_formulas"].append({"scope": sc, "name": name, "label": label, "formula": formula, "unit": unit,
+                                               "is_result": False, "description": desc})
+                added["formulas"] += 1
+        for name, (old, new, label) in SCRAP_CHANGED.items():
+            r = fms.get((sc, name))
+            if r and r["formula"].replace(" ", "") == old.replace(" ", ""):
+                r["formula"], r["label"] = new, label
+                added["changed"] += 1
+    if added["inputs"] or added["formulas"] or added["changed"]:
+        costing_setup.write(setup)
+    return added
+
+
 def overridable(family: str) -> list[dict]:
     """Inputs you may type over per part, with their master-data default (None for part values)."""
     if family not in FAMILIES:
@@ -124,11 +201,16 @@ def run(family: str, *, country: str, as_of: str | None = None, material: str = 
                         except rates.RateMissing as exc:
                             raise RMError(str(exc)) from None
         elif inp["source"] == "parameter":
+            own = _material_value(family, material, inp["item"])
             row = _parameter_row(family, inp["item"])
-            if row is None or not isinstance(row["value"], (int, float)):
-                raise RMError(f"{label}: Master data → Parameters has no number '{inp['item']}' for {family}.")
-            trace.add_input(nid, label, row["value"], inp["unit"] or row["unit"] or "",
-                            {"type": "master", "sheet": "Parameters", "row": f"{row['part_type']} / {inp['item']}"})
+            if own is not None:                  # stage 49: the material's own value (Materials column of the same name)
+                trace.add_input(nid, label, own, inp["unit"] or (row or {}).get("unit") or "",
+                                {"type": "master", "sheet": "Materials", "row": f"{family} / {material} / {inp['item']}"})
+            else:
+                if row is None or not isinstance(row["value"], (int, float)):
+                    raise RMError(f"{label}: Master data → Parameters has no number '{inp['item']}' for {family}.")
+                trace.add_input(nid, label, row["value"], inp["unit"] or row["unit"] or "",
+                                {"type": "master", "sheet": "Parameters", "row": f"{row['part_type']} / {inp['item']}"})
         elif inp["source"] == "part":
             if inp["item"] == "blanks_per_sheet":
                 deferred.append((var, label))

@@ -114,6 +114,7 @@ def guard(path: str) -> str | None:
         if f:                       # a 3D file or thumbnail of a part revision: the part's tool group decides
             r = db.revisions
             owners = conn.execute(select(r.c.part_id).where((r.c.file_id == int(f.group(1))) | (r.c.thumbnail_file_id == int(f.group(1))))).scalars().all()
+            owners += conn.execute(select(db.saved_files.c.part_id).where(db.saved_files.c.file_id == int(f.group(1)))).scalars().all()
             if owners and not any(part_ok(conn, pid, g) for pid in owners):
                 return f"This file belongs to a part of a tool group that is not yours ({_names(g)})."
             return None
