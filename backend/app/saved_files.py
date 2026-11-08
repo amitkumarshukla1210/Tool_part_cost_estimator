@@ -262,6 +262,10 @@ def disk_get(kind: str, key):
         return None
 
 
+def disk_has(kind: str, key) -> bool:
+    return not os.environ.get("DTC_NO_DISK_KEEP") and _disk_path(kind, key).exists()
+
+
 def disk_put(kind: str, key, obj) -> None:
     if os.environ.get("DTC_NO_DISK_KEEP"):
         return

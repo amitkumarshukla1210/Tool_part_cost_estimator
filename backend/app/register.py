@@ -2353,6 +2353,9 @@ def _simulate(part_id: int):
     with _SIMULATION_CACHE_LOCK:
         if key in _SIMULATION_CACHE:                     # kept for the last parts opened, not only the last one
             _SIMULATION_CACHE.move_to_end(key)
+            from . import saved_files
+            if not saved_files.disk_has("simulation", key):   # kept in memory only (e.g. made before): keep it on disk too
+                saved_files.disk_put("simulation", key, _SIMULATION_CACHE[key])
             return _SIMULATION_CACHE[key]
         from . import saved_files
         value = saved_files.disk_get("simulation", key)          # stage 47: kept on disk across restarts
