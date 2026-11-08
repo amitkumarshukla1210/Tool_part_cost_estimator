@@ -1,17 +1,18 @@
 ---
 name: design-to-cost-dev
-description: Use for any work on the Design to Cost / Part Cost Estimator repository (part, RM and tool cost, tool design and drawings, master data, rates, releases). Holds the project memory (stages 1-45) and the working rules (master data only added, main wins, one PR).
+description: Use for any work on the Design to Cost / Part Cost Estimator repository (part, RM and tool cost, tool design and drawings, master data, rates, releases). Holds the project memory (stages 1-49) and the working rules (master data only added, main wins, one PR).
 ---
 
 Project: **Design to Cost — Part Cost Estimator**, repository `amitkumarshukla1210/Tool_part_cost_estimator`.
 I am Amit, Head of Operations / costing at an OEM (supply chain, production, strategic sourcing, projects; RM, part and tool cost,
 BOM cost and CAPEX, EBITDA, digital transformation). Answer simply, **INR first**.
 
-**State (3 Nov 2026):** stages 1–46 are built (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
+**State (8 Nov 2026):** stages 1–49 are built (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
 cycle, PR 53; 43 = toolmaker review, 44 = design skills, both PR 55; 45 = tool internals, production data, FEA, 3D outputs, PR 57; fixes PR 59, 61, 62;
-46 = cavities, gate, overflow, ejection, cooling of the mould, PR 64); the next stage is **47** (first free number in `ROADMAP.md`). Everything of the old V4 branch is now on main (written new);
-the 4 old unmerged branches are NOT to be merged.
-To save tokens, do not read the whole README (1350+ lines): read the stage table in `ROADMAP.md` and only the README section of the topic I ask about.
+46 = cavities, gate, overflow, ejection, cooling of the mould, PR 64; 47 = saved files with revisions, 48 = India vs China per cost line,
+49 = scrap reuse and scrap rate % of RM, all PR 66); the next stage is **50** (first free number in `ROADMAP.md`). Everything of the old V4 branch is now on main (written new);
+the 4 old unmerged branches are NOT to be merged; neither is `rate-update-2026-11` (draft rates on an old main) as it is.
+To save tokens, do not read the whole README (1650+ lines): read the stage table in `ROADMAP.md` and only the README section of the topic I ask about.
 Stack: Python / FastAPI (`backend/app/`), plain HTML / JS (`frontend/`), SQLite (`data/projects.sqlite` = my data, `master_data/costing_db.sqlite`
 + `master_data/master_data.xlsx` = master data), CadQuery for 3D, reportlab (PDF), ezdxf (DXF), openpyxl (Excel). Local: Windows kit `windows/`
 (`DTC_Start.bat`, `DTC_Update.bat` with master-data merge, `DTC_Backup.bat`, `DTC_Restore.bat`, `DTC_Rollback.bat`) at http://127.0.0.1:8100/.
@@ -68,6 +69,29 @@ What the later stages added (details in README):
   New EXAMPLE values to replace: gate factors, `eject_extra_mm`, `stop_disc_mm`, coolant rows (`water_below_mould_c`, `water_dt_max_c`,
   `tcu_pressure_bar`, `dew_point_c` …), `cooling_cross_extra_mm`, `gate_freeze_share`. Full suite: ~25 min, 443 tests.
   Fingerprints: a cloud clone is shallow — `git fetch --unshallow` before `upgrade_tools fingerprints`, or old rows are lost.
+- PR 66 (fixes): Windows kit default port **8100** (app, `dtc_settings.ini`, docs); drawing set **one page per drawing**
+  (`tool_drawings._one_sheet`: title block at the foot, hole table under the views in up to 4 blocks `_hole_columns`, views /
+  pictures take the height left, KeepInFrame shrink as last resort); faster downloads (`render3d._fill_rows` row-by-row fill of
+  large triangles, 3× faster; meshes / pictures kept on the components `render3d.kept`; `register._kept_file` keeps finished
+  files, ZIP reuses the PDF `_drawing_set`; `GET …/tool-design/prepare` makes PDF + ZIP in the background after the panel has
+  loaded; links show "Preparing … n s"). **pypdf** was missing from requirements.txt (PDF logo stamp failed silently on Windows);
+  test_requirements checks every import, test_branding_all checks every part PDF / Excel / ZIP carries logo + name.
+- 47 (PR 66): saved files (`saved_files.py`, table `saved_files`): every GET file under /api/parts/{id}/ (pdf, xlsx, zip, dxf,
+  step, stl, png, html, mp4 …) saved with a revision (bytes via file_store, in backups) and served again while `part_state`
+  (hash per group: part, project, every part table, inserts, master data / rates files, drawing settings without drawn-by,
+  software stamp) is unchanged; after a change *out of date*, next revision made when asked, old ones kept with what changed
+  (part panel → Saved files; GET …/saved-files, …/saved-files/{id}; header X-DTC-Saved). Middleware `saved_part_files` sits
+  outside the brand stamp and inside AuthMiddleware (now added last = runs first). 3D design and simulation also pickled on
+  disk (`storage/kept`, `disk_get` / `disk_put`, keyed with the software stamp). Every part type.
+- 48 (PR 66): India vs comparison country (`landed.versus`, Register settings `compare_country` = CN, `landed.seed()`): tool and
+  part cost tables get China CNY / INR columns (same engines, China approved rates, traces in the answer: click opens them),
+  landed rows for both (exw, freight, insurance, CIF, BCD, SWS, IGST + credit taken, clearance, inland, landed); downloads
+  `/vs-country/export.xlsx|pdf` = `<part>_cost_India_vs_China.*`.
+- 49 (PR 66): scrap reuse (`rm_cost.seed_scrap_reuse`, plastic / die casting / foundry / EPS / blow): reused_g = scrap ×
+  `scrap_reuse_pct`, virgin_g = input − reused (RM cost on virgin), sold_g sold at `scrap_value` = RM rate ×
+  `scrap_rate_pct_of_rm` % when > 0, else the fixed scrap rate; part (RM inputs) > material (new optional Materials columns,
+  `master_data.MATERIAL_PARAMETERS`) > family (Parameters); starting 0 = as before. EXAMPLE: both %, China rates / duties /
+  freight. Full suite: ~26 min, 459 tests; audit 0 findings.
 - To open a STEP: his CAD, eDrawings Viewer (SOLIDWORKS free downloads; not "3DEXPERIENCE Exchange", that is a SOLIDWORKS add-in),
   CAD Assistant, FreeCAD, or the app's own 3D viewer. Windows 3D Viewer opens the STL, not STEP.
 - Amit's PC: kit at `D:\Project\DTC Tool and mould`, app on port 8100, CalculiX 2.22 `ccx_static.exe` in
