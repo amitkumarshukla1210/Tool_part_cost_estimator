@@ -1749,6 +1749,9 @@ def _server_startup():
     if auth.server_mode():
         projects_db.engine()
         auth.bootstrap_admin()       # optional: first admin from DTC_ADMIN_PASSWORD; otherwise /setup asks for it
+    if os.environ.get("DTC_AUTO_RATES", "").strip() == "1":     # Windows kit: monthly rate update once per new month
+        from . import auto_rates
+        auto_rates.start_in_background()
 
 
 class LoginIn(BaseModel):
@@ -1940,6 +1943,26 @@ def admin_backup_download(name: str):
         return FileResponse(admin.backup_file(name), media_type="application/zip", filename=name)
     except admin.AdminError as exc:
         raise HTTPException(404, str(exc)) from None
+
+
+@app.get("/api/admin/auto-rates")
+def admin_auto_rates():
+    """Monthly automatic country rate update (stage 52): last run and the log."""
+    auth.require("admin")
+    from . import auto_rates, rate_update
+    return auto_rates.status() | {"runs": [r for r in rate_update.runs(60) if r["source"] == "Auto monthly update"][:12]}
+
+
+@app.post("/api/admin/auto-rates/run")
+def admin_auto_rates_run():
+    auth.require("admin")
+    from . import auto_rates
+    if auto_rates.status()["running"]:
+        raise HTTPException(409, "An update is already running.")
+    import threading
+    who = register.user()
+    threading.Thread(target=auto_rates.run, kwargs={"user": who}, name="auto-rates", daemon=True).start()
+    return {"started": True}
 
 
 @app.get("/api/admin/about")

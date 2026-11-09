@@ -1592,6 +1592,29 @@ One Excel workbook per country (all countries of Master data → Countries), las
   values on the Rates page; approved rates fill the month columns at the next refresh) or the yellow entry rows. Nothing is
   filled in or guessed: a month without data stays empty. Master data is never changed by the rate book.
 
+## Monthly automatic country rates (stage 52)
+
+Every month each country gets **new approved rates** by itself, and an admin can still change any of them.
+
+- **When:** the Windows kit starts the app with `DTC_AUTO_RATES=1`; the first start in a new month runs the update in the
+  background (about a minute). Also: Admin → **Monthly rates** → *Update rates now* (admin), or `DTC_Country_Rates.bat`
+  (`python -m backend.app.auto_rates [--ilo-file …]`). The country rate book workbooks are built in the same run.
+- **What is written** (user *Auto monthly update*, origin `auto monthly`, approved, source text and link on every value):
+  - **Forex:** INR per CNY / USD / EUR / JPY / KRW / THB / TWD = market monthly average (FRED); VND from the World Bank yearly rate.
+  - **RM grades, tool & mould steels, scrap values:** last approved rate × (market index × local currency per USD) of the latest
+    published month ÷ the same in the month the last rate stands for (an auto rate says it: `index 2026-10→2026-11 ×1.0312`).
+    The index per grade is the one shown in the country rate book (LME aluminium / copper / nickel / zinc / tin / lead, iron ore,
+    US steel and resin price indices). No newer index month → no new version that month.
+  - **Electricity:** Germany = Eurostat half-yearly industrial price (EUR/kWh); other countries × the US PPI electric power ratio
+    (no free tariff series).
+  - **Salaries:** × the ILOSTAT yearly wage change of the country when ILO publishes a newer year (the year seen first is the
+    baseline). Machine hour and labour rates are formulas over these, so they follow.
+- **Admin stays in charge:** change any value on the Rates page (a new version). A rate that already has a version in a month is
+  never written again by the update, and the next month starts from the latest approved value - so your value becomes the base.
+  Results built on EXAMPLE rates stay EXAMPLE until you replace the base.
+- **Log:** Admin → Monthly rates (last runs) and the Rates page update log. A failing source is logged; the last approved rates
+  stay in use and costing never breaks. ILOSTAT refuses automatic downloads by design: the saved wage files are used.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:

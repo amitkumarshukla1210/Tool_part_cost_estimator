@@ -46,6 +46,7 @@
             <button role="tab" class="btn btn-outline" data-tab="backups" aria-selected="false">Backups &amp; update</button>
             <button role="tab" class="btn btn-outline" data-tab="drawings" aria-selected="false">Drawings (logo)</button>
             <button role="tab" class="btn btn-outline" data-tab="bot" aria-selected="false">AI assistant</button>
+            <button role="tab" class="btn btn-outline" data-tab="autorates" aria-selected="false">Monthly rates</button>
           </div>
           <span class="spacer"></span>
           <span class="note" id="whoami"></span>
@@ -170,6 +171,20 @@
         <p class="note">Get a key on <b>console.anthropic.com</b> → API keys (your company's Anthropic account; usage is billed there).
           The key is kept in this installation's project database (never in GitHub) and is never shown again, only its last 4
           characters. Backups contain it, so keep backup files safe.</p>
+      </div>
+      <div id="tab-autorates" class="tab-pane" hidden>
+        <p class="note">Every month the app downloads the free official sources and writes <b>new approved rates</b> for each country
+          (user <b>Auto monthly update</b>): forex; every RM grade, tool steel and scrap value by its market index (LME metals, steel
+          and resin price indices, iron ore, with the forex change); electricity (Germany from Eurostat, others by the power price
+          index); salaries by the ILOSTAT yearly wage change. Machine hour and labour rates follow from these. It runs by itself when
+          the app starts in a new month; the country rate book (one Excel per country) is built at the same time.</p>
+        <p class="note"><b>You stay in charge:</b> change any value on the <a class="link" href="/rates">Rates page</a> (a new version).
+          A rate that already has a version in a month is never written again by the update, and the next month starts from your
+          value. Results built on EXAMPLE rates stay marked EXAMPLE.</p>
+        <div class="card" id="autoState"></div>
+        <div class="dialog-actions"><button class="btn btn-primary" id="autoRun" type="button">Update rates now</button></div>
+        <h3 class="block-title">Last runs</h3>
+        <div class="table-wrap"><table class="cost-table" id="autoRuns"></table></div>
       </div>
     </div></section>
   </main>

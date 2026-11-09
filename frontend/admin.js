@@ -25,7 +25,7 @@ async function init() {
     $("newGroups").innerHTML = groupBoxes([], "groups");
   }
   const tabOk = { users: isAdmin, account: true, activity: info.mine.view_activity,
-    backups: info.mine.backups || info.mine.update_app, drawings: true, bot: isAdmin };
+    backups: info.mine.backups || info.mine.update_app, drawings: true, bot: isAdmin, autorates: isAdmin };
   document.querySelectorAll("#tabs [data-tab]").forEach((b) => (b.hidden = !tabOk[b.dataset.tab]));
   $("updateArea").hidden = !info.mine.update_app;
   $("updateManual").hidden = !info.mine.update_app;
@@ -38,7 +38,8 @@ function show(tab) {
   document.querySelectorAll(".tab-pane").forEach((p) => (p.hidden = p.id !== `tab-${tab}`));
   history.replaceState(null, "", `?tab=${tab}`);
   status($("status"), "");
-  ({ users: loadUsers, activity: () => loadActivity(false), backups: loadBackups, drawings: loadDrawing, bot: loadBot })[tab]?.();
+  ({ users: loadUsers, activity: () => loadActivity(false), backups: loadBackups, drawings: loadDrawing, bot: loadBot,
+     autorates: loadAutoRates })[tab]?.();
 }
 $("tabs").addEventListener("click", (e) => {
   const b = e.target.closest("[data-tab]");
@@ -332,4 +333,28 @@ $("botClear").addEventListener("click", async () => {
   } catch (err) {
     status($("status"), err.message, "error");
   }
+});
+
+// ---------- monthly automatic rate update (stage 52) ----------
+let autoTimer = null;
+async function loadAutoRates() {
+  clearTimeout(autoTimer);
+  try {
+    const a = await api("/api/admin/auto-rates");
+    $("autoState").innerHTML = `<p><b>This month:</b> ${esc(a.this_month)} · <b>last update for:</b> ${esc(a.last_month || "never")}
+      ${a.last_run ? `(${esc(a.last_run.replace("T", " "))})` : ""} · ${a.running ? "<b>running now …</b>" : a.due ? "due" : "done for this month"}</p>
+      <p class="note">${esc(a.last_message || "")}</p><p class="note">Workbooks: ${esc(a.folder)}</p>`;
+    $("autoRun").disabled = a.running;
+    $("autoRuns").innerHTML = `<thead><tr><th>When</th><th>Status</th><th class="num">New rates</th><th>Message</th><th>By</th></tr></thead><tbody>${
+      a.runs.map((r) => `<tr><td>${esc(String(r.at).replace("T", " "))}</td><td>${esc(r.status)}</td><td class="num">${r.created}</td>
+        <td>${esc(r.message)}</td><td>${esc(r.user || "")}</td></tr>`).join("") || `<tr><td colspan="5">No run yet.</td></tr>`}</tbody>`;
+    if (a.running) autoTimer = setTimeout(loadAutoRates, 5000);
+  } catch (e) { status($("status"), e.message, "error"); }
+}
+$("autoRun").addEventListener("click", async () => {
+  try {
+    await api("/api/admin/auto-rates/run", { method: "POST" });
+    status($("status"), "Update started: downloading the sources (about a minute).");
+    setTimeout(loadAutoRates, 1500);
+  } catch (e) { status($("status"), e.message, "error"); }
 });
