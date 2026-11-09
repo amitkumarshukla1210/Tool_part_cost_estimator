@@ -301,16 +301,26 @@ def recalculate_pieces(project_id: int) -> dict:
                if sv["visible"] is None or r in sv["visible"]]
     done = same = 0
     skipped = []
+    reason = "recalculated with the latest approved rates"
+    before = {"rm": 0, "tool": 0}
     for pid in ids:
+        # one click: RM cost and tool cost first (new prices, tool steels, tool life), then the part cost that uses them.
+        # A step that does not apply to the part (bought-out, no tool …) is skipped; its error then shows on the part cost.
+        for key, step in (("rm", register.compute_rm), ("tool", register.compute_tool)):
+            try:
+                before[key] += step(pid, reason)["stored"]
+            except register.RegisterError:
+                pass
         try:
-            res = register.compute_piece(pid, "recalculated with the latest approved rates")
+            res = register.compute_piece(pid, reason)
         except register.RegisterError as exc:
             if not register.tool_eligibility(register.part_detail(pid, with_rm=False)):
                 skipped.append({"part_id": pid, "why": str(exc)})
             continue
         done += res["stored"]
         same += not res["stored"]
-    return {"new_versions": done, "unchanged": same, "problems": skipped}
+    return {"new_versions": done, "unchanged": same, "problems": skipped,
+            "rm_new_versions": before["rm"], "tool_new_versions": before["tool"]}
 
 
 def to_excel(project_id: int) -> bytes:

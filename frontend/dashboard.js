@@ -134,12 +134,12 @@ async function editCapex(item) {
   }
 }
 $("pieceRecalc").addEventListener("click", async () => {
-  status($("status"), "Recalculating the part cost of every part…");
+  status($("status"), "Recalculating RM cost, tool cost and part cost of every part…");
   try {
     const r = await api(`/api/projects/${current()}/piece-cost/recalculate`, { method: "POST" });
     await load();
     loadChanges();
-    status($("status"), `${r.new_versions} part(s) got a new part cost version, ${r.unchanged} unchanged.` + (r.problems.length ? ` ${r.problems.length} could not be costed (open the part to see why).` : ""), r.problems.length ? "error" : "ok");
+    status($("status"), `RM cost: ${r.rm_new_versions ?? 0} new version(s) · tool cost: ${r.tool_new_versions ?? 0} · part cost: ${r.new_versions} part(s) got a new version, ${r.unchanged} unchanged.` + (r.problems.length ? ` ${r.problems.length} could not be costed (open the part to see why).` : ""), r.problems.length ? "error" : "ok");
   } catch (err) {
     status($("status"), err.message, "error");
   }
