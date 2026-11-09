@@ -172,3 +172,27 @@ def test_rm_sheet_groups_grades_by_family_and_lists_missing_grades_for_entry(tmp
     assert lm2[30].value.startswith("Aluminium (LME")
     am = next(r for r in ws.iter_rows(min_row=c) if r[0].value == "AM60B")
     assert am[30].value == "-"                                                                    # magnesium: no free index
+
+
+def test_missing_ilo_file_is_reported_and_the_workbooks_are_still_built(tmp_path, capsys):
+    p = crb.run(["IN"], tmp_path, http=fake, today=TODAY, ilo_files=[tmp_path / "file1.csv"])
+    assert p and p[0].exists()
+    log = crb.load_history(tmp_path)["runs"][-1]["log"]
+    assert any("NOT FOUND" in line and "file1.csv" in line for line in log)
+    crb.main(["--countries", "IN", "--out", str(tmp_path), "--offline", "--ilo-file", str(tmp_path / "nope.csv")])
+    assert "NOT FOUND" in capsys.readouterr().out
+
+
+def test_ilo_explorer_csv_with_labels_and_old_bulk_csv_are_read():
+    labels = ("STRUCTURE,STRUCTURE_ID,ACTION,REF_AREA: Reference area,FREQ: Frequency,MEASURE: Measure,SEX: Sex,"
+              "OCU: Occupation,CUR: Currency,TIME_PERIOD: Time,OBS_VALUE,SOURCE\n"
+              "dataflow,ILO:DF_EAR_EHRA_SEX_OCU_CUR_NB(1.0),I,IND: India,A: Annual,EAR: Earnings,SEX_T: Total,"
+              "OCU_SKILL_L2: Skill level 2,CUR_TYPE_USD: US dollars,2025: 2025,0.80,LFS\n").encode()
+    r = crb.parse_ilo(labels)[0]
+    assert (r["area"], r["cls"], r["cur"], r["year"], r["value"], r["sex"]) == ("IND", "OCU_SKILL_L2", "CUR_TYPE_USD", "2025", 0.8, "SEX_T")
+    assert "EHRA_SEX_OCU" in r["flow"]
+    bulk = (b"ref_area,source,indicator,sex,classif1,classif2,time,obs_value\n"
+            b"CHN,ADM,EAR_EMTA_SEX_ECO_CUR_NB_A,SEX_T,ECO_ISIC4_C,CUR_TYPE_LCU,2022,5613\n")
+    r = crb.parse_ilo(bulk)[0]
+    assert (r["area"], r["cls"], r["cur"], r["year"], r["value"]) == ("CHN", "ECO_ISIC4_C", "CUR_TYPE_LCU", "2022", 5613.0)
+    assert "EMTA_SEX_ECO" in r["flow"]

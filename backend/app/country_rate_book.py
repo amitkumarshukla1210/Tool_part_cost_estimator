@@ -149,18 +149,32 @@ def parse_fred(body: bytes) -> dict[str, float]:
     return {m: sum(v) / len(v) for m, v in sums.items()}
 
 
+def _code(v) -> str:
+    """'IND: India' -> 'IND' (data explorer 'codes and labels' export); plain codes stay as they are."""
+    return str(v or "").split(":")[0].strip()
+
+
 def parse_ilo(body: bytes) -> list[dict]:
-    """ILOSTAT SDMX-CSV -> rows {area, cls, cur, year, value, source, note}."""
+    """ILOSTAT CSV -> rows {flow, sex, area, cls, cur, year, value, source, note}.
+
+    Takes the SDMX-CSV of the ILO API / data explorer (codes, or 'CODE: label' columns and values; DATAFLOW or STRUCTURE_ID)
+    and the older ILOSTAT bulk CSV (ref_area, indicator, sex, classif1, classif2, time, obs_value)."""
+    text = body.decode("utf-8-sig", errors="replace")
     out = []
-    for r in csv.DictReader(io.StringIO(body.decode("utf-8-sig"))):
+    for raw in csv.DictReader(io.StringIO(text)):
+        r = {_code(k).upper(): v for k, v in raw.items() if k}
         try:
-            v = float(r["OBS_VALUE"])
-        except (KeyError, ValueError, TypeError):
+            v = float(str(r.get("OBS_VALUE", "")).strip())
+        except ValueError:
             continue
-        out.append({"flow": r.get("DATAFLOW", ""), "sex": r.get("SEX", "SEX_T"),
-                    "area": r.get("REF_AREA", ""), "cls": r.get("OCU") or r.get("ECO") or "", "cur": r.get("CUR", ""),
-                    "year": str(r.get("TIME_PERIOD", "")), "value": v, "source": r.get("SOURCE", ""),
-                    "note": r.get("NOTE_INDICATOR", "") or ""})
+        flow = r.get("DATAFLOW") or r.get("STRUCTURE_ID") or r.get("INDICATOR") or ""
+        c1, c2 = _code(r.get("CLASSIF1")), _code(r.get("CLASSIF2"))
+        cls = _code(r.get("OCU") or r.get("ECO")) or next((c for c in (c1, c2) if c.startswith(("OCU_", "ECO_"))), "")
+        cur = _code(r.get("CUR")) or next((c for c in (c1, c2) if c.startswith("CUR_")), "")
+        out.append({"flow": _code(flow) if ":" in flow and "(" not in flow else flow, "sex": _code(r.get("SEX")) or "SEX_T",
+                    "area": _code(r.get("REF_AREA")), "cls": cls, "cur": cur,
+                    "year": _code(r.get("TIME_PERIOD") or r.get("TIME")), "value": v,
+                    "source": str(r.get("SOURCE", "") or ""), "note": str(r.get("NOTE_INDICATOR", "") or "")})
     return out
 
 
@@ -211,11 +225,26 @@ def merge_ilo(hist: dict, tag: str | None, rows: list[dict], log: list, today: d
 
 
 def import_ilo(out_dir: Path, files: list[Path], today: date | None = None) -> int:
-    """ILOSTAT SDMX-CSV files downloaded by hand (data explorer → Download → CSV) into the history."""
+    """ILOSTAT CSV files downloaded by hand into the history. A missing or unreadable file is reported and skipped:
+    the workbooks are still built from what there is."""
     today = today or date.today()
     hist = load_history(out_dir)
     log: list[str] = []
-    n = sum(merge_ilo(hist, None, parse_ilo(Path(f).read_bytes()), log, today) for f in files)
+    n = 0
+    for f in files:
+        f = Path(f)
+        if not f.is_file():
+            log.append(f"ILOSTAT file NOT FOUND, skipped: {f} (check the name and folder; see README, country rate book)")
+            continue
+        try:
+            rows = parse_ilo(f.read_bytes())
+        except (OSError, csv.Error, UnicodeError) as exc:
+            log.append(f"ILOSTAT file NOT READ, skipped: {f}: {exc}")
+            continue
+        k = merge_ilo(hist, None, rows, log, today)
+        log.append(f"ILOSTAT file {f.name}: {k} values" + ("" if k else " - not an ILOSTAT earnings CSV of "
+                   "EAR_EHRA_SEX_OCU_CUR_NB / EAR_EMTA_SEX_ECO_CUR_NB, or no 'both sexes' rows"))
+        n += k
     hist.setdefault("runs", []).append({"at": datetime.now().isoformat(timespec="seconds"),
                                         "log": [f"ILOSTAT file import: {n} values from {len(files)} file(s)"] + log})
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1165,10 +1194,12 @@ def main(argv=None) -> int:
                     help="ILOSTAT SDMX-CSV downloaded by hand (EAR_EHRA_SEX_OCU_CUR_NB / EAR_EMTA_SEX_ECO_CUR_NB); repeatable")
     a = ap.parse_args(argv)
     codes = [c.strip().upper() for c in a.countries.split(",")] if a.countries else None
-    paths = run(codes, Path(a.out) if a.out else None, a.offline, ilo_files=[Path(f) for f in a.ilo_file])
-    hist = load_history(paths[0].parent) if paths else {"runs": []}
-    for line in (hist.get("runs") or [{}])[-1].get("log", []):
-        print(line)
+    out = Path(a.out) if a.out else default_out()
+    before = len(load_history(out).get("runs", []))
+    paths = run(codes, out, a.offline, ilo_files=[Path(f) for f in a.ilo_file])
+    for r in load_history(out).get("runs", [])[before:]:          # the log of this refresh (downloads, file import)
+        for line in r.get("log", []):
+            print(line)
     for p in paths:
         print(f"Written: {p}")
     return 0

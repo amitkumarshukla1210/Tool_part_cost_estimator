@@ -1579,9 +1579,14 @@ One Excel workbook per country (all countries of Master data → Countries), las
   diesel; Federal Reserve H.10 forex), ILOSTAT (ILO), Eurostat `nrg_pc_205`, World Bank `PA.NUS.FCRF`. The downloads are kept in
   `country_rate_book_history.json` next to the workbooks: append-only, a value revised by the source is replaced and logged, a
   source that fails is logged and the history stays in use.
-- **ILOSTAT** may refuse automatic downloads (HTTP 403). Then open the ILOSTAT data explorer, download *Mean nominal hourly
-  earnings of employees by occupation (skill level)* and *Mean nominal monthly earnings of employees by economic activity* as CSV
-  and run with `--ilo-file file1.csv --ilo-file file2.csv` (the bat takes the same arguments).
+- **ILOSTAT** may refuse automatic downloads (HTTP 403). Then open these two links in your browser (each saves a CSV in Downloads):
+  - hourly earnings by skill level: `https://sdmx.ilo.org/rest/data/ILO,DF_EAR_EHRA_SEX_OCU_CUR_NB/IND+CHN+KOR+JPN+THA+VNM+DEU+USA.A..SEX_T..?startPeriod=2018&format=csvfile`
+  - monthly earnings by activity: `https://sdmx.ilo.org/rest/data/ILO,DF_EAR_EMTA_SEX_ECO_CUR_NB/IND+CHN+KOR+JPN+THA+VNM+DEU+USA.A..SEX_T.ECO_ISIC4_C.?startPeriod=2018&format=csvfile`
+
+  and run `DTC_Country_Rates.bat --ilo-file "<path of the first CSV>" --ilo-file "<path of the second CSV>"` with the real file
+  names. A CSV saved from the ILOSTAT data explorer (codes, or codes and labels) or the older ILOSTAT bulk CSV works too. A file
+  that is not found or not an ILOSTAT earnings CSV is reported (NOT FOUND / 0 values) and the workbooks are still built. Once
+  imported, the figures stay in the history: import again only when ILO publishes a new year.
 - **What is not free:** steel and plastic grade prices per country (only the US PPI as a trend), machine hour rates, industrial
   electricity tariffs outside the EU, container freight indices. These come from the tool's own rates (replace the EXAMPLE
   values on the Rates page; approved rates fill the month columns at the next refresh) or the yellow entry rows. Nothing is
