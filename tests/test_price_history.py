@@ -55,6 +55,19 @@ def test_auto_update_fills_the_history_once(tmp_path, monkeypatch):
     res = auto_rates.run(out_dir=tmp_path, http=fake, today=TODAY, build=False)
     assert "24-month history filled" in res["message"] and auto_rates.status()["history_done"]
     assert auto_rates.run_if_due() is None
+    again = auto_rates.run(out_dir=tmp_path, http=fake, today=TODAY, build=False)        # every run fills what is missing
+    assert "24-month history: nothing missing" in again["message"]
+
+
+def test_a_run_without_index_data_says_so_and_a_later_run_fills(tmp_path, monkeypatch):
+    monkeypatch.setattr(rates, "current_month", lambda: "2026-11")
+    def offline(url, accept=None):
+        raise OSError("no internet")
+    res = auto_rates.run(out_dir=tmp_path, http=offline, build=False)
+    assert "NO market index data" in res["message"] and not auto_rates.status()["history_done"]
+    from tests.test_country_rate_book import TODAY, fake
+    res = auto_rates.run(out_dir=tmp_path, http=fake, today=TODAY, build=False)
+    assert "24-month history filled" in res["message"]
 
 
 def test_more_stainless_en_steel_and_plastic_grades():
