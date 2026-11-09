@@ -1243,6 +1243,9 @@ def default_out() -> Path:
     return Path(__file__).resolve().parents[2] / "data" / "country_rates"
 
 
+LOCKED: list[str] = []      # workbooks of the last run that could not be written (open in Excel)
+
+
 def run(countries: list[str] | None = None, out_dir: Path | None = None, offline: bool = False, http=_http,
         today: date | None = None, ilo_files: list[Path] | None = None) -> list[Path]:
     from . import costing_setup
@@ -1256,12 +1259,17 @@ def run(countries: list[str] | None = None, out_dir: Path | None = None, offline
         import_ilo(out_dir, ilo_files, today)
     hist = load_history(out_dir)
     paths = []
+    LOCKED.clear()
     for c in chosen:
         wb = build(c["code"], hist, app_data(c["code"]), today=today)
         last = wb["RM_Price"].cell(4, 2 + MONTHS).value                              # last month column, e.g. Oct-26
         tag = datetime.strptime(last, "%b-%y").strftime("%Y-%m")
         p = out_dir / f"Country_Rates_{c['name'].replace(' ', '_')}_{tag}.xlsx"
-        wb.save(p)
+        try:
+            wb.save(p)
+        except PermissionError:                         # open in Excel: skip it, build the others, say so
+            LOCKED.append(str(p))
+            continue
         paths.append(p)
     return paths
 
@@ -1284,6 +1292,8 @@ def main(argv=None) -> int:
             print(line)
     for p in paths:
         print(f"Written: {p}")
+    for p in LOCKED:
+        print(f"NOT written (open in Excel - close it and run again): {p}")
     return 0
 
 

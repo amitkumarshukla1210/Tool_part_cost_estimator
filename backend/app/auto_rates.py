@@ -253,11 +253,11 @@ def run(user: str = SYSTEM_USER, out_dir: Path | None = None, http=crb._http, il
         hist = crb.load_history(out_dir)
         res = apply(hist)
         n = sum(res["written"].values())
-        history = None
-        if state("history_done") != "1":                 # stage 54: 24 months of history, once
-            from . import price_history
-            history = price_history.backfill(hist)
+        from . import price_history                     # stage 54: every run fills the months still empty in the last
+        history = price_history.backfill(hist)          # 24 (idempotent, < 1 s), so a run without index data is made up later
+        if series_ok(hist):                              # done only with real index data; else the next start tries again
             set_state("history_done", "1")
+        set_state("history_last", f"{history['total']} month values ({history['months']})")
         last_log = [x for r in hist.get("runs", []) if r.get("at", "") >= started for x in r.get("log", [])]   # this refresh
         fails = [line for line in last_log if line.startswith("FAILED") and "ILOSTAT" not in line]   # ILO: refused by design,
         ilo_note = any(line.startswith("FAILED ILOSTAT") for line in last_log)                        # saved files are used
@@ -265,13 +265,18 @@ def run(user: str = SYSTEM_USER, out_dir: Path | None = None, http=crb._http, il
                f"{res['kept']} kept (already set this month), {res['unchanged']} without a newer index"
                + (f"; {len(fails)} source(s) failed" if fails else "")
                + ("; ILOSTAT: saved wage data used (new year: DTC_Country_Rates.bat --ilo-file)" if ilo_note else "")
-               + (f"; 24-month history filled: {history['total']} month values ({history['months']})" if history else ""))
+               + (f"; 24-month history filled: {history['total']} month values ({history['months']})" if history["total"]
+                  else "; 24-month history: nothing missing")
+               + ("" if series_ok(hist) else
+                  "; NO market index data downloaded yet - grades not filled (check the internet / proxy, then Update rates now)"))
         rate_update._log("Auto monthly update", "ok" if not fails else "partial", msg, n, user)
         set_state("last_month", res["month"])
         set_state("last_run", datetime.now().isoformat(timespec="seconds"))
         set_state("last_message", msg)
         paths = crb.run(None, out_dir, offline=True, today=today) if build else []
-        return {"status": "ok", "message": msg, "written": res["written"], "log": res["log"] + fails,
+        locked = list(crb.LOCKED)
+        return {"status": "ok", "message": msg, "written": res["written"],
+                "log": res["log"] + fails + [f"NOT written (open in Excel - close it and run again): {p}" for p in locked],
                 "workbooks": [str(p) for p in paths], "folder": str(out_dir)}
     except Exception as exc:  # noqa: BLE001 - the app keeps running; the last approved rates stay in use
         try:
@@ -285,11 +290,17 @@ def run(user: str = SYSTEM_USER, out_dir: Path | None = None, http=crb._http, il
         _LOCK.release()
 
 
+def series_ok(hist: dict) -> bool:
+    """The downloaded history has the index and forex data the 24-month fill needs."""
+    s = hist.get("series", {})
+    return bool(s.get("fx_INR", {}).get("values")) and bool(s.get("aluminium", {}).get("values"))
+
+
 def status() -> dict:
     return {"last_month": state("last_month"), "last_run": state("last_run"), "last_message": state("last_message"),
             "this_month": rates.current_month(),
             "due": state("last_month") != rates.current_month() or state("history_done") != "1",
-            "history_done": state("history_done") == "1",
+            "history_done": state("history_done") == "1", "history_last": state("history_last"),
             "running": _LOCK.locked(), "folder": str(crb.default_out())}
 
 
