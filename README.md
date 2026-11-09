@@ -1683,7 +1683,12 @@ Every month each country gets **new approved rates** by itself, and an admin can
 
 The cost lines come from each stored version's own trace: the terms of the part cost formula (Cost formulas, scope piece),
 with every step that is only a sum of other steps (e.g. cost before profit) opened up, so they always add up to the part
-cost and follow your formulas. The report only reads stored versions; it changes nothing. Values in INR (other currencies
+cost and follow your formulas. The report only reads stored versions; it changes nothing.
+
+**One click:** *Recalculate part costs (RM + tool + part)* on the project page first recalculates the RM cost and the tool
+cost of every part with the latest approved rates (new Price master prices, tool steels, tool life), then the part cost that
+uses them - so a price change reaches the part cost and the Cost changes report at once. Only parts whose cost really changed
+get a new version. The separate *Recalculate RM* and *Recalculate tools* buttons still work alone. Values in INR (other currencies
 at the forex rate stored with each version).
 
 **Excel and PDF (stage 56).** The card's *Excel* and *PDF* buttons download the same report for the chosen date, with your
