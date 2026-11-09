@@ -156,6 +156,8 @@ async function loadChanges() {
   try {
     const c = await api(`/api/projects/${current()}/cost-changes${since ? `?since=${since}` : ""}`);
     $("ccSince").value = c.since;
+    $("ccXlsx").href = `/api/projects/${current()}/cost-changes.xlsx?since=${c.since}`;
+    $("ccPdf").href = `/api/projects/${current()}/cost-changes.pdf?since=${c.since}`;
     const t = c.totals;
     $("ccNote").textContent = `${t.changed} changed (${t.flagged} by ±${c.flag_pct}% or more), ${t.new} new, ${t.unchanged} unchanged, ${t.no_cost} without a part cost.`;
     const ver = (v) => (v ? `${rs(v.cost_inr)}<div class="note">v${v.version} · ${esc(v.at.replace("T", " "))}</div>` : "—");

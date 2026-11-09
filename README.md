@@ -1691,6 +1691,13 @@ uses them - so a price change reaches the part cost and the Cost changes report 
 get a new version. The separate *Recalculate RM* and *Recalculate tools* buttons still work alone. Values in INR (other currencies
 at the forex rate stored with each version).
 
+**Excel and PDF (stage 56).** The card's *Excel* and *PDF* buttons download the same report for the chosen date, with your
+logo and company name (stage 35): Excel sheets *Summary* (date, threshold, counts), *Parts* (cost then / now with version,
+date, change ₹ and %, status, highlighted rows shaded, stored reason, who, rate month) and *Cost lines* (every part's lines
+then / now / change, moved lines marked); the PDF (A4 landscape, for management) has the counts, the parts table with
+highlighted rows shaded and FLAG, and the cost lines of the changed parts with the moved lines in bold. EXAMPLE rates are
+flagged as everywhere else. API: `/api/projects/{id}/cost-changes.xlsx?since=YYYY-MM-DD` and `.pdf`.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:

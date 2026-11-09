@@ -72,3 +72,29 @@ def test_threshold_and_default_date_come_from_master_data():
     assert c["since"] == (date.today() - timedelta(days=7)).isoformat() and c["flag_pct"] == 12
     assert client.get(f"/api/projects/{p['id']}/cost-changes", params={"since": "31-12-2026"}).status_code == 400
     assert client.get("/api/projects/99999/cost-changes").status_code == 400
+
+
+def test_excel_and_pdf_downloads():
+    """Stage 56: the same report as Excel (Summary, Parts, Cost lines) and PDF."""
+    import io
+    from openpyxl import load_workbook
+    p = project()
+    pid = costed_part(p, "CC-6")
+    backdate(pid, 1, datetime(2026, 1, 10, 9, 0))
+    set_all("rejection_pct", 10)
+    client.post(f"/api/projects/{p['id']}/piece-cost/recalculate")
+    x = client.get(f"/api/projects/{p['id']}/cost-changes.xlsx", params={"since": "2026-06-01"})
+    assert x.status_code == 200 and "attachment" in x.headers["content-disposition"]
+    wb = load_workbook(io.BytesIO(x.content))
+    assert {"Summary", "Parts", "Cost lines"} <= set(wb.sheetnames)
+    parts = list(wb["Parts"].iter_rows(values_only=True))
+    head, row = parts[0], next(r for r in parts[1:] if r[0] == "CC-6")
+    c = client.get(f"/api/projects/{p['id']}/cost-changes", params={"since": "2026-06-01"}).json()
+    r = next(r for r in c["rows"] if r["part_id"] == pid)
+    assert row[head.index("Status")] == "Changed" and row[head.index("Highlighted")] == "⚑"
+    assert row[head.index("Change (INR/part)")] == pytest.approx(r["delta_inr"])
+    lines = [l for l in wb["Cost lines"].iter_rows(values_only=True) if l[0] == "CC-6"]
+    assert sum(l[5] for l in lines) == pytest.approx(r["delta_inr"]) and any(l[6] == "yes" for l in lines)
+    pdf = client.get(f"/api/projects/{p['id']}/cost-changes.pdf", params={"since": "2026-06-01"})
+    assert pdf.status_code == 200 and pdf.content[:4] == b"%PDF"
+    assert client.get(f"/api/projects/{p['id']}/cost-changes.pdf", params={"since": "bad"}).status_code == 400
