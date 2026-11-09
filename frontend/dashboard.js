@@ -35,6 +35,7 @@ async function load() {
   status($("status"), "");
   render();
   loadLeader();
+  loadChanges();
 }
 
 // ---------- project leader view (stage 13) ----------
@@ -137,11 +138,47 @@ $("pieceRecalc").addEventListener("click", async () => {
   try {
     const r = await api(`/api/projects/${current()}/piece-cost/recalculate`, { method: "POST" });
     await load();
+    loadChanges();
     status($("status"), `${r.new_versions} part(s) got a new part cost version, ${r.unchanged} unchanged.` + (r.problems.length ? ` ${r.problems.length} could not be costed (open the part to see why).` : ""), r.problems.length ? "error" : "ok");
   } catch (err) {
     status($("status"), err.message, "error");
   }
 });
+
+// cost change report (stage 55): part cost now vs the cost valid on a date, line by line, INR first
+const rs = (v, d = 2) => (v == null ? "—" : `₹${Number(v).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d })}`);
+const signed = (v, d = 2) => (v == null ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${rs(Math.abs(v), d)}`);
+const STATUS = { changed: "Changed", new: "New since the date", unchanged: "Unchanged", no_cost: "No part cost yet" };
+async function loadChanges() {
+  if (!current()) return;
+  const since = $("ccSince").value;
+  $("costChanges").innerHTML = '<p class="note">Reading the stored part costs…</p>';
+  try {
+    const c = await api(`/api/projects/${current()}/cost-changes${since ? `?since=${since}` : ""}`);
+    $("ccSince").value = c.since;
+    const t = c.totals;
+    $("ccNote").textContent = `${t.changed} changed (${t.flagged} by ±${c.flag_pct}% or more), ${t.new} new, ${t.unchanged} unchanged, ${t.no_cost} without a part cost.`;
+    const ver = (v) => (v ? `${rs(v.cost_inr)}<div class="note">v${v.version} · ${esc(v.at.replace("T", " "))}</div>` : "—");
+    const shown = (r) => r.lines.filter((l) => Math.abs(l.then_inr || 0) >= 0.005 || Math.abs(l.now_inr || 0) >= 0.005);
+    const lines = (r) => (r.lines.length ? `<details><summary>${r.lines.filter((l) => Math.abs(l.delta_inr) >= 0.005).length} line(s) moved</summary>
+      <table class="cost-table" data-nofilter><thead><tr><th>Cost line</th><th class="num">Then</th><th class="num">Now</th><th class="num">Change</th></tr></thead><tbody>
+      ${shown(r).map((l) => `<tr${Math.abs(l.delta_inr) >= 0.005 ? ' class="total"' : ""}><td>${esc(l.label)}</td><td class="num">${rs(l.then_inr)}</td>
+        <td class="num">${rs(l.now_inr)}</td><td class="num">${signed(l.delta_inr)}</td></tr>`).join("")}</tbody></table>
+      ${r.lines.length > shown(r).length ? `<p class="note">${r.lines.length - shown(r).length} line(s) at ₹0 then and now not shown.</p>` : ""}
+      <p class="note">${esc(r.now.reason || "")}${r.now.by ? ` · ${esc(r.now.by)}` : ""} · rates of ${esc(r.now.as_of)}</p></details>` : "");
+    $("costChanges").innerHTML = (c.scope.limited ? `<p class="note">${esc(c.scope.note)}</p>` : "") + `<div class="table-wrap"><table class="cost-table" data-nofilter>
+      <thead><tr><th>Part</th><th>Name</th><th class="num">Part cost on ${esc(c.since)}</th><th class="num">Part cost now</th><th class="num">Change (₹/part)</th>
+        <th class="num">Change (%)</th><th>Status</th><th>Why (cost lines)</th></tr></thead><tbody>
+      ${c.rows.map((r) => `<tr${r.flagged ? ' class="over"' : ""}><td><a href="/parts?part=${r.part_id}">${esc(r.part_code)}</a></td><td>${esc(r.name)}</td>
+        <td class="num">${ver(r.then)}</td><td class="num">${ver(r.now)}</td><td class="num">${signed(r.delta_inr)}</td>
+        <td class="num">${r.delta_pct == null ? "—" : `${r.delta_pct > 0 ? "+" : ""}${fmt(r.delta_pct, 1)} %`}${r.flagged ? " ⚑" : ""}</td>
+        <td>${STATUS[r.status]}</td><td>${lines(r)}</td></tr>`).join("") || '<tr><td colspan="8" class="empty">No parts.</td></tr>'}</tbody></table></div>
+      <p class="note">⚑ = change of ±${c.flag_pct}% or more (Master data → Parameters → all / cost_change_flag_pct). Each cost line is read from that version's own trace.</p>`;
+  } catch (err) {
+    $("costChanges").innerHTML = `<p class="note">${esc(err.message)}</p>`;
+  }
+}
+$("ccShow").addEventListener("click", loadChanges);
 
 function tile(label, value, sub = "", alert = false) {
   return `<div class="card tile ${alert ? "alert" : ""}"><div class="label">${esc(label)}</div>

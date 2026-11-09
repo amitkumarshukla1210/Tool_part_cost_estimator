@@ -690,6 +690,16 @@ def projects_piece_recalculate(project_id: int):
     return leader.recalculate_pieces(project_id)
 
 
+@app.get("/api/projects/{project_id}/cost-changes")
+def projects_cost_changes(project_id: int, since: Optional[str] = None):
+    """Cost change report: every part's cost now vs the cost valid on `since` (YYYY-MM-DD), line by line (roadmap stage 55)."""
+    from . import cost_changes
+    try:
+        return cost_changes.report(project_id, since)
+    except cost_changes.ChangeError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
 @app.post("/api/projects/{project_id}/capex/build")
 def projects_capex_build(project_id: int):
     from . import leader

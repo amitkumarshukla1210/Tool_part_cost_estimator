@@ -1667,6 +1667,25 @@ Every month each country gets **new approved rates** by itself, and an admin can
   SAN / ASA, Acrylic (PMMA), PPO / PPE, PPS, Thermoplastic elastomer); tool steels EN19 / EN36 / EN353, SS 420, 440C,
   SS 304, 1.2311+S, 1.2344 ESR, 1.2379 ESR, ASP 23, Vanadis 4E, tungsten carbide, Ampcoloy 940.
 
+## Cost change report of a project (stage 55)
+
+**Project page → Cost changes.** Pick a date (default: today minus Parameters → all / `cost_change_lookback_days`, EXAMPLE
+30 days) and press *Show changes*; the report is shown again after *Recalculate part costs*. For every part of the project
+(only your tool groups if your login is limited):
+
+| Column | What it is |
+|---|---|
+| Part cost on the date | the latest stored part cost version made on or before that day (version, date) |
+| Part cost now | the latest stored version |
+| Change | ₹ per part and %; ⚑ when it is ±`cost_change_flag_pct` (EXAMPLE 5 %) or more: listed first |
+| Status | changed · new since the date (no cost then) · unchanged · no part cost yet |
+| Why | the cost lines then / now / change: RM, process, rejection, overhead, profit, packing, tool amortisation, logistics … |
+
+The cost lines come from each stored version's own trace: the terms of the part cost formula (Cost formulas, scope piece),
+with every step that is only a sum of other steps (e.g. cost before profit) opened up, so they always add up to the part
+cost and follow your formulas. The report only reads stored versions; it changes nothing. Values in INR (other currencies
+at the forex rate stored with each version).
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:

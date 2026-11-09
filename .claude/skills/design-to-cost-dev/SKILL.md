@@ -7,11 +7,11 @@ Project: **Design to Cost — Part Cost Estimator**, repository `amitkumarshukla
 I am Amit, Head of Operations / costing at an OEM (supply chain, production, strategic sourcing, projects; RM, part and tool cost,
 BOM cost and CAPEX, EBITDA, digital transformation). Answer simply, **INR first**.
 
-**State (9 Nov 2026):** stages 1–54 are built (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
+**State (9 Nov 2026):** stages 1–55 are built (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
 cycle, PR 53; 43 = toolmaker review, 44 = design skills, both PR 55; 45 = tool internals, production data, FEA, 3D outputs, PR 57; fixes PR 59, 61, 62;
 46 = cavities, gate, overflow, ejection, cooling of the mould, PR 64; 47 = saved files with revisions, 48 = India vs China per cost line,
 49 = scrap reuse and scrap rate % of RM, all PR 66; 50 = several countries per part, traces for admin, tool life per part,
-suppliers removed, PR 68; 51 = country rate book, PR 70; 52 = monthly automatic country rates, PR 71; 53 = unique codes, live Price master link, main / sub materials, more grades, PR 72; 54 = 24-month history for every rate + more grades, PR 73); the next stage is **55** (first free number in `ROADMAP.md`). Everything of the old V4 branch is now on main (written new);
+suppliers removed, PR 68; 51 = country rate book, PR 70; 52 = monthly automatic country rates, PR 71; 53 = unique codes, live Price master link, main / sub materials, more grades, PR 72; 54 = 24-month history for every rate + more grades, PR 73; 55 = cost change report of a project (`cost_changes.py`)); the next stage is **56** (first free number in `ROADMAP.md`). Everything of the old V4 branch is now on main (written new);
 the 4 old unmerged branches are NOT to be merged; neither is `rate-update-2026-11` (draft rates on an old main) as it is.
 To save tokens, do not read the whole README (1650+ lines): read the stage table in `ROADMAP.md` and only the README section of the topic I ask about.
 Stack: Python / FastAPI (`backend/app/`), plain HTML / JS (`frontend/`), SQLite (`data/projects.sqlite` = my data, `master_data/costing_db.sqlite`
