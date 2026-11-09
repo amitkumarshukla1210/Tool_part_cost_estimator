@@ -274,7 +274,9 @@ def run(user: str = SYSTEM_USER, out_dir: Path | None = None, http=crb._http, il
         set_state("last_run", datetime.now().isoformat(timespec="seconds"))
         set_state("last_message", msg)
         paths = crb.run(None, out_dir, offline=True, today=today) if build else []
-        return {"status": "ok", "message": msg, "written": res["written"], "log": res["log"] + fails,
+        locked = list(crb.LOCKED)
+        return {"status": "ok", "message": msg, "written": res["written"],
+                "log": res["log"] + fails + [f"NOT written (open in Excel - close it and run again): {p}" for p in locked],
                 "workbooks": [str(p) for p in paths], "folder": str(out_dir)}
     except Exception as exc:  # noqa: BLE001 - the app keeps running; the last approved rates stay in use
         try:
