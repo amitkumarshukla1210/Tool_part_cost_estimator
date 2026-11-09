@@ -148,3 +148,7 @@ button.tv:hover, button.tv:focus-visible { color: var(--brand); outline: none; b
 .trace-edit .was { font-size: 12.5px; color: var(--grey); }
 .badge-override { border-color: #f5b400; background: #fff5d6; color: #6b4e00; }
 .base-pick tr.current td { background: #e9f3ff; font-weight: 600; }
+
+/* stage 50: without the permission "Open traces" a value is plain text, not a link to its trace */
+.no-trace button.tv, .no-trace .clickable[data-piecetrace], .no-trace [data-vstrace], .no-trace [data-trace], .no-trace [data-rmtrace],
+.no-trace [data-tooltrace] { pointer-events: none; cursor: default; border-bottom: 0; color: inherit; }

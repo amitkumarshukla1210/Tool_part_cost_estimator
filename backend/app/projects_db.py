@@ -76,6 +76,8 @@ parts = Table(
     Column("status", String(60), default=""),
     Column("annual_volume", Integer),
     Column("programme_life_years", Float),
+    Column("tool_life_shots", Float),                    # stage 50: tool / mould life typed for the part (blank = Parameters)
+    Column("compare_countries", JSON),                   # stage 50: countries costed next to the producing country
     Column("target_piece_cost_inr", Float),
     Column("is_assembly", Boolean, default=False),
     Column("current_revision_id", Integer),

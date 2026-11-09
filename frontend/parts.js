@@ -104,8 +104,8 @@ async function openPart(id) {
     p.tool?.versions ? get(`/api/parts/${id}/tool-cost`, []) : Promise.resolve([]),
     sheet,
     p.is_assembly ? none : get(`/api/parts/${id}/design-loop`),
-    p.is_assembly ? none : get(`/api/parts/${id}/suppliers`),
-    supplierList ? Promise.resolve(supplierList) : api("/api/suppliers").then((r) => r.suppliers).catch(() => []),
+    none,                                                    // suppliers & quotes: removed from the panel (stage 50)
+    Promise.resolve([]),
   ]);
   if (part !== p) return;                                   // another part was opened meanwhile
   Object.assign(p, { trace, rmTrace, rmVersions, toolTrace, toolVersions, sheet: sh, loop, sup, layout: null });
@@ -207,6 +207,29 @@ function rmBlock(p) {
   const amount = (id, unit, d = 2) => (node(id) ? tv(id, `${fmt(node(id).value, d)} ${unit}`) : "—");
   const example = v?.is_example ? ' <span class="badge badge-example" title="Some rates used are placeholders">EXAMPLE rates</span>' : "";
   let html = `<h3 class="block-title">Raw-material (RM) cost</h3>`;
+  // stage 50: inputs, producing country and the countries costed next to it come first, the result table under them
+  let inputsHtml = "";
+  if (rm.applicable) {
+    const typed = p.rm_inputs || {};
+    inputsHtml = `<details class="card add-insert" ${Object.keys(typed).length || p.country || p.costing_month ? "open" : ""}>
+      <summary class="btn btn-outline small">RM inputs, country and month</summary>
+      <form id="rmForm" class="grid2">
+        <label>Producing country (yours: stored and used in BOM, dashboard, PO) <select name="country"><option value="">Default (${esc(p.effective_country)})</option>
+          ${rmMeta.countries.map((c) => `<option value="${esc(c.code)}" ${c.code === p.country ? "selected" : ""}>${esc(c.name)} (${esc(c.currency)})</option>`).join("")}</select></label>
+        <label>Also cost in (columns next to yours; Ctrl / Shift to pick several) <select name="compare_countries" multiple size="4">
+          ${rmMeta.countries.filter((c) => c.code !== p.effective_country).map((c) => `<option value="${esc(c.code)}" ${(p.effective_compare_countries || []).includes(c.code) ? "selected" : ""}>${esc(c.name)} (${esc(c.currency)})</option>`).join("")}</select></label>
+        <label>Costing month <input name="costing_month" placeholder="blank = ${esc(rmMeta.month)}" pattern="\\d{4}-\\d{2}" value="${esc(p.costing_month || "")}" /></label>
+        <p class="note span2">Leave a box empty to use the default shown. A value you type replaces it and is traced as your input.
+          Money values are in the producing country's currency.</p>
+        ${rm.overridable.map((i) => `<label>${esc(i.label)} (${esc(i.unit)})
+          <input type="number" min="0" step="any" name="in_${esc(i.variable)}" value="${typed[i.variable] ?? ""}"
+            placeholder="${i.default != null ? esc(i.default) : i.source === "rate" ? "approved rate" : "from the 3D file"}" /></label>`).join("")}
+        <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary">Save and calculate</button></div>
+        <p class="status span2" id="rmStatus"></p>
+      </form></details>`;
+  }
+  html += inputsHtml;
+
   if (v?.is_example) html += window.exampleBanner("Replace the EXAMPLE rates on the Rates page before using this cost.");
   if (rm.problem) html += `<p class="warn">${esc(rm.problem)}</p>`;
   if (rm.outdated) {
@@ -218,7 +241,7 @@ function rmBlock(p) {
   if (v && tr) {
     const cur = tr.currency;
     const has = (id) => node(id);
-    html += `<div class="table-wrap"><table class="cost-table"><tbody>
+    html += `<div class="table-wrap"><table class="cost-table" data-vsblock="rm"><tbody>
       <tr><td>Net weight (body, from the 3D file × density)</td><td class="calc num">${amount("weight", "g")}</td></tr>
       <tr><td>Gross weight</td><td class="calc num">${amount("calc:gross_g", "g")}</td></tr>
       <tr><td>Returns / scrap</td><td class="calc num">${amount("calc:returns_g", "g")}</td></tr>
@@ -241,23 +264,6 @@ function rmBlock(p) {
       Stored ${esc(v.created_at.slice(0, 16).replace("T", " "))} by ${esc(v.created_by)} · ${esc(v.reason)}.
       <a class="link" href="/api/parts/${p.id}/rm-cost/export.xlsx">Excel</a> · <a class="link" href="/api/parts/${p.id}/rm-cost/export.pdf">PDF</a>
       ${p.file_id ? ` · <a class="link" href="/?part=${p.id}">Open in Estimate</a>` : ""}</p>`;
-  }
-  if (rm.applicable) {
-    const typed = p.rm_inputs || {};
-    html += `<details class="card add-insert" ${Object.keys(typed).length || p.country || p.costing_month ? "open" : ""}>
-      <summary class="btn btn-outline small">RM inputs, country and month</summary>
-      <form id="rmForm" class="grid2">
-        <label>Producing country <select name="country"><option value="">Default (${esc(p.effective_country)})</option>
-          ${rmMeta.countries.map((c) => `<option value="${esc(c.code)}" ${c.code === p.country ? "selected" : ""}>${esc(c.name)} (${esc(c.currency)})</option>`).join("")}</select></label>
-        <label>Costing month <input name="costing_month" placeholder="blank = ${esc(rmMeta.month)}" pattern="\\d{4}-\\d{2}" value="${esc(p.costing_month || "")}" /></label>
-        <p class="note span2">Leave a box empty to use the default shown. A value you type replaces it and is traced as your input.
-          Money values are in the producing country's currency.</p>
-        ${rm.overridable.map((i) => `<label>${esc(i.label)} (${esc(i.unit)})
-          <input type="number" min="0" step="any" name="in_${esc(i.variable)}" value="${typed[i.variable] ?? ""}"
-            placeholder="${i.default != null ? esc(i.default) : i.source === "rate" ? "approved rate" : "from the 3D file"}" /></label>`).join("")}
-        <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary">Save and calculate</button></div>
-        <p class="status span2" id="rmStatus"></p>
-      </form></details>`;
   }
   if (rm.versions) {
     html += `<details class="card add-insert"><summary class="btn btn-outline small">RM cost versions (${rm.versions})</summary>
@@ -516,6 +522,8 @@ function renderPart() {
           <label>Status ${sel("status", meta.statuses, p.status)}</label>
           <label>Annual volume <input type="number" name="annual_volume" min="0" value="${p.annual_volume ?? ""}" /></label>
           <label>Programme life (years) <input type="number" name="programme_life_years" min="0" step="any" value="${p.programme_life_years ?? ""}" /></label>
+          <label>Tool / mould life (shots) <input type="number" name="tool_life_shots" min="1" step="1" value="${p.tool_life_shots ?? ""}"
+            placeholder="blank = Master data → Parameters" title="Used by the tools over the programme and the part-cost amortisation (shots × cavities)" /></label>
           <label>Target piece cost (INR) <input type="number" name="target_piece_cost_inr" min="0" step="any" value="${p.target_piece_cost_inr ?? ""}" /></label>
           <label class="span2">Notes <input name="notes" value="${esc(p.notes)}" /></label>
           ${suggestionBox(p)}
@@ -544,7 +552,6 @@ function renderPart() {
     <div id="pieceBox">${pieceBlock(p)}</div>
     ${sheetBlock(p)}
     ${compareBlock(p)}
-    ${suppliersBlock(p)}
     ${insertsBlock(p)}
     ${mouldedIntoBlock(p)}
 
@@ -583,46 +590,72 @@ function renderPart() {
   applyVersus(part);
 }
 
-// India vs the comparison country (stage 48): two columns added to the tool and part cost tables, landed rows under them
+// The producing country and the countries costed next to it (stage 48 / 50): two columns per country (its currency, INR) in
+// the RM, tool and part cost tables, a forex row, and the landed rows under the tool and part cost
 function applyVersus(p) {
   const v = p.vs;
   if (!v) return;
   const f = (x) => (x == null ? "—" : fmt(x, Math.abs(x) >= 1000 ? 0 : 4));
-  for (const block of ["tool", "piece"]) {
+  for (const block of ["rm", "tool", "piece"]) {
     const table = document.querySelector(`table[data-vsblock="${block}"]`);
     if (!table || table.dataset.vsDone) continue;
     table.dataset.vsDone = "1";
     const body = table.tBodies[0];
-    if (v.problem || v.error || !v.rows) {
-      (table.closest(".table-wrap") || table).insertAdjacentHTML("afterend", `<p class="note">${esc(v.name || "Comparison country")}: ${esc(v.problem || v.error || "not available")}</p>`);
-      continue;
-    }
-    const rows = Object.fromEntries(v.rows[block].map((r) => [r.node, r]));
-    const cell = (r) => r && r.local != null
-      ? `<td class="calc num"><button type="button" class="tv" data-vstrace="${block}" data-node="${esc(r.node)}">${f(r.local)}</button></td>
-         <td class="calc num">${r.inr != null ? f(r.inr) : `<span class="note">${esc(r.unit)}</span>`}</td>` : "<td></td><td></td>";
-    body.insertAdjacentHTML("afterbegin", `<tr class="vs-head"><th>Line</th><th class="num">${esc(v.home_name)}</th>
-      <th class="num">${esc(v.name)} (${esc(v.currency)})</th><th class="num">${esc(v.name)} (INR)</th></tr>`);
+    const wrap = table.closest(".table-wrap") || table;
+    if (v.problem) { wrap.insertAdjacentHTML("afterend", `<p class="note">${esc(v.problem)}</p>`); continue; }
+    const own = v.own[block] || {};
+    const cs = v.countries;
+    const nodeOf = (tr) => {
+      if (tr.dataset.vsnode) return tr.dataset.vsnode;
+      const b = tr.querySelector("[data-rmtrace],[data-tooltrace],[data-piecetrace]");
+      return b ? b.dataset.rmtrace || b.dataset.tooltrace || b.dataset.piecetrace : null;
+    };
+    const cur = block === "tool" ? (own.currency || v.own.currency) : v.own.currency;
+    const curOf = (b) => (block === "tool" && b.tool ? b.tool.currency : b.currency);
+    const fxOf = (b) => (block === "tool" && b.tool ? b.tool.fx_inr_per_unit : b.fx_inr_per_unit);
+    const ownInr = cur !== "INR";                         // an INR country needs no second (INR) column
+    const inrCol = (b) => curOf(b) !== "INR";
+    body.insertAdjacentHTML("afterbegin", `<tr class="vs-head"><th>Line</th><th class="num">${esc(v.own.name)} (${esc(cur)})</th>
+      ${ownInr ? `<th class="num">${esc(v.own.name)} (INR)</th>` : ""}${cs.map((b) => `<th class="num">${esc(b.name)} (${esc(curOf(b))})</th>
+      ${inrCol(b) ? `<th class="num">${esc(b.name)} (INR)</th>` : ""}`).join("")}</tr>
+      <tr class="vs-fx"><td>Forex: INR per 1 unit of the currency</td><td class="num">${f(own.fx_inr_per_unit)}</td>${ownInr ? "<td></td>" : ""}
+      ${cs.map((b) => `<td class="num">${f(fxOf(b))}</td>${inrCol(b) ? "<td></td>" : ""}`).join("")}</tr>`);
     for (const tr of body.rows) {
-      if (tr.classList.contains("vs-head")) continue;
-      tr.insertAdjacentHTML("beforeend", cell(rows[tr.dataset.vsnode]));
+      if (tr.classList.contains("vs-head") || tr.classList.contains("vs-fx")) continue;
+      const node = nodeOf(tr);
+      const on = node && own.nodes ? own.nodes[node] : null;
+      let cells = ownInr ? `<td class="calc num">${on && on.money ? f(on.inr) : ""}</td>` : "";
+      for (const b of cs) {
+        const n = node && b[block] ? b[block].nodes[node] : null;
+        cells += n ? `<td class="calc num"><button type="button" class="tv" data-vstrace="${block}" data-vscountry="${esc(b.country)}" data-node="${esc(node)}">${f(n.value)}</button>${n.money ? "" : ` <span class="note">${esc(n.unit)}</span>`}</td>
+          ${inrCol(b) ? `<td class="calc num">${n.money ? f(n.inr) : ""}</td>` : ""}` : `<td></td>${inrCol(b) ? "<td></td>" : ""}`;
+      }
+      tr.insertAdjacentHTML("beforeend", cells);
     }
-    body.insertAdjacentHTML("beforeend", `<tr class="vs-head"><th colspan="4">Landed at the factory (${v.mode === "sea" ? "sea" : "air"} freight; IGST shown, its credit taken)</th></tr>`
-      + v.rows[block].filter((r) => r.landed).map((r) => `<tr class="${r.node === "landed:landed" ? "total" : ""}"><td>${esc(r.label)}</td>
-        <td class="calc num">${f(r.home)}</td><td class="calc num">${f(r.local)}</td><td class="calc num">${f(r.inr)}</td></tr>`).join(""));
-    const save = v.saving_inr ? v.saving_inr[block] : null;
-    (table.closest(".table-wrap") || table).insertAdjacentHTML("afterend", `<p class="note vs-note">${v.is_example ? '<span class="badge badge-example">EXAMPLE</span> ' : ""}
-      <b>${esc(v.name)}</b> with its approved rates of ${esc(v.as_of)} · 1 ${esc(v.currency)} = ${fmt(v.fx_inr_per_unit, 4)} INR${save != null
-        ? ` · ${esc(v.name)} landed is <b>${f(Math.abs(save))} INR ${save > 0 ? "dearer" : "cheaper"}</b> than ${esc(v.home_name)}` : ""}.
-      Click a ${esc(v.name)} value for its formula and rates. Comparison country: Part register setup → Register settings <code>compare_country</code>.
-      <a class="link" href="/api/parts/${p.id}/vs-country/export.xlsx">⬇ ${esc(v.home_name)} vs ${esc(v.name)} (Excel)</a> ·
+    if (block !== "rm" && own.landed) {
+      const span = 2 + (ownInr ? 1 : 0) + cs.reduce((a, b) => a + 1 + (inrCol(b) ? 1 : 0), 0);
+      body.insertAdjacentHTML("beforeend", `<tr class="vs-head"><th colspan="${span}">Landed at the factory in India
+        (${v.mode === "sea" ? "sea" : "air"} freight; IGST shown, its credit taken)</th></tr>`
+        + own.landed.map((l, i) => `<tr class="${l.key === "landed" ? "total" : ""}"><td>${esc(l.label)}${l.pct != null ? ` (${fmt(l.pct, 1)} %)` : ""}</td>
+          <td class="calc num">${f(ownInr ? l.local : l.inr)}</td>${ownInr ? `<td class="calc num">${f(l.inr)}</td>` : ""}
+          ${cs.map((b) => { const bl = b.landed ? b.landed[block][i] : null;
+            return bl ? `<td class="calc num">${f(inrCol(b) ? bl.local : bl.inr)}</td>${inrCol(b) ? `<td class="calc num">${f(bl.inr)}</td>` : ""}`
+              : `<td></td>${inrCol(b) ? "<td></td>" : ""}`; }).join("")}</tr>`).join(""));
+    }
+    const notes = cs.map((b) => b.error ? `${esc(b.name)}: ${esc(b.error)}`
+      : b.saving_inr && b.saving_inr[block] != null ? `${esc(b.name)} landed is <b>${f(Math.abs(b.saving_inr[block]))} INR ${b.saving_inr[block] > 0 ? "dearer" : "cheaper"}</b> than ${esc(v.own.name)}` : "").filter(Boolean);
+    wrap.insertAdjacentHTML("afterend", `<p class="note vs-note">${v.is_example ? '<span class="badge badge-example">EXAMPLE</span> ' : ""}
+      Each country with its own approved rates.${notes.length ? " " + notes.join(" · ") + "." : ""}
+      Countries: <i>RM inputs, country and month → Also cost in</i>.
+      <a class="link" href="/api/parts/${p.id}/vs-country/export.xlsx">⬇ ${esc([v.own.name, ...cs.map((b) => b.name)].join(" vs "))} (Excel)</a> ·
       <a class="link" href="/api/parts/${p.id}/vs-country/export.pdf">PDF</a></p>`);
   }
 }
 document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-vstrace]");
   if (!b || !part?.vs) return;
-  const trace = b.dataset.vstrace === "tool" ? part.vs.tool_trace : part.vs.piece_trace;
+  const c = part.vs.countries.find((x) => x.country === b.dataset.vscountry);
+  const trace = c && c.traces ? c.traces[b.dataset.vstrace] : null;
   if (trace && trace.nodes[b.dataset.node]) window.TracePanel.open(trace, b.dataset.node);
 });
 
@@ -674,6 +707,7 @@ $("panelBody").addEventListener("submit", async (e) => {
     for (const [k, v] of f.entries()) if (k.startsWith("in_") && v !== "") inputs[k.slice(3)] = Number(v);
     status($("rmStatus"), "Calculating…");
     try {
+      await api(`/api/parts/${part.id}`, { method: "PUT", body: JSON.stringify({ compare_countries: f.getAll("compare_countries") }) });
       const res = await api(`/api/parts/${part.id}/rm-cost`, { method: "POST", body: JSON.stringify({
         rm_inputs: inputs, country: f.get("country"), costing_month: f.get("costing_month"), reason: "changed in the part panel" }) });
       await openPart(part.id);

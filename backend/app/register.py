@@ -364,7 +364,8 @@ def update_variant(vid: int, data: dict) -> dict:
 
 # ---------- parts & revisions ----------
 
-PART_FIELDS = ("name", "material", "process", "sourcing", "status", "annual_volume", "programme_life_years",
+PART_FIELDS = ("name", "material", "process", "sourcing", "status", "annual_volume", "programme_life_years", "tool_life_shots",
+               "compare_countries",
                "target_piece_cost_inr", "notes", "unit_price", "price_currency", "price_source", "price_month",
                "price_is_example", "dimensions", "country", "costing_month", "rm_inputs", "tool_country", "tool_inputs", "piece_inputs", "sheet_inputs")
 
@@ -463,6 +464,17 @@ def _part_values(data, where="Part"):
             out[k] = _num(v, f"{where}: annual volume", int)
         elif k in ("programme_life_years", "target_piece_cost_inr", "unit_price"):
             out[k] = _num(v, f"{where}: {k.replace('_', ' ')}")
+        elif k == "tool_life_shots":
+            out[k] = _num(v, f"{where}: tool / mould life (shots)")
+            if out[k] is not None and out[k] <= 0:
+                raise RegisterError(f"{where}: tool / mould life must be more than 0 shots (blank = Master data → Parameters).")
+        elif k == "compare_countries":
+            codes = v if isinstance(v, (list, tuple)) else [c for c in str(v or "").replace(";", ",").split(",")]
+            codes = list(dict.fromkeys(str(c).strip().upper() for c in codes if str(c).strip()))
+            bad = [c for c in codes if c not in costing_setup.countries()]
+            if bad:
+                raise RegisterError(f"{where}: country '{bad[0]}' is not in Master data → Countries.")
+            out[k] = codes
         elif k in ("country", "tool_country"):
             code = str(v or "").strip().upper()
             if code and code not in costing_setup.countries():
@@ -694,7 +706,7 @@ def update_part(part_id: int, data: dict, refresh: bool = True) -> dict:
                                                            "comment": str(data.get("status_comment") or "").strip(),
                                                            "step_back": _is_step_back(old["status"], vals["status"])})
     if refresh and {"material", "process", "sourcing", "country", "costing_month", "rm_inputs", "tool_country",
-                    "tool_inputs", "annual_volume", "programme_life_years"} & set(changes):
+                    "tool_inputs", "annual_volume", "programme_life_years", "tool_life_shots"} & set(changes):
         refresh_costs([part_id], "part details changed")
     return part_detail(part_id)
 
@@ -838,6 +850,8 @@ def part_detail(part_id: int, with_rm: bool = True) -> dict:
         out["effective_country"] = (out["country"] or register_setup.settings()["default_country"]).upper()
         out["tool"] = tool_summary(out)
         out["effective_tool_country"] = (out["tool_country"] or out["effective_country"]).upper()
+        from . import landed                      # stage 50: the countries costed next to the producing country
+        out["effective_compare_countries"] = landed.selected(out)[1]
         out["material_recommendation"] = material_recommendation(out)
     return out
 
@@ -1928,6 +1942,8 @@ def _tool_compute(part_id: int, country: str | None = None) -> dict:
         cap_in["annual_volume"] = max(1, round(volume))
     if d["programme_life_years"]:
         cap_in["programme_years"] = max(1, round(d["programme_life_years"]))
+    if d.get("tool_life_shots"):                     # stage 50: tool / mould life typed for the part
+        cap_in["tool_life_shots"] = max(1, round(d["tool_life_shots"]))
     if part_type == "plastic" and g.get("wall_mm"):
         cap_in["cycle_time_s"] = capacity.plastic_cycle_estimate(g["wall_mm"])
     try:

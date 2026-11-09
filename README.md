@@ -1536,6 +1536,23 @@ Both % come from the **part** (RM inputs, traced as your input), else the **mate
 **0 % and 0**, so RM costs stay as before until you enter your values. The new steps are Cost formula rows (`reused_g`, `virgin_g`,
 `sold_g`, `scrap_value`) and every step is traced. Your own edited formula rows are kept on update.
 
+## Several countries per part, traces for admin, tool life per part (stage 50)
+
+- **Producing country + "Also cost in"** (part panel → *RM inputs, country and month*, now above the RM cost table). The producing
+  country (default India) is yours: its costs are stored as versions and used by BOM, dashboard and PO pack. Tick other countries
+  in *Also cost in* (several with Ctrl / Shift). The default is the Register settings `compare_country` (China), so a part shows
+  India + China until you change it. The **RM cost, Cost build-up and Part cost** tables get two columns per country (its currency,
+  INR; an INR country gets one), a **forex row** (INR per 1 unit), and the landed rows under the tool and part cost. Every
+  country is costed live with its own approved rates. A part produced in China now shows China in its own column and India
+  next to it; before, the China values were shown under "India". Downloads are named after the countries:
+  `<part>_cost_India_vs_China_Vietnam.xlsx / .pdf`, with RM, tool and part cost sheets.
+- **Opening a trace needs the permission "Open traces"** (admin by default; Admin → permissions can give it to another role or
+  user). Other users see the plain values, with no click and no rate table.
+- **Tool / mould life (shots)** in the part data block, next to Programme life. Blank = Master data → Parameters. It sets the
+  tools over the programme and the part-cost amortisation (parts per tool life = shots × cavities), and is traced as your input.
+- **Suppliers removed** from the menu, the Suppliers page and the part panel (the `/suppliers` page goes to Parts). The supplier
+  data and its API stay in the database.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:

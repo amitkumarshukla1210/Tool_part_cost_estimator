@@ -439,8 +439,19 @@
     }
   }
 
+  // Stage 50: opening a trace (formula, inputs, rate table) needs the permission "Open traces" (Admin → permissions,
+  // admin by default). Others see the plain values: no click, no panel.
+  let canTrace = false;
+  document.documentElement.classList.add("no-trace");
+  fetch("/api/auth/me").then((r) => r.json()).then((me) => {
+    canTrace = !!(me.permissions || {}).open_traces;
+    document.documentElement.classList.toggle("no-trace", !canTrace);
+  }).catch(() => {});
+
   window.TracePanel = {
+    allowed: () => canTrace,
     open(trace, nodeId, ctx) {
+      if (!canTrace) return;
       ensurePanel();
       stack = [{ trace, node: nodeId || trace.root, ctx: ctx || null }];
       panel.hidden = false;
@@ -448,6 +459,7 @@
       panel.querySelector(".trace-close").focus();
     },
     openRate(rate) {
+      if (!canTrace) return;
       ensurePanel();
       stack = [{ rate }];
       panel.hidden = false;
