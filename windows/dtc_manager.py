@@ -20,6 +20,7 @@ This file and the DTC_*.bat files live in the folder ABOVE the app (the "base fo
     python dtc_manager.py reset-password [user]   new password for a user (e.g. a forgotten admin password), from this PC only
     python dtc_manager.py status     where everything is, installed version, last backup
     python dtc_manager.py fea        strength check: install Gmsh, show where CalculiX (ccx.exe) goes
+    python dtc_manager.py country-rates   country rate book: one Excel per country, 24 months, with sources (monthly)
 """
 
 from __future__ import annotations
@@ -749,7 +750,20 @@ def cmd_fea(_args) -> None:
         say(f"site and copy ccx.exe (with the .dll files next to it) into {folder} - then restart the app.")
 
 
-COMMANDS = {"fea": cmd_fea, "reset-password": cmd_reset_password, "start": cmd_start, "update": cmd_update, "update-wait": cmd_update_wait,
+def cmd_country_rates(args) -> None:
+    """Country rate book (stage 51): one Excel per country, 24 months of market data with sources, into DTC_Data\\country_rates."""
+    app = app_dir()
+    if not is_app(app) or not venv_python().exists():
+        raise KitError("The app is not installed in this folder yet: run DTC_Update.bat first.")
+    out = DATA / "country_rates"
+    say(f"Downloading the official sources and building the workbooks into {out} ...")
+    r = subprocess.run([str(venv_python()), "-m", "backend.app.country_rate_book", "--out", str(out), *args], cwd=app, env=app_env())
+    if r.returncode:
+        raise KitError("The country rate book was not built (see the messages above).")
+    say(f"Done: open the folder {out}")
+
+
+COMMANDS = {"country-rates": cmd_country_rates, "fea": cmd_fea, "reset-password": cmd_reset_password, "start": cmd_start, "update": cmd_update, "update-wait": cmd_update_wait,
             "backup": cmd_backup, "restore": cmd_restore, "rollback": cmd_rollback, "status": cmd_status}
 
 

@@ -23,6 +23,17 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Fetch rates (a failing source is logged and skipped)
         run: python -m backend.app.rate_update
+      - name: Country rate book (one Excel per country, 24 months, with sources)
+        continue-on-error: true
+        run: python -m backend.app.country_rate_book --out country_rates
+      - name: Attach the country rate book to this run (Actions → this run → Artifacts)
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: country-rate-book-${{ github.run_number }}
+          path: country_rates/
+          retention-days: 90
       - name: Open a pull request with the drafts
         env:
           GH_TOKEN: ${{ github.token }}

@@ -1553,6 +1553,40 @@ Both % come from the **part** (RM inputs, traced as your input), else the **mate
 - **Suppliers removed** from the menu, the Suppliers page and the part panel (the `/suppliers` page goes to Parts). The supplier
   data and its API stay in the database.
 
+## Country rate book: RM, labour, process, electricity, transport per country (stage 51)
+
+One Excel workbook per country (all countries of Master data → Countries), last **24 months**, INR first, every value with its source.
+
+- **Run it monthly:** `python -m backend.app.country_rate_book` (all countries) or `--countries CN,IN`; `--offline` builds from the
+  saved history without downloading. Windows kit: **DTC_Country_Rates.bat** → `DTC_Data\country_rates\`. GitHub Actions: the monthly
+  rate update builds them and attaches them to the run (Actions → run → Artifacts, kept 90 days). File: `Country_Rates_China_2026-10.xlsx`.
+- **Sheets:** *Summary* (latest, Δ 12 months, Δ since the first month, data gaps, count of EXAMPLE rates) · *RM_Price* (A: world
+  market prices per month in USD, INR/kg and the local currency/kg, price indices; B: every part RM grade, tool / mould steel and
+  scrap rate of the tool per month, **grouped by family** (carbon & alloy steel, sheet steel, stainless, aluminium casting /
+  wrought, zinc, magnesium, copper alloys, cast iron, plastics, tool & mould, scrap) with the market index it follows and that
+  index's change; C: **about 60 more common grades** not yet in the tool (EN24, EN31, 20MnCr5, SS 316 / 202 / 409L, D3, M2, LM2,
+  LM25, ALDC2, AlSi9Cu3, 6063, Zamak 5, AM60B, HDPE, PMMA, EPDM …) with equivalents and the index they follow, yellow monthly
+  cells for your quotes - add a grade on Master data → Price master and it moves to B) · *Labour* (ILOSTAT hourly earnings by
+  skill level 1 / 2 / 3-4 and manufacturing monthly earnings, yearly; the tool's fully loaded labour rate per grade and its inputs) ·
+  *Process_Cost* (machine hour rate of every machine and the process rates of the tool; cost drivers) · *Electricity* (the tool's
+  power rate; Eurostat half-yearly industrial price for EU countries; official tariff publisher; yellow entry rows; gas / coal /
+  power index) · *Transport* (the tool's freight rates; Brent, diesel, sea and truck freight indices; yellow entry rows for your
+  container and diesel quotes) · *Forex* (INR per USD, local currency per USD, INR per local currency, check against the tool's
+  approved forex) · *Sources* (publisher, link, frequency, latest period, MARKET / APP / GAP, refresh log).
+- **Colours:** green = downloaded market data, blue = approved rate of the tool, orange = EXAMPLE or fallback, yellow = your entry.
+- **Sources (free, official):** FRED of the St. Louis Fed (IMF primary commodity prices = LME metals, iron ore, rubber, Brent, gas,
+  coal; US BLS producer price indices for steel mill products, plastic resins, electric power, deep-sea and truck freight; US EIA
+  diesel; Federal Reserve H.10 forex), ILOSTAT (ILO), Eurostat `nrg_pc_205`, World Bank `PA.NUS.FCRF`. The downloads are kept in
+  `country_rate_book_history.json` next to the workbooks: append-only, a value revised by the source is replaced and logged, a
+  source that fails is logged and the history stays in use.
+- **ILOSTAT** may refuse automatic downloads (HTTP 403). Then open the ILOSTAT data explorer, download *Mean nominal hourly
+  earnings of employees by occupation (skill level)* and *Mean nominal monthly earnings of employees by economic activity* as CSV
+  and run with `--ilo-file file1.csv --ilo-file file2.csv` (the bat takes the same arguments).
+- **What is not free:** steel and plastic grade prices per country (only the US PPI as a trend), machine hour rates, industrial
+  electricity tariffs outside the EU, container freight indices. These come from the tool's own rates (replace the EXAMPLE
+  values on the Rates page; approved rates fill the month columns at the next refresh) or the yellow entry rows. Nothing is
+  filled in or guessed: a month without data stays empty. Master data is never changed by the rate book.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:
