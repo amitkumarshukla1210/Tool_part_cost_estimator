@@ -172,3 +172,64 @@ def test_rm_sheet_groups_grades_by_family_and_lists_missing_grades_for_entry(tmp
     assert lm2[30].value.startswith("Aluminium (LME")
     am = next(r for r in ws.iter_rows(min_row=c) if r[0].value == "AM60B")
     assert am[30].value == "-"                                                                    # magnesium: no free index
+
+
+def test_missing_ilo_file_is_reported_and_the_workbooks_are_still_built(tmp_path, capsys):
+    p = crb.run(["IN"], tmp_path, http=fake, today=TODAY, ilo_files=[tmp_path / "file1.csv"])
+    assert p and p[0].exists()
+    log = crb.load_history(tmp_path)["runs"][-1]["log"]
+    assert any("NOT FOUND" in line and "file1.csv" in line for line in log)
+    crb.main(["--countries", "IN", "--out", str(tmp_path), "--offline", "--ilo-file", str(tmp_path / "nope.csv")])
+    assert "NOT FOUND" in capsys.readouterr().out
+
+
+def test_ilo_explorer_csv_with_labels_and_old_bulk_csv_are_read():
+    labels = ("STRUCTURE,STRUCTURE_ID,ACTION,REF_AREA: Reference area,FREQ: Frequency,MEASURE: Measure,SEX: Sex,"
+              "OCU: Occupation,CUR: Currency,TIME_PERIOD: Time,OBS_VALUE,SOURCE\n"
+              "dataflow,ILO:DF_EAR_EHRA_SEX_OCU_CUR_NB(1.0),I,IND: India,A: Annual,EAR: Earnings,SEX_T: Total,"
+              "OCU_SKILL_L2: Skill level 2,CUR_TYPE_USD: US dollars,2025: 2025,0.80,LFS\n").encode()
+    r = crb.parse_ilo(labels)[0]
+    assert (r["area"], r["cls"], r["cur"], r["year"], r["value"], r["sex"]) == ("IND", "OCU_SKILL_L2", "CUR_TYPE_USD", "2025", 0.8, "SEX_T")
+    assert "EHRA_SEX_OCU" in r["flow"]
+    bulk = (b"ref_area,source,indicator,sex,classif1,classif2,time,obs_value\n"
+            b"CHN,ADM,EAR_EMTA_SEX_ECO_CUR_NB_A,SEX_T,ECO_ISIC4_C,CUR_TYPE_LCU,2022,5613\n")
+    r = crb.parse_ilo(bulk)[0]
+    assert (r["area"], r["cls"], r["cur"], r["year"], r["value"]) == ("CHN", "ECO_ISIC4_C", "CUR_TYPE_LCU", "2022", 5613.0)
+    assert "EMTA_SEX_ECO" in r["flow"]
+
+
+def test_ilo_folder_finds_the_files_with_the_names_the_ilo_gives_them(tmp_path):
+    dl = tmp_path / "Downloads"
+    dl.mkdir()
+    (dl / "ILO,DF_EAR_EHRA_SEX_OCU_CUR_NB+IND+CHN.A..SEX_T...csv").write_bytes(
+        b"DATAFLOW,REF_AREA,FREQ,MEASURE,SEX,OCU,CUR,TIME_PERIOD,OBS_VALUE,SOURCE\n"
+        b"ILO:DF_EAR_EHRA_SEX_OCU_CUR_NB(1.0),IND,A,EAR,SEX_T,OCU_SKILL_L1,CUR_TYPE_LCU,2025,50.8,LFS\n")
+    (dl / "ILO,DF_EAR_EMTA_SEX_ECO_CUR_NB+IND+CHN.A..SEX_T.ECO_ISIC4_C..csv").write_bytes(
+        b"DATAFLOW,REF_AREA,FREQ,MEASURE,SEX,ECO,CUR,TIME_PERIOD,OBS_VALUE,SOURCE\n"
+        b"ILO:DF_EAR_EMTA_SEX_ECO_CUR_NB(1.0),CHN,A,EAR,SEX_T,ECO_ISIC4_C,CUR_TYPE_LCU,2022,5613,ADM\n")
+    (dl / "holiday.csv").write_bytes(b"a,b\n1,2\n")
+    out = tmp_path / "out"
+    assert crb.import_ilo(out, [dl, tmp_path / "<real name 1>.csv"], TODAY) == 2
+    h = crb.load_history(out)
+    assert h["ilo"]["monthly_manufacturing"]["CHN|ECO_ISIC4_C|CUR_TYPE_LCU"]["2022"]["value"] == 5613.0
+    log = h["runs"][-1]["log"]
+    assert any("2 earnings CSV" in line for line in log) and any("NOT FOUND" in line for line in log)
+
+
+def test_indicative_grade_trend_fills_24_months_from_the_index_and_is_marked(tmp_path):
+    p = crb.run(["CN"], tmp_path, http=fake, today=TODAY)[0]
+    ws = load_workbook(p)["RM_Price"]
+    names = [r[0].value for r in ws.iter_rows()]
+    b2 = names.index("B2. Indicative price, CNY/kg")
+    b3 = names.index("B3. Indicative price, INR/kg")
+    assert names.index("B. Grade / RM") < b2 < b3 < names.index("C. Grade (not in the tool yet)")
+    row = next(r for r in ws.iter_rows(min_row=b2 + 1, max_row=b3) if r[0].value == "Aluminium ADC12 / A383")
+    f = row[2].value                                                     # Nov-24
+    assert f.startswith("=IFERROR(IF(AND(ISNUMBER(RM_Price!C") and "Forex!C6" in f and "$AA$" in f
+    assert row[27].value == "approved rate 2026-10" or row[27].value == "EXAMPLE rate 2026-10"
+    assert row[26].value == "Sep-26"                                     # base = latest month with index data
+    assert row[28].value.startswith("Aluminium (LME")
+    inr = next(r for r in ws.iter_rows(min_row=b3 + 1) if r[0].value == "Aluminium ADC12 / A383")
+    assert "Forex!C7" in inr[2].value
+    notes = [n for n in names if n and str(n).startswith("B2. INDICATIVE")]
+    assert notes and "NOT a quote" in notes[0]

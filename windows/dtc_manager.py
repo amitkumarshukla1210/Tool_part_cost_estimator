@@ -144,6 +144,7 @@ def app_env() -> dict:
         "DTC_DATA_FOLDER": str(DATA),               # Admin page: version.json and the update reports in logs\
         "DTC_KIT_MANAGER": str(BASE / "dtc_manager.py"),
         "DTC_PORT": str(port()),
+        "DTC_AUTO_RATES": "1",                    # stage 52: new month -> new approved country rates at app start
         "DTC_MODE": "server",                       # logins always on (the first start asks for the first admin)
         "PYTHONUTF8": "1",
         "PYTHONIOENCODING": "utf-8",
@@ -756,8 +757,8 @@ def cmd_country_rates(args) -> None:
     if not is_app(app) or not venv_python().exists():
         raise KitError("The app is not installed in this folder yet: run DTC_Update.bat first.")
     out = DATA / "country_rates"
-    say(f"Downloading the official sources and building the workbooks into {out} ...")
-    r = subprocess.run([str(venv_python()), "-m", "backend.app.country_rate_book", "--out", str(out), *args], cwd=app, env=app_env())
+    say(f"Downloading the official sources, writing this month's approved rates and building the workbooks into {out} ...")
+    r = subprocess.run([str(venv_python()), "-m", "backend.app.auto_rates", "--out", str(out), *args], cwd=app, env=app_env())
     if r.returncode:
         raise KitError("The country rate book was not built (see the messages above).")
     say(f"Done: open the folder {out}")

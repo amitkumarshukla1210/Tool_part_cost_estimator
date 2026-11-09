@@ -1566,7 +1566,7 @@ One Excel workbook per country (all countries of Master data → Countries), las
   wrought, zinc, magnesium, copper alloys, cast iron, plastics, tool & mould, scrap) with the market index it follows and that
   index's change; C: **about 60 more common grades** not yet in the tool (EN24, EN31, 20MnCr5, SS 316 / 202 / 409L, D3, M2, LM2,
   LM25, ALDC2, AlSi9Cu3, 6063, Zamak 5, AM60B, HDPE, PMMA, EPDM …) with equivalents and the index they follow, yellow monthly
-  cells for your quotes - add a grade on Master data → Price master and it moves to B) · *Labour* (ILOSTAT hourly earnings by
+  cells for your quotes - add a grade on Master data → Price master and it moves to B); **B2 / B3: indicative 24-month price trend of every grade** in the local currency and INR = latest approved rate × (market index × local currency per USD) of the month ÷ the same in the base month (latest month with index data up to the rate month). Excel formulas, lilac cells, marked *indicative, not a quote*; based on EXAMPLE rates until you replace them; grades without a market index (e.g. magnesium) are left out; a currency without a free monthly forex (VND) follows the index ratio in USD only) · *Labour* (ILOSTAT hourly earnings by
   skill level 1 / 2 / 3-4 and manufacturing monthly earnings, yearly; the tool's fully loaded labour rate per grade and its inputs) ·
   *Process_Cost* (machine hour rate of every machine and the process rates of the tool; cost drivers) · *Electricity* (the tool's
   power rate; Eurostat half-yearly industrial price for EU countries; official tariff publisher; yellow entry rows; gas / coal /
@@ -1579,13 +1579,41 @@ One Excel workbook per country (all countries of Master data → Countries), las
   diesel; Federal Reserve H.10 forex), ILOSTAT (ILO), Eurostat `nrg_pc_205`, World Bank `PA.NUS.FCRF`. The downloads are kept in
   `country_rate_book_history.json` next to the workbooks: append-only, a value revised by the source is replaced and logged, a
   source that fails is logged and the history stays in use.
-- **ILOSTAT** may refuse automatic downloads (HTTP 403). Then open the ILOSTAT data explorer, download *Mean nominal hourly
-  earnings of employees by occupation (skill level)* and *Mean nominal monthly earnings of employees by economic activity* as CSV
-  and run with `--ilo-file file1.csv --ilo-file file2.csv` (the bat takes the same arguments).
+- **ILOSTAT** may refuse automatic downloads (HTTP 403). Then open these two links in your browser (each saves a CSV in Downloads):
+  - hourly earnings by skill level: `https://sdmx.ilo.org/rest/data/ILO,DF_EAR_EHRA_SEX_OCU_CUR_NB/IND+CHN+KOR+JPN+THA+VNM+DEU+USA.A..SEX_T..?startPeriod=2018&format=csvfile`
+  - monthly earnings by activity: `https://sdmx.ilo.org/rest/data/ILO,DF_EAR_EMTA_SEX_ECO_CUR_NB/IND+CHN+KOR+JPN+THA+VNM+DEU+USA.A..SEX_T.ECO_ISIC4_C.?startPeriod=2018&format=csvfile`
+
+  and run `DTC_Country_Rates.bat --ilo-file "C:\Users\<you>\Downloads"` - a folder takes every ILO earnings CSV in it with the
+  names the ILO gives them (or give each file with its own `--ilo-file`). A CSV saved from the ILOSTAT data explorer (codes, or codes and labels) or the older ILOSTAT bulk CSV works too. A file
+  that is not found or not an ILOSTAT earnings CSV is reported (NOT FOUND / 0 values) and the workbooks are still built. Once
+  imported, the figures stay in the history: import again only when ILO publishes a new year.
 - **What is not free:** steel and plastic grade prices per country (only the US PPI as a trend), machine hour rates, industrial
   electricity tariffs outside the EU, container freight indices. These come from the tool's own rates (replace the EXAMPLE
   values on the Rates page; approved rates fill the month columns at the next refresh) or the yellow entry rows. Nothing is
   filled in or guessed: a month without data stays empty. Master data is never changed by the rate book.
+
+## Monthly automatic country rates (stage 52)
+
+Every month each country gets **new approved rates** by itself, and an admin can still change any of them.
+
+- **When:** the Windows kit starts the app with `DTC_AUTO_RATES=1`; the first start in a new month runs the update in the
+  background (about a minute). Also: Admin → **Monthly rates** → *Update rates now* (admin), or `DTC_Country_Rates.bat`
+  (`python -m backend.app.auto_rates [--ilo-file …]`). The country rate book workbooks are built in the same run.
+- **What is written** (user *Auto monthly update*, origin `auto monthly`, approved, source text and link on every value):
+  - **Forex:** INR per CNY / USD / EUR / JPY / KRW / THB / TWD = market monthly average (FRED); VND from the World Bank yearly rate.
+  - **RM grades, tool & mould steels, scrap values:** last approved rate × (market index × local currency per USD) of the latest
+    published month ÷ the same in the month the last rate stands for (an auto rate says it: `index 2026-10→2026-11 ×1.0312`).
+    The index per grade is the one shown in the country rate book (LME aluminium / copper / nickel / zinc / tin / lead, iron ore,
+    US steel and resin price indices). No newer index month → no new version that month.
+  - **Electricity:** Germany = Eurostat half-yearly industrial price (EUR/kWh); other countries × the US PPI electric power ratio
+    (no free tariff series).
+  - **Salaries:** × the ILOSTAT yearly wage change of the country when ILO publishes a newer year (the year seen first is the
+    baseline). Machine hour and labour rates are formulas over these, so they follow.
+- **Admin stays in charge:** change any value on the Rates page (a new version). A rate that already has a version in a month is
+  never written again by the update, and the next month starts from the latest approved value - so your value becomes the base.
+  Results built on EXAMPLE rates stay EXAMPLE until you replace the base.
+- **Log:** Admin → Monthly rates (last runs) and the Rates page update log. A failing source is logged; the last approved rates
+  stay in use and costing never breaks. ILOSTAT refuses automatic downloads by design: the saved wage files are used.
 
 ## Look & feel: Design to Cost theme
 
