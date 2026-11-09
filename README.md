@@ -1686,6 +1686,13 @@ with every step that is only a sum of other steps (e.g. cost before profit) open
 cost and follow your formulas. The report only reads stored versions; it changes nothing. Values in INR (other currencies
 at the forex rate stored with each version).
 
+**Excel and PDF (stage 56).** The card's *Excel* and *PDF* buttons download the same report for the chosen date, with your
+logo and company name (stage 35): Excel sheets *Summary* (date, threshold, counts), *Parts* (cost then / now with version,
+date, change ₹ and %, status, highlighted rows shaded, stored reason, who, rate month) and *Cost lines* (every part's lines
+then / now / change, moved lines marked); the PDF (A4 landscape, for management) has the counts, the parts table with
+highlighted rows shaded and FLAG, and the cost lines of the changed parts with the moved lines in bold. EXAMPLE rates are
+flagged as everywhere else. API: `/api/projects/{id}/cost-changes.xlsx?since=YYYY-MM-DD` and `.pdf`.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:

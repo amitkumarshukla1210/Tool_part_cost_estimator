@@ -700,6 +700,28 @@ def projects_cost_changes(project_id: int, since: Optional[str] = None):
         raise HTTPException(400, str(exc)) from None
 
 
+@app.get("/api/projects/{project_id}/cost-changes.xlsx")
+def projects_cost_changes_xlsx(project_id: int, since: Optional[str] = None):
+    """The cost change report as Excel: Summary, Parts, Cost lines (stage 56)."""
+    from . import cost_changes
+    try:
+        return _xlsx(cost_changes.to_excel(project_id, since), f"{register.get_project(project_id)['code']}_cost_changes.xlsx")
+    except cost_changes.ChangeError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/projects/{project_id}/cost-changes.pdf")
+def projects_cost_changes_pdf(project_id: int, since: Optional[str] = None):
+    """The cost change report as PDF for management (stage 56)."""
+    from . import cost_changes
+    try:
+        content = cost_changes.to_pdf(project_id, since)
+    except cost_changes.ChangeError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return Response(content, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{register.get_project(project_id)["code"]}_cost_changes.pdf"'})
+
+
 @app.post("/api/projects/{project_id}/capex/build")
 def projects_capex_build(project_id: int):
     from . import leader
