@@ -1642,6 +1642,31 @@ Every month each country gets **new approved rates** by itself, and an admin can
   reference's flow-simulation, process-window, sheet-metal and machining data - so costing and simulation work at once.
   Replace prices in the Price master and densities in Materials with your supplier's values.
 
+## 24-month price history for every rate, and more grades (stage 54)
+
+- **Every rate gets the last 24 months.** The first monthly update on your PC (app start, Admin → Monthly rates → *Update rates
+  now*, or `DTC_Country_Rates.bat`) fills the months before each rate's first version, back 24 months, once:
+  - **forex** - market monthly averages (FRED; VND World Bank yearly) and **Germany power** - Eurostat half-years: real data;
+  - **part RM grades, scrap values, tool & mould steels** - INDICATIVE: first rate × (the grade's market index × local
+    currency per USD) of the month ÷ the same in the first rate's month (LME aluminium / copper / nickel / zinc, iron ore, US
+    steel and resin price indices; tool steels without an own index follow the US steel index);
+  - **salaries** - INDICATIVE: × the ILOSTAT yearly wage ratio; **power** in other countries by the US power price index;
+    **sea freight** by the US deep-sea freight index;
+  - **everything else** (machine prices, process rates, consumables, rent, utilities, overheads, duties, hours, % settings) -
+    INDICATIVE flat: the first value dated back once (there is no free index for them).
+  INDICATIVE rows are approved (costing for an earlier month can use them), marked EXAMPLE and say how they were made, by the
+  user *Indicative history*. A month that already has a version (yours or the update's) is never written. The Price master then
+  shows 24 filled months. Note: steel grades follow the US steel index (tariff-driven rise in 2025) and the forex - treat the
+  history as indicative and replace it with your purchase prices where you have them.
+- **More grades** (EXAMPLE, price = reference grade until you enter yours): stainless sheet 201 / 202 / 304L / 316 / 316L /
+  409L / 410 / 441 / 310S and bar 303 / 304L / 316 / 316L / 410 / 420 / 431 / 17-4PH; EN3B, EN9, EN14, EN18, EN24, EN31, EN36,
+  EN353, EN354, EN41B, EN45, EN47, 20MnCr5, 16MnCr5, SAE 8620, SAE 1018 bar; CRCA CR1 / CR2 / CR4, HR D, HRPO, E250, E350,
+  HSLA, electro-galvanised, galvannealed, CRNO sheet; PP homopolymer / random / UV, HDPE, LDPE, LLDPE, PVC rigid / flexible,
+  HIPS, GPPS, ABS high heat / plating / GF20, SAN, ASA, PMMA, PC GF10 / V0, PC/PBT, PPO, PA6 GF30, PA66, PA66 GF15, PA12, POM
+  copolymer / homopolymer, PBT, PET GF30, PPS GF40, TPE, TPU (new main materials: Polyethylene (PE), PVC, Polystyrene (PS),
+  SAN / ASA, Acrylic (PMMA), PPO / PPE, PPS, Thermoplastic elastomer); tool steels EN19 / EN36 / EN353, SS 420, 440C,
+  SS 304, 1.2311+S, 1.2344 ESR, 1.2379 ESR, ASP 23, Vanadis 4E, tungsten carbide, Ampcoloy 940.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:
