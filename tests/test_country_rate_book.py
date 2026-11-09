@@ -214,3 +214,22 @@ def test_ilo_folder_finds_the_files_with_the_names_the_ilo_gives_them(tmp_path):
     assert h["ilo"]["monthly_manufacturing"]["CHN|ECO_ISIC4_C|CUR_TYPE_LCU"]["2022"]["value"] == 5613.0
     log = h["runs"][-1]["log"]
     assert any("2 earnings CSV" in line for line in log) and any("NOT FOUND" in line for line in log)
+
+
+def test_indicative_grade_trend_fills_24_months_from_the_index_and_is_marked(tmp_path):
+    p = crb.run(["CN"], tmp_path, http=fake, today=TODAY)[0]
+    ws = load_workbook(p)["RM_Price"]
+    names = [r[0].value for r in ws.iter_rows()]
+    b2 = names.index("B2. Indicative price, CNY/kg")
+    b3 = names.index("B3. Indicative price, INR/kg")
+    assert names.index("B. Grade / RM") < b2 < b3 < names.index("C. Grade (not in the tool yet)")
+    row = next(r for r in ws.iter_rows(min_row=b2 + 1, max_row=b3) if r[0].value == "Aluminium ADC12 / A383")
+    f = row[2].value                                                     # Nov-24
+    assert f.startswith("=IFERROR(IF(AND(ISNUMBER(RM_Price!C") and "Forex!C6" in f and "$AA$" in f
+    assert row[27].value == "approved rate 2026-10" or row[27].value == "EXAMPLE rate 2026-10"
+    assert row[26].value == "Sep-26"                                     # base = latest month with index data
+    assert row[28].value.startswith("Aluminium (LME")
+    inr = next(r for r in ws.iter_rows(min_row=b3 + 1) if r[0].value == "Aluminium ADC12 / A383")
+    assert "Forex!C7" in inr[2].value
+    notes = [n for n in names if n and str(n).startswith("B2. INDICATIVE")]
+    assert notes and "NOT a quote" in notes[0]

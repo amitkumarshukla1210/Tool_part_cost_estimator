@@ -123,6 +123,7 @@ MARKET_FILL = PatternFill("solid", fgColor="E2EFDA")     # downloaded market dat
 APP_FILL = PatternFill("solid", fgColor="DDEBF7")        # approved rate of this tool
 EXAMPLE_FILL = PatternFill("solid", fgColor="FCE4D6")    # EXAMPLE / fallback value
 ENTRY_FILL = PatternFill("solid", fgColor="FFFF00")      # for you to fill in
+INDICATIVE_FILL = PatternFill("solid", fgColor="EDE7F6")  # indicative: latest rate × market index ratio, not a quote
 THIN = Border(*(Side(style="thin", color="BFBFBF"),) * 4)
 
 
@@ -739,6 +740,65 @@ def build(country_code: str, hist: dict, app: dict, months: int = MONTHS, end: s
             rm.put(base + 1, "=" + delta(rng, 12), None, "0.0%")
             rm.put(base + 2, "=" + delta(rng, None), None, "0.0%")
 
+    def indicative_block(rows):
+        """B2 / B3: each grade's price over the 24 months, estimated from its latest approved rate and its market index:
+        price(m) = latest rate × (index(m) × LCU per USD(m)) ÷ (index × LCU per USD in the month of the rate).
+        Excel formulas, marked indicative; a month without index or forex stays empty. Not a quote, not stored anywhere."""
+        if not rows:
+            return
+        lcu = f"Forex!{{c}}{r_lcu_usd}"
+        rm.row += 1
+        rm.note("B2. INDICATIVE grade price trend - NOT a quote: latest approved rate of the grade × (market index × "
+                f"{cur} per USD) of the month ÷ the same in the month of the rate. Shows how the grade would have moved with "
+                "its index. Based on EXAMPLE rates until you replace them. Grades without a market index are left out.")
+        monthly_fx = cur == "USD" or cur in FX_FRED
+        if not monthly_fx:
+            rm.note(f"No free monthly {cur} per USD rate: B2 follows the index ratio in USD only (forex change not included).")
+        heads = {}
+        for label, unit_cur in ((f"B2. Indicative price, {cur}/kg", cur),) + ((("B3. Indicative price, INR/kg", "INR"),)
+                                                                                if cur != "INR" else ()):
+            rm.head([label, "Unit"] + [_mlabel(m) for m in ms] + ["Base month", "Based on", "Market index"])
+            heads[unit_cur] = rm.row
+            fam_now = None
+            for fam, item, brow, ix, latest in rows:
+                if not ix or ix not in index_rows or (latest["currency"] or cur) != cur:
+                    continue
+                vals = series.get(ix, {}).get("values", {})
+                fxv = (series.get(fx_key, {}).get("values", {}) if cur not in ("USD",) else None)
+                base_m = next((m for m in reversed(ms) if m <= latest["month"] and vals.get(m) is not None
+                               and (not monthly_fx or cur == "USD" or (fxv or {}).get(m) is not None)), None)
+                if not base_m:
+                    continue
+                if fam != fam_now:
+                    rm.put(1, fam, bold=True)
+                    rm.row += 1
+                    fam_now = fam
+                bc = L(col_of[base_m])
+                ixr = index_rows[ix]
+                rm.put(1, item)
+                rm.put(2, f"{unit_cur}/kg")
+                for m in ms:
+                    c = L(col_of[m])
+                    if unit_cur == cur and monthly_fx:
+                        num = f"RM_Price!{c}{ixr}*{lcu.format(c=c)}"
+                        den = f"RM_Price!${bc}${ixr}*{lcu.format(c='$' + bc)}"
+                        f = (f'=IFERROR(IF(AND(ISNUMBER(RM_Price!{c}{ixr}),ISNUMBER({lcu.format(c=c)})),'
+                             f'$%s${brow}*{num}/({den}),""),"")' % L(last_col + 1))
+                    elif unit_cur == cur:            # no monthly forex for this currency: index ratio in USD only
+                        f = (f'=IFERROR(IF(ISNUMBER(RM_Price!{c}{ixr}),'
+                             f'$%s${brow}*RM_Price!{c}{ixr}/RM_Price!${bc}${ixr},""),"")' % L(last_col + 1))
+                    else:
+                        lrow = rm.row - (heads["INR"] - heads[cur])
+                        f = f'=IFERROR(IF(ISNUMBER({c}{lrow}),{c}{lrow}*Forex!{c}{r_inr_lcu},""),"")'
+                    rm.put(col_of[m], f, INDICATIVE_FILL, "#,##0.00")
+                rm.put(last_col + 1, _mlabel(base_m))
+                rm.put(last_col + 2, ("EXAMPLE rate " if latest["is_example"] else "approved rate ") + latest["month"])
+                rm.put(last_col + 3, (COMMODITIES.get(ix) or INDICES.get(ix))[1])
+                rm.row += 1
+            rm.row += 1
+        src("Indicative grade price trend (B2 / B3)", "Calculated here: latest approved rate × market index × forex ratio",
+            "", "monthly", f"{cur}/kg", "", "APP", "indicative, not a quote")
+
     inr_latest = (f'LOOKUP(2,1/ISNUMBER(Forex!C{r_inr_lcu}:{L(last_col)}{r_inr_lcu}),'
                   f'Forex!C{r_inr_lcu}:{L(last_col)}{r_inr_lcu})')
     # every grade of the tool, grouped by material family (tool & mould steels and scrap values in their own groups)
@@ -754,6 +814,7 @@ def build(country_code: str, hist: dict, app: dict, months: int = MONTHS, end: s
             fam_rows.setdefault(fam, []).append((cat, item, versions))
     order = [f for f, _ in FAMILIES] + ["Tool & mould material", "Other", "Scrap value (all materials)"]
     known = set()
+    b_rows: list[tuple[str, str, int, str | None, dict]] = []   # (family, grade, row, index, latest version) for B2
     for fam in sorted(fam_rows, key=lambda f: order.index(f) if f in order else len(order)):
         rm.put(1, fam, bold=True)
         rm.row += 1
@@ -782,8 +843,11 @@ def build(country_code: str, hist: dict, app: dict, months: int = MONTHS, end: s
             rm.put(base + 2, "EXAMPLE" if latest["is_example"] else latest["status"])
             rm.put(base + 3, latest["source"])
             index_cells(index_for(item), base + 4)
+            if cat != "material_scrap":
+                b_rows.append((fam, item, rm.row, index_for(item), latest))
             rm.row += 1
         rm.row += 1
+    indicative_block(b_rows)
     # C: common grades that are not in the tool yet - names and equivalents only, rate cells for you (no free price source)
     rm.row += 1
     rm.note("C. Other common grades, not yet in the tool. No free source publishes these prices: enter your supplier quote in "

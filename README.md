@@ -1566,7 +1566,7 @@ One Excel workbook per country (all countries of Master data → Countries), las
   wrought, zinc, magnesium, copper alloys, cast iron, plastics, tool & mould, scrap) with the market index it follows and that
   index's change; C: **about 60 more common grades** not yet in the tool (EN24, EN31, 20MnCr5, SS 316 / 202 / 409L, D3, M2, LM2,
   LM25, ALDC2, AlSi9Cu3, 6063, Zamak 5, AM60B, HDPE, PMMA, EPDM …) with equivalents and the index they follow, yellow monthly
-  cells for your quotes - add a grade on Master data → Price master and it moves to B) · *Labour* (ILOSTAT hourly earnings by
+  cells for your quotes - add a grade on Master data → Price master and it moves to B); **B2 / B3: indicative 24-month price trend of every grade** in the local currency and INR = latest approved rate × (market index × local currency per USD) of the month ÷ the same in the base month (latest month with index data up to the rate month). Excel formulas, lilac cells, marked *indicative, not a quote*; based on EXAMPLE rates until you replace them; grades without a market index (e.g. magnesium) are left out; a currency without a free monthly forex (VND) follows the index ratio in USD only) · *Labour* (ILOSTAT hourly earnings by
   skill level 1 / 2 / 3-4 and manufacturing monthly earnings, yearly; the tool's fully loaded labour rate per grade and its inputs) ·
   *Process_Cost* (machine hour rate of every machine and the process rates of the tool; cost drivers) · *Electricity* (the tool's
   power rate; Eurostat half-yearly industrial price for EU countries; official tariff publisher; yellow entry rows; gas / coal /
