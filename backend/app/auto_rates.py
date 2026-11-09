@@ -253,13 +253,19 @@ def run(user: str = SYSTEM_USER, out_dir: Path | None = None, http=crb._http, il
         hist = crb.load_history(out_dir)
         res = apply(hist)
         n = sum(res["written"].values())
+        history = None
+        if state("history_done") != "1":                 # stage 54: 24 months of history, once
+            from . import price_history
+            history = price_history.backfill(hist)
+            set_state("history_done", "1")
         last_log = [x for r in hist.get("runs", []) if r.get("at", "") >= started for x in r.get("log", [])]   # this refresh
         fails = [line for line in last_log if line.startswith("FAILED") and "ILOSTAT" not in line]   # ILO: refused by design,
         ilo_note = any(line.startswith("FAILED ILOSTAT") for line in last_log)                        # saved files are used
         msg = (f"{n} new approved rates for {res['month']} ({', '.join(f'{k} {v}' for k, v in res['written'].items()) or 'none'}); "
                f"{res['kept']} kept (already set this month), {res['unchanged']} without a newer index"
                + (f"; {len(fails)} source(s) failed" if fails else "")
-               + ("; ILOSTAT: saved wage data used (new year: DTC_Country_Rates.bat --ilo-file)" if ilo_note else ""))
+               + ("; ILOSTAT: saved wage data used (new year: DTC_Country_Rates.bat --ilo-file)" if ilo_note else "")
+               + (f"; 24-month history filled: {history['total']} month values ({history['months']})" if history else ""))
         rate_update._log("Auto monthly update", "ok" if not fails else "partial", msg, n, user)
         set_state("last_month", res["month"])
         set_state("last_run", datetime.now().isoformat(timespec="seconds"))
@@ -281,13 +287,15 @@ def run(user: str = SYSTEM_USER, out_dir: Path | None = None, http=crb._http, il
 
 def status() -> dict:
     return {"last_month": state("last_month"), "last_run": state("last_run"), "last_message": state("last_message"),
-            "this_month": rates.current_month(), "due": state("last_month") != rates.current_month(),
+            "this_month": rates.current_month(),
+            "due": state("last_month") != rates.current_month() or state("history_done") != "1",
+            "history_done": state("history_done") == "1",
             "running": _LOCK.locked(), "folder": str(crb.default_out())}
 
 
 def run_if_due() -> dict | None:
     """App start: once per new month, in the background."""
-    if state("last_month") == rates.current_month():
+    if state("last_month") == rates.current_month() and state("history_done") == "1":
         return None
     return run()
 

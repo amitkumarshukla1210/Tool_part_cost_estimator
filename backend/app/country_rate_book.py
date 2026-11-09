@@ -498,7 +498,7 @@ def family_of(grade: str) -> str:
 
 def _norm(text: str) -> str:
     t = text.lower().replace("stainless steel", "ss").replace("aluminium", "").replace("zinc", "")
-    return re.sub(r"[^a-z0-9.]", "", t)
+    return re.sub(r"[^a-z0-9.]+", " ", t).strip()          # word gaps kept: "20MnCr5 (1.7147)" is not "20mncr51.7147"
 
 
 def in_tool(grade: str, known: set[str]) -> bool:
@@ -507,8 +507,8 @@ def in_tool(grade: str, known: set[str]) -> bool:
     names = [_norm(k) for k in known]
     for seg in grade.split("/"):
         n = _norm(seg.split(",")[0])
-        if len(n) >= 3 and any(re.search(re.escape(n) + r"(?![0-9])", k) for k in names):     # ADC1 is not ADC12
-            return True
+        if len(n.replace(" ", "")) >= 3 and any(re.search(r"(?<![a-z0-9])" + re.escape(n) + r"(?![0-9])", k) for k in names):
+            return True                                                                      # ADC1 is not ADC12
         if len(n) == 2 and any(k.startswith(n) for k in names):
             return True
     return False

@@ -177,7 +177,9 @@
           (user <b>Auto monthly update</b>): forex; every RM grade, tool steel and scrap value by its market index (LME metals, steel
           and resin price indices, iron ore, with the forex change); electricity (Germany from Eurostat, others by the power price
           index); salaries by the ILOSTAT yearly wage change. Machine hour and labour rates follow from these. It runs by itself when
-          the app starts in a new month; the country rate book (one Excel per country) is built at the same time.</p>
+          the app starts in a new month; the country rate book (one Excel per country) is built at the same time. The first run also
+          fills the <b>last 24 months</b> of every rate that starts later (forex and Germany power from the market; grades, salaries and
+          power elsewhere by their index, marked INDICATIVE / EXAMPLE; others flat) - months that already have a value are never changed.</p>
         <p class="note"><b>You stay in charge:</b> change any value on the <a class="link" href="/rates">Rates page</a> (a new version).
           A rate that already has a version in a month is never written again by the update, and the next month starts from your
           value. Results built on EXAMPLE rates stay marked EXAMPLE.</p>

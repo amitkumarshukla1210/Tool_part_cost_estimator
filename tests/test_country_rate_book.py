@@ -165,12 +165,13 @@ def test_rm_sheet_groups_grades_by_family_and_lists_missing_grades_for_entry(tmp
     alu = names.index("Aluminium - casting alloys", b)
     assert "Aluminium ADC12 / A383" in names[alu:alu + 8]
     part_c = names[c:]
-    assert "SS 316 / 316L" in part_c and "EN31 / 100Cr6" not in part_c and "SAE 8620" in part_c
+    assert "EPDM" in part_c and "AM60B" in part_c and "EN31 / 100Cr6" not in part_c
+    assert "SS 316 / 316L" not in part_c and "SAE 8620" not in part_c and "20MnCr5 / 16MnCr5" not in part_c   # stage 54 grades
     assert "ADC12" not in part_c and "P20 / 1.2311" not in part_c and "SS 430" not in part_c   # already in the tool: in B
     assert "LM2" not in part_c and "ALDC2 / ADC3" not in part_c and "EN24 / 34CrNiMo6" not in part_c   # stage 53 grades
-    ss316 = next(r for r in ws.iter_rows(min_row=c) if r[0].value == "SS 316 / 316L")
-    assert all(x.value is None and x.fill.fgColor.rgb.endswith("FFFF00") for x in ss316[2:26])   # yellow, empty: no made-up price
-    assert ss316[30].value.startswith("Nickel (LME")
+    epdm = next(r for r in ws.iter_rows(min_row=c) if r[0].value == "EPDM")
+    assert all(x.value is None and x.fill.fgColor.rgb.endswith("FFFF00") for x in epdm[2:26])     # yellow, empty: no made-up price
+    assert epdm[30].value.startswith("Natural rubber")
     am = next(r for r in ws.iter_rows(min_row=c) if r[0].value == "AM60B")
     assert am[30].value == "-"                                                                    # magnesium: no free index
 
