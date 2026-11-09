@@ -72,6 +72,14 @@
 
           <div id="leader"></div>
 
+          <h3 class="block-title">Cost changes</h3>
+          <div class="card toolbar">
+            <label>Compare with the part costs valid on <input type="date" id="ccSince" /></label>
+            <button type="button" class="btn btn-outline" id="ccShow">Show changes</button>
+            <span class="note" id="ccNote"></span>
+          </div>
+          <div id="costChanges"></div>
+
           <h3 class="block-title">Variants · RM cost vs target</h3>
           <div class="table-wrap"><table class="cost-table" id="variants"></table></div>
           <div id="bomBlock" hidden>
