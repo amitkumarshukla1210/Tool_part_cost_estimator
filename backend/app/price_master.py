@@ -90,12 +90,14 @@ def grid(group: str, country: str, end: str | None = None, count: int = MONTHS) 
     for r in rows:
         by_item.setdefault(r["item"], []).append(r)
     out = []
+    from . import item_codes
+    code = item_codes.tool_code if group == "tool_material" else item_codes.material_code
     for it in items(group):
         versions = by_item.pop(it["item"], [])
-        out.append(it | {"cells": _cells(versions, cols)})
+        out.append(it | {"code": code(it["item"]), "cells": _cells(versions, cols)})
     for item, versions in sorted(by_item.items()):  # rates of items no longer in the master list
-        out.append({"item": item, "type": "", "grade": item, "info": "not in the master list", "is_example": False,
-                    "cells": _cells(versions, cols), "orphan": True})
+        out.append({"item": item, "code": code(item), "type": "", "grade": item, "info": "not in the master list",
+                    "is_example": False, "cells": _cells(versions, cols), "orphan": True})
     return {"group": group, "title": g["title"], "category": g["category"], "country": country,
             "currency": countries[country]["currency"], "unit": f"{countries[country]['currency']}/{g['per']}",
             "months": cols, "current_month": rates.current_month(), "rows": out}

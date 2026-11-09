@@ -80,9 +80,14 @@
             </select>
           </label>
           <label class="inline grow">Search
-            <input type="search" id="search" placeholder="name, description or notes" />
+            <input type="search" id="search" placeholder="code, name, description or notes" />
           </label>
           <label class="check"><input type="checkbox" id="examplesOnly" /> Examples only</label>
+          <span id="priceBox" hidden>
+            <label class="inline">Price of
+              <select id="priceCountry"></select></label>
+            <label class="inline">month <input type="month" id="priceMonth" /></label>
+          </span>
         </div>
 
         <details class="card help" id="formulaHelp" hidden>

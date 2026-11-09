@@ -483,7 +483,7 @@ def family_of(grade: str) -> str:
              ("Aluminium - casting alloys", ("adc", "lm6", "lm2", "lm4", "lm24", "lm25", "a380", "a356", "a383", "alsi", "aldc")),
              ("Aluminium - wrought (sheet, extrusion, bar)", ("alumin",)),
              ("Zinc alloys", ("zinc", "zamak")), ("Magnesium alloys", ("magnesium", "az91", "am60")),
-             ("Copper & copper alloys", ("copper", "brass", "bronze", "becu")),
+             ("Copper & copper alloys", ("copper", "brass", "bronze", "becu", "gunmetal", "cuzn", "cusn")),
              ("Cast iron", ("cast iron", "ductile", "sg ", "fg2")),
              ("Sheet & strip steel", ("crca", "galvan", " gi", " hr", "sheet", "d513", "dc0", "spcc")),
              ("Carbon & alloy steel (bar, forging)", ("steel", " en", "c45", "42crmo", "bar")),

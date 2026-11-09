@@ -175,6 +175,34 @@ function materialOptions(value) {
     `<optgroup label="Insert materials">${meta.insert_materials.map((m) => opt(m.name)).join("")}</optgroup>`;
 }
 
+// Main material → sub material (stage 53): Master data → Materials material type = main, the grade = sub; codes shown.
+function materialGroups() {
+  const tree = (meta.material_tree || []).map((g) => ({ main: g.main, subs: g.subs.map((x) => ({ value: x.material, label: `${x.material} · ${x.code}` })) }));
+  if (meta.insert_materials?.length) tree.push({ main: "Insert materials", subs: meta.insert_materials.map((m) => ({ value: m.name, label: m.name })) });
+  return tree;
+}
+
+function subOptions(main, value) {
+  const g = materialGroups().find((x) => x.main === main);
+  const subs = g ? g.subs : [];
+  const extra = value && !subs.some((x) => x.value === value) ? `<option value="${esc(value)}" selected>${esc(value)}</option>` : "";
+  return `<option value="">—</option>${extra}` + subs.map((x) => `<option value="${esc(x.value)}" ${x.value === value ? "selected" : ""}>${esc(x.label)}</option>`).join("");
+}
+
+function materialPicker(value) {
+  const groups = materialGroups();
+  const main = groups.find((g) => g.subs.some((x) => x.value === value))?.main || "";
+  return `<label>Main material <select data-main-material>${`<option value="">—</option>` +
+      groups.map((g) => `<option value="${esc(g.main)}" ${g.main === main ? "selected" : ""}>${esc(g.main)}</option>`).join("")}</select></label>
+    <label>Sub material (grade) <select name="material">${subOptions(main, value)}</select></label>`;
+}
+document.addEventListener("change", (e) => {
+  const m = e.target.closest("select[data-main-material]");
+  if (!m) return;
+  const sub = m.closest("form, .grid2, div")?.querySelector('select[name="material"]');
+  if (sub) sub.innerHTML = subOptions(m.value, "");
+});
+
 // Shape + dimension inputs (Part register setup → Insert shapes) for a part without a 3D file.
 function dimsFields(dims, prefix = "") {
   const shape = meta.insert_shapes.find((s) => s.code === dims?.shape);
@@ -488,7 +516,7 @@ function insertsBlock(p) {
         <label>Quantity in this part <input type="number" name="quantity" min="0" step="any" value="1" required /></label>
         <p class="note span2">For a new insert part, also fill in:</p>
         <label>Name <input name="name" placeholder="e.g. M3 brass threaded insert" /></label>
-        <label>Material <select name="material">${materialOptions("")}</select></label>
+        ${materialPicker("")}
         ${dimsFields(null, "n_")}
         ${priceFields({}, "n_")}
         <div class="span2 dialog-actions"><button type="submit" class="btn btn-primary">Link insert</button></div>
@@ -515,7 +543,7 @@ function renderPart() {
         <p class="note">Project ${esc(p.project_code)} · current rev <b>${esc(p.rev ?? "—")}</b> · created ${esc(p.created_at.slice(0, 10))} by ${esc(p.created_by)}</p>
         <form id="partForm" class="grid2">
           <label class="span2">Part name <input name="name" value="${esc(p.name)}" /></label>
-          <label>Material <select name="material">${materialOptions(p.material)}</select></label>
+          ${materialPicker(p.material)}
           ${materialHint(p)}
           <label>Process ${sel("process", meta.processes, p.process)}</label>
           <label>Sourcing ${sel("sourcing", meta.sourcing, p.sourcing)}</label>

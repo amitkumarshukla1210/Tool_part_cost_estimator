@@ -4,10 +4,10 @@ let meta = null;
 let grid = null;
 let group = "tool_material";
 
-const COLS = {
-  tool_material: ["Type", "Grade", "Used for"],
-  part_material: ["Type", "Grade", "Part type"],
-  part_scrap: ["Type", "Grade", "Part type"],
+const COLS = {   // code · main material (type) · sub material (grade) · info
+  tool_material: ["Code · main material", "Sub material (grade)", "Used for"],
+  part_material: ["Code · main material", "Sub material (grade)", "Part type"],
+  part_scrap: ["Code · main material", "Sub material (grade)", "Part type"],
 };
 
 async function init() {
@@ -21,6 +21,11 @@ async function init() {
   $("approve").checked = false;
   const [s, me] = await Promise.all([api("/api/settings"), api("/api/auth/me")]);
   $("approverBox").hidden = !meta.may_approve || me.mode === "server" || !!s.approver_name;  // with logins: the logged-in user
+  const qs = new URLSearchParams(location.search);       // links from the master-data pages: ?group=…&country=…&code=…
+  if (qs.get("group") && meta.groups[qs.get("group")]) group = qs.get("group");
+  if (qs.get("country")) $("country").value = qs.get("country");
+  if (qs.get("code")) $("q").value = qs.get("code");
+  document.querySelectorAll("#groups [data-group]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.group === group)));
   await load();
 }
 
@@ -45,7 +50,7 @@ function render() {
   const q = $("q").value.trim().toLowerCase();
   const type = $("type").value;
   const rows = grid.rows.filter((r) => (!type || r.type === type) &&
-    (!q || `${r.type} ${r.grade} ${r.info} ${r.item}`.toLowerCase().includes(q)));
+    (!q || `${r.code} ${r.type} ${r.grade} ${r.info} ${r.item}`.toLowerCase().includes(q)));
   const [c1, c2, c3] = COLS[group];
   const cur = grid.current_month;
   const head = `<thead><tr><th class="sticky0">${c1}</th><th class="sticky1">${c2}</th><th>${c3}</th>` +
@@ -59,7 +64,7 @@ function render() {
       return `<td class="${cls}" title="${esc(title)}"><input type="number" min="0" step="any" data-item="${esc(r.item)}" data-month="${m}"
         value="${c?.value ?? ""}" placeholder="—" />${c?.draft != null ? '<b class="draft" title="open draft">D</b>' : ""}</td>`;
     }).join("");
-    return `<tr class="${r.orphan ? "orphan" : ""}"><td class="sticky0">${esc(r.type)}</td>
+    return `<tr class="${r.orphan ? "orphan" : ""}" id="code-${esc(r.code || "")}"><td class="sticky0"><code class="item-code">${esc(r.code || "")}</code><br>${esc(r.type)}</td>
       <td class="sticky1"><b>${r.recommended ? "★ " : ""}${esc(r.grade)}</b>${r.is_example ? '<span class="example-mark" title="Example row">•</span>' : ""}</td>
       <td class="note">${[r.info, r.origin, r.density ? `${fmt(r.density, 3)} g/cm³` : "", r.hardness].filter(Boolean).map(esc).join(" · ")}</td>${cells}</tr>`;
   }).join("");

@@ -166,6 +166,16 @@ async def master_data_upload(file: UploadFile = File(...)):
     return master_data.tables() | ({"_notes": notes} if notes else {})
 
 
+@app.get("/api/master-codes/{dataset}")
+def master_codes(dataset: str, country: str = "IN", month: str = ""):
+    """Unique code of every row of a master-data set, and the live Price master price of priced rows (stage 53)."""
+    from . import item_codes
+    try:
+        return item_codes.for_dataset(dataset, country, month or None)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from None
+
+
 @app.get("/api/mould-db/schema")
 def mould_db_schema():
     return mould_db.schema()
@@ -555,6 +565,21 @@ async def register_setup_upload(file: UploadFile = File(...)):
     return register_setup.tables()
 
 
+def _material_tree() -> list[dict]:
+    from . import item_codes
+    rows = master_data.tables()["Materials"]
+    codes = item_codes.codes({"Materials": rows})["Materials"]          # one material = one code
+    tree: dict[str, list] = {}
+    seen = set()
+    for m, code in zip(rows, codes):
+        if m["material"] in seen:
+            continue
+        seen.add(m["material"])
+        tree.setdefault(m["material_type"] or m["material"], []).append({"material": m["material"], "code": code,
+                                                                          "part_type": m["part_type"]})
+    return [{"main": k, "subs": v} for k, v in sorted(tree.items(), key=lambda kv: kv[0].lower())]
+
+
 @app.get("/api/register-meta")
 def register_meta():
     """Choices for the register pages, all from master data."""
@@ -563,6 +588,8 @@ def register_meta():
         "statuses": register_setup.statuses(),
         "sourcing": list(register_setup.sourcing().values()),
         "materials": [m["material"] for m in master_data.tables()["Materials"]],
+        # main material (Materials → material type) → sub materials (grades), with their codes (stage 53)
+        "material_tree": _material_tree(),
         "insert_materials": list(register_setup.insert_materials().values()),
         "insert_shapes": list(register_setup.insert_shapes().values()),
         "insert_default_sourcing": register_setup.settings()["insert_default_sourcing"],
