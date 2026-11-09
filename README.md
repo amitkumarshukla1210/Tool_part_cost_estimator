@@ -1615,6 +1615,33 @@ Every month each country gets **new approved rates** by itself, and an admin can
 - **Log:** Admin → Monthly rates (last runs) and the Rates page update log. A failing source is logged; the last approved rates
   stay in use and costing never breaks. ILOSTAT refuses automatic downloads by design: the saved wage files are used.
 
+## Unique codes, live prices from the Price master, main and sub materials (stage 53)
+
+- **A unique code on every row** of General master data, Mould & die database, Countries, machines & formulas and Part register
+  setup (first column *Code*), and on every Price master item. A code is never changed or reused: it belongs to what the row
+  is (its material, steel, machine, process, name …), so changing a value keeps the code and a new row gets the next number.
+  Part materials are coded by family - RM-STL carbon / alloy steel, RM-SHT sheet steel, RM-SS stainless, RM-ALC aluminium
+  casting, RM-ALW aluminium wrought, RM-ZN zinc, RM-MG magnesium, RM-CU copper / brass / bronze, RM-CI cast iron, RM-PLC /
+  RM-PLE commodity / engineering plastics, RM-RUB rubber - tool steels TS-, machines MC-, process rates PR- / PU-, parameters
+  PA-, every other table by its initials (e.g. DR- design rules). One material has one code in Materials, the flow and process
+  tables and the Price master. Search by code on every page; codes are kept per installation.
+- **Prices are linked, not copied.** Materials, Tool materials, Machines and Process rates show a *Price* column with the latest
+  approved Price master / Rates value for the country and month you pick above the table (default India, this month), with its
+  month and EXAMPLE / approved status. Change a price in the Price master (or let the monthly update do it) and every page shows
+  it at once; *edit* opens the Price master on that code. The old "Rate / kg (India)" columns of Tool materials and Process
+  rates were copies from the first set-up: they are labelled "not used".
+- **Main material → sub material.** The part's material is picked in two steps: *Main material* (Master data → Materials →
+  Material type, e.g. ABS, Polypropylene (PP), Coated steel sheet) and *Sub material (grade)* with its code (e.g. ABS Colour
+  White · RM-PLE-015). The Price master shows *Code · main material* and *Sub material*.
+- **More grades** (EXAMPLE until you replace them): PP CaCO3 10 / 20 / 30 % (= talc / mineral filled), PP GF 10 / 20 / 30 %;
+  ABS Colour White, Black, Sparkle; GI D, DD, EDD, IF; zinc Zamak 2 / 5 / 7, ZA-8 / 12 / 27; aluminium die casting ALDC1,
+  ALDC2, ADC10, AlSi9Cu3, LM2, LM24, casting LM4, LM25, AC4C, sheet 1100, 3003, 5083, 6061, bar 6082, 6063, 7075, 2014; brass
+  bar CW617N, CW508L, CW602N (DZR), CW712R, brass sheet CuZn37, CuZn30; gunmetal LG2, brass casting CuZn39Pb1Al-C, phosphor
+  bronze PB1; tool steels D3, O1, A2, M2, DC53, 1.2767, 1.2714, H11, 718H, 1.2085, EN31, EN24. Each starts with the price of
+  its reference grade in every country ("EXAMPLE: same as ABS until you enter your price"), typical density, and a copy of the
+  reference's flow-simulation, process-window, sheet-metal and machining data - so costing and simulation work at once.
+  Replace prices in the Price master and densities in Materials with your supplier's values.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:

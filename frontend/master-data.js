@@ -82,6 +82,11 @@ let savedById = {};
 let nextId = 1;
 let badRow = null; // { sheet, index } from the last failed save
 let formulaVars = {};
+// stage 53: unique code of every row and the live Price master price of priced rows (never stored in the tables)
+let codeById = {};
+let priceById = {};
+let pricedSheets = {};
+const PRICE_GROUP = { material: "part_material", tool_material: "tool_material" };
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const display = (v) => (Array.isArray(v) ? v.join(", ") : v ?? "");
@@ -129,9 +134,50 @@ async function switchDataset(name) {
       .join("");
     setData(body);
     setStatus("");
+    loadCodes();
   } catch (err) {
     setStatus(`Could not load: ${err.message}`, "error");
   }
+}
+
+async function loadCodes() {
+  try {
+    const q = new URLSearchParams({ country: $("priceCountry").value || "IN", month: $("priceMonth").value || "" });
+    const res = await fetch(`/api/master-codes/${ds}?${q}`);
+    if (!res.ok) return;
+    const c = await res.json();
+    if (!$("priceMonth").value) $("priceMonth").value = c.month;
+    codeById = {};
+    priceById = {};
+    pricedSheets = c.priced || {};
+    for (const [s, rows] of Object.entries(saved || {})) {
+      rows.forEach((row, i) => {
+        if (c.codes[s]) codeById[row._id] = c.codes[s][i];
+        if (c.prices[s]) priceById[row._id] = c.prices[s][i];
+      });
+    }
+    render();
+  } catch { /* codes are extra information: the editor works without them */ }
+}
+
+async function loadCountries() {
+  try {
+    const m = await (await fetch("/api/price-master/meta")).json();
+    $("priceCountry").innerHTML = m.countries.map((c) =>
+      `<option value="${escapeHtml(c.code)}" ${c.code === m.base ? "selected" : ""}>${escapeHtml(c.name)} (${escapeHtml(c.currency)})</option>`).join("");
+  } catch { $("priceCountry").innerHTML = '<option value="IN">India</option>'; }
+}
+
+function priceCell(row) {
+  const p = priceById[row._id];
+  const cat = pricedSheets[sheet];
+  if (!(row._id in priceById)) return `<td class="calc note">save first</td>`;
+  const code = codeById[row._id] || "";
+  const group = PRICE_GROUP[cat];
+  const href = group ? `/master-data/prices?group=${group}&country=${encodeURIComponent($("priceCountry").value)}&code=${encodeURIComponent(code)}` : "/rates";
+  if (!p) return `<td class="calc"><span class="note">no approved price</span> <a class="link" href="${href}">set it</a></td>`;
+  return `<td class="calc num" title="${escapeHtml(p.source || "")}">${escapeHtml(String(p.value))} <span class="note">${escapeHtml(p.unit || "")}</span>` +
+    `<br><span class="note">${escapeHtml(p.month)} · ${p.is_example ? "EXAMPLE" : escapeHtml(p.status)}</span> <a class="link" href="${href}">edit</a></td>`;
 }
 
 function setData(body) {
@@ -204,9 +250,12 @@ function render() {
     .map((row, i) => ({ row, i }))
     .filter(({ row }) => !filter || !hasPartType || row.part_type === filter)
     .filter(({ row }) => !examplesOnly || row.is_example)
-    .filter(({ row }) => !query || Object.values(row).join(" ").toLowerCase().includes(query));
+    .filter(({ row }) => !query || `${codeById[row._id] || ""} ${Object.values(row).join(" ")}`.toLowerCase().includes(query));
 
-  const head = `<thead><tr><th>Row</th>${columns.map((c) => `<th>${c.label}</th>`).join("")}<th></th></tr></thead>`;
+  const priced = sheet in pricedSheets;
+  $("priceBox").hidden = !priced;
+  const head = `<thead><tr><th>Row</th><th>Code</th>${columns.map((c) => `<th>${c.label}</th>`).join("")}` +
+    `${priced ? `<th>Price · ${escapeHtml($("priceCountry").value)} ${escapeHtml($("priceMonth").value)}<br><span class="note">live from Price master / Rates</span></th>` : ""}<th></th></tr></thead>`;
   const body = visible
     .map(({ row, i }) => {
       const cls = [
@@ -215,12 +264,13 @@ function render() {
       ].join(" ");
       // Excel row number = position + 1 for the header row.
       // Yellow = cell you type into, grey = row number (theme costing-table style).
-      return `<tr class="${cls}"><td class="calc rownum">${i + 2}</td>${columns.map((c) => `<td class="input">${cell(c, row, i)}</td>`).join("")}` +
+      return `<tr class="${cls}"><td class="calc rownum">${i + 2}</td><td class="calc"><code class="item-code">${escapeHtml(codeById[row._id] || "new")}</code></td>` +
+        `${columns.map((c) => `<td class="input">${cell(c, row, i)}</td>`).join("")}${priced ? priceCell(row) : ""}` +
         `<td><button class="del" data-del="${i}" title="Delete row">✕</button></td></tr>`;
     })
     .join("");
   $("table").innerHTML =
-    head + `<tbody>${body || `<tr><td class="empty" colspan="${columns.length + 2}">No rows match.</td></tr>`}</tbody>`;
+    head + `<tbody>${body || `<tr><td class="empty" colspan="${columns.length + 4}">No rows match.</td></tr>`}</tbody>`;
 
   document.querySelectorAll("#tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.sheet === sheet)));
   $("formulaHelp").hidden = !columns.some((c) => c.kind === "formula");
@@ -317,6 +367,7 @@ $("save").addEventListener("click", async () => {
     const body = await res.json();
     if (!res.ok) throw new Error(errorText(body.detail));
     setData(body);
+    loadCodes();
     setStatus(`Saved to ${conf().file}. New values apply to the next calculation.`, "ok");
   } catch (err) {
     showError(err.message);
@@ -348,6 +399,7 @@ $("upload").addEventListener("change", async () => {
     const notes = body._notes || [];
     delete body._notes;
     setData(body);
+    loadCodes();
     setStatus(`${file.name} imported and saved to ${conf().file}.${notes.length ? " Note: " + notes.join(" ") : ""}`, "ok");
   } catch (err) {
     setStatus(`Upload rejected, nothing was changed: ${err.message}`, "error");
@@ -390,4 +442,6 @@ function showError(msg) {
 const startSet = new URLSearchParams(location.search).get("set");
 // Links from the Replace example values checklist open a sheet with "Examples only" ticked.
 $("examplesOnly").checked = new URLSearchParams(location.search).has("examples");
-switchDataset(DATASETS[startSet] ? startSet : "general");
+$("priceCountry").addEventListener("change", loadCodes);
+$("priceMonth").addEventListener("change", loadCodes);
+loadCountries().then(() => switchDataset(DATASETS[startSet] ? startSet : "general"));

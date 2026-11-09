@@ -83,3 +83,7 @@ label.grow { flex: 1; min-width: 200px; }
 
 /* Link to the Replace example values checklist */
 .datasets a.checklist { text-decoration: none; border-left: 4px solid var(--accent); }
+
+/* stage 53: unique item codes */
+code.item-code { font-size: 0.8em; white-space: nowrap; background: #eef2f7; border-radius: 3px; padding: 1px 4px; color: #1f3864; }
+#priceBox { display: inline-flex; gap: 8px; align-items: center; }
