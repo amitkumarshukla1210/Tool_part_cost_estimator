@@ -9,11 +9,11 @@ Project: **Design to Cost — Part Cost Estimator**, repository `amitkumarshukla
 I am Amit, Head of Operations / costing at an OEM (supply chain, production, strategic sourcing, projects; RM, part and tool cost,
 BOM cost and CAPEX, EBITDA, digital transformation). Answer simply, **INR first**.
 
-**State (9 Nov 2026):** stages 1–50 are built (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
+**State (9 Nov 2026):** stages 1–51 are built (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
 cycle, PR 53; 43 = toolmaker review, 44 = design skills, both PR 55; 45 = tool internals, production data, FEA, 3D outputs, PR 57; fixes PR 59, 61, 62;
 46 = cavities, gate, overflow, ejection, cooling of the mould, PR 64; 47 = saved files with revisions, 48 = India vs China per cost line,
 49 = scrap reuse and scrap rate % of RM, all PR 66; 50 = several countries per part, traces for admin, tool life per part,
-suppliers removed, PR 68); the next stage is **51** (first free number in `ROADMAP.md`). Everything of the old V4 branch is now on main (written new);
+suppliers removed, PR 68; 51 = country rate book, PR 70); the next stage is **52** (first free number in `ROADMAP.md`). Everything of the old V4 branch is now on main (written new);
 the 4 old unmerged branches are NOT to be merged; neither is `rate-update-2026-11` (draft rates on an old main) as it is.
 To save tokens, do not read the whole README (1650+ lines): read the stage table in `ROADMAP.md` and only the README section of the topic I ask about.
 Stack: Python / FastAPI (`backend/app/`), plain HTML / JS (`frontend/`), SQLite (`data/projects.sqlite` = my data, `master_data/costing_db.sqlite`
@@ -103,6 +103,12 @@ What the later stages added (details in README):
   Downloads `<part>_cost_<own>_vs_<others>.*` (RM, tool, part sheets). Permission `open_traces` (admin): without it values are plain
   (trace.js `canTrace`, CSS `.no-trace`). Tool / mould life per part → Stage C and piece `tool_life_shots` (user source).
   Suppliers page / menu / help / panel block removed (`/suppliers` → /parts; data and API kept). Full suite 463 tests.
+- 51 (PR 70): country rate book (`country_rate_book.py`, `python -m backend.app.country_rate_book [--countries] [--offline]
+  [--ilo-file]`; kit `DTC_Country_Rates.bat` → `DTC_Data\country_rates`; monthly workflow artifact): one Excel per country, 24 months,
+  sheets Summary / RM_Price (market A, grades of the tool by family B, ~60 catalogue grades for entry C) / Labour / Process_Cost /
+  Electricity / Transport / Forex / Sources. MARKET from FRED, ILOSTAT (SDMX; refuses automatic download 403 → `--ilo-file`, never
+  spoof user agents), Eurostat, World Bank, history `country_rate_book_history.json` append-only; APP = approved rates; empty months
+  stay empty. FRED and ILO answer only some user agents: urllib default works for FRED. Environment allowed hosts added for these.
 - To open a STEP: his CAD, eDrawings Viewer (SOLIDWORKS free downloads; not "3DEXPERIENCE Exchange", that is a SOLIDWORKS add-in),
   CAD Assistant, FreeCAD, or the app's own 3D viewer. Windows 3D Viewer opens the STL, not STEP.
 - Amit's PC: kit at `D:\Project\DTC Tool and mould`, app on port 8100, CalculiX 2.22 `ccx_static.exe` in
