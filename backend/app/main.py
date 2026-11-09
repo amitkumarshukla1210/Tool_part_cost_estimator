@@ -1378,8 +1378,6 @@ def parts_vs_country_export(part_id: int, kind: str, mode: str = "sea", use_fta:
     if kind not in ("xlsx", "pdf"):
         raise HTTPException(404, "xlsx or pdf")
     v = _versus(part_id, mode, use_fta)
-    if v["error"]:
-        raise HTTPException(400, f"{v['name']}: {v['error']}")
     name = landed.versus_filename(v, kind)
     if kind == "xlsx":
         return _xlsx(landed.versus_excel(v, {}), name)
@@ -2004,7 +2002,9 @@ async def bot_chat(inp: BotQuestion, request: Request):
 
 @app.get("/suppliers")
 def suppliers_page():
-    return FileResponse(FRONTEND_DIR / "suppliers.html")
+    """The Suppliers page was removed (stage 50); its data stays in the database (API below)."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse("/parts", status_code=303)
 
 
 @app.get("/api/suppliers")

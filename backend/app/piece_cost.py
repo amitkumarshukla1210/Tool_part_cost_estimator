@@ -232,6 +232,8 @@ def run(part_id: int, country: str | None = None) -> dict:
                 if v[0] is None:
                     raise PieceError(f"{label}: no value (Master data → Parameters or the part).")
                 t.add_input(nid, label, float(v[0]), v[1], v[2], money=v[3])
+        elif inp["source"] == "parameter" and inp["item"] == "tool_life_shots" and d.get("tool_life_shots"):
+            t.add_input(nid, label, float(d["tool_life_shots"]), inp["unit"], you)      # stage 50: typed on the part
         elif inp["source"] == "parameter":
             if not isinstance(params.get(inp["item"]), (int, float)):
                 raise PieceError(f"{label}: Master data → Parameters has no number '{inp['item']}' for {part_type}.")

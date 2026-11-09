@@ -20,7 +20,6 @@
         <ul>
           <li><a href="/dashboard">Dashboard</a></li>
           <li><a href="/parts">Parts</a></li>
-          <li><a href="/suppliers">Suppliers</a></li>
           <li><a href="/import">Import</a></li>
           <li><a href="/bom-extract">Harness &amp; PCB</a></li>
           <li><a href="/">Estimate</a></li>
@@ -321,8 +320,8 @@
     <section class="page-body">
       <div class="container">
         <div class="section-head">
-          <p class="kicker">Admin &amp; suppliers</p>
-          <h2>Logins, admin control and suppliers</h2>
+          <p class="kicker">Admin</p>
+          <h2>Logins and admin control</h2>
         </div>
         <div class="help-steps two">
           <div class="card">
@@ -334,16 +333,6 @@
             <h3>Admin page</h3>
             <p><b>Users &amp; roles</b>: create IDs, roles, block users. <b>Permissions</b>: the lowest role for each action.
               <b>Activity log</b>: who changed what and when, with Excel export. <b>Backups &amp; update</b>: backup now, download, version.</p>
-          </div>
-          <div class="card">
-            <h3>Supplier master</h3>
-            <p>Codes come automatically from <code>supplier_code_pattern</code> (SUP-0001…). Each supplier has status, capability,
-              contacts, certifications and quality / delivery / cost scores; their average is the rating.</p>
-          </div>
-          <div class="card">
-            <h3>Quotes vs should-cost</h3>
-            <p>On a part, add its main and alternate suppliers with their piece and tool price. The quote is converted to INR with the
-              approved forex and compared with our part cost and tool cost. CAPEX lines take the supplier by its code.</p>
           </div>
           <div class="card">
             <h3>Dies and tool BOM</h3>
@@ -392,7 +381,6 @@
             <tr><td>Any rate (material, scrap, steel, process, MHR input, labour, overhead %)</td><td>Traceability → For this part only / Save for the future; Rates page</td><td>New rate version</td></tr>
             <tr><td>A rule or formula (BOM rule, cost formula)</td><td>Traceability on the formula → change → For this part only / Save for the future</td><td>Master data</td></tr>
             <tr><td>Machines, countries, labour grades</td><td>Master data → Countries, machines &amp; formulas</td><td>Approved rates on Rates</td></tr>
-            <tr><td>Supplier data or a quote</td><td>Suppliers page / Part → Suppliers &amp; quotes</td><td>History kept</td></tr>
             <tr><td>Users, roles, permissions</td><td>Admin → Users &amp; roles / Permissions</td><td>Admin only</td></tr>
             <tr><td>A stored cost looks old</td><td>Part → Recalculate, or Dashboard → Recalculate RM / tools / part costs</td><td>Old versions are never changed</td></tr>
             <tr><td>Something wrong after an update</td><td>DTC_Rollback.bat (old version and data); DTC_Restore.bat (a backup)</td><td>Backups in DTC_Backups</td></tr>

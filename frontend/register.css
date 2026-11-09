@@ -167,3 +167,7 @@ label.check.small { font-size: .75rem; display: inline-flex; gap: 4px; align-ite
 .price-grid b.draft { position: absolute; top: 1px; right: 2px; font-size: 9px; color: var(--brand); }
 .price-grid tr.orphan td { color: var(--grey); font-style: italic; }
 .price-grid caption { caption-side: bottom; text-align: left; padding-top: 6px; }
+
+/* stage 50: without the permission "Open traces" a value is plain text, not a link to its trace */
+.no-trace button.tv, .no-trace .clickable[data-piecetrace], .no-trace [data-vstrace], .no-trace [data-trace], .no-trace [data-rmtrace],
+.no-trace [data-tooltrace] { pointer-events: none; cursor: default; border-bottom: 0; color: inherit; }

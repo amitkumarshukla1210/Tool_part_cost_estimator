@@ -44,6 +44,7 @@ PERMISSIONS = {
     "view_activity": ("approver", "See the activity log", "Admin → Activity log: who changed what, when"),
     "backups": ("admin", "Backups", "Admin → Backups: list, make and download backups"),
     "update_app": ("admin", "Update the app", "Admin → Backups & update: start a Windows-kit update"),
+    "open_traces": ("admin", "Open traces", "Click a value to see its formula, inputs, sources and rate table (others see the plain value)"),
 }
 # Pure calculations that change nothing: anyone logged in may run them.
 CALC_PATHS = ("/api/analyze", "/api/gross-weight", "/api/capacity", "/api/mould/estimate", "/api/tool-cost", "/api/suggest-process")

@@ -283,76 +283,115 @@ def _landed_lines(land: dict, k_rev: float = 1.0) -> list[dict]:
             for key, label in LANDED_ROWS]
 
 
-def versus(part_id: int, mode: str = "sea", use_fta: bool = True) -> dict:
-    """Tool cost and part cost of the part next to the same lines in the comparison country, and both landed at the
-    factory in INR."""
+def selected(d: dict) -> tuple[str, list[str]]:
+    """(producing country, the countries costed next to it) of a part (stage 50): the part's compare_countries, else the
+    Register settings compare_country; the producing country itself is never repeated."""
+    own = (d.get("effective_country") or d.get("country") or register_setup.settings().get("default_country") or HOME).upper()
+    others = d.get("compare_countries")
+    if others is None:
+        try:
+            others = [compare_country()]
+        except ValueError:
+            others = []
+    return own, [c for c in others if c and c.upper() != own]
+
+
+def _k(tr: dict) -> float:
+    return tr["value_inr"] / tr["value"] if tr.get("value") else 1.0
+
+
+def _country_block(part_id: int, c: str, cmap: dict, part_type: str, mode: str, use_fta: bool) -> dict:
+    """RM, tool and part cost of the part made in country c (live, that country's approved rates), with its landed rows."""
     from . import register
-    cc = compare_country()
-    res = compare(part_id, [cc], mode, use_fta, keep=True)
-    other = res["rows"][0]
-    cmap = {c["code"]: c for c in costing_setup.tables()["countries"]}
-    out = {"part_id": part_id, "part_code": res["part_code"], "home": HOME, "home_name": cmap[HOME]["name"], "country": cc,
-           "name": cmap[cc]["name"], "currency": cmap[cc]["currency"], "mode": mode, "use_fta": use_fta, "error": other["error"]}
-    if other["error"]:
+    out = {"country": c, "name": cmap[c]["name"], "currency": cmap[c]["currency"], "error": ""}
+    try:
+        rm = register._rm_compute(part_id, c)
+    except Exception as exc:                     # RM may not apply (e.g. bought-out); the other blocks still show
+        rm, out["rm_error"] = None, str(exc)
+    res = compare(part_id, [c], mode, use_fta, keep=True)["rows"][0]
+    if res["error"]:
+        out["error"] = res["error"]
+        if rm:
+            k = rates.lookup("forex", cmap[c]["currency"], "", rm["as_of"])["value"] if cmap[c]["currency"] != "INR" else 1.0
+            out |= {"fx_inr_per_unit": k, "rm": {"nodes": _nodes(rm, k)}, "traces": {"rm": rm}}
         return out
-    pc = other.pop("_piece")
+    pc = res.pop("_piece")
     tl = pc.pop("_tool_trace")
-    k = other["forex"]["fx_inr_per_unit"]
-    k_tool = tl["value_inr"] / tl["value"] if tl["value"] else k
-    out |= {"as_of": other["as_of"], "fx_inr_per_unit": k, "is_example": other["is_example"], "rates_used": other["rates_used"],
-            "piece": {"value": pc["value"], "value_inr": pc["value_inr"], "nodes": _nodes(pc, k), "machine": pc["machine"]},
-            "tool": {"value": tl["value"], "value_inr": tl["value_inr"], "capex_inr": tl.get("capex_inr"), "currency": tl["currency"],
-                     "fx_inr_per_unit": k_tool, "nodes": _nodes(tl, k_tool)},
-            "landed": {"piece": {"other": _landed_lines(other["landed"], k), "home": None},
-                       "tool": {"other": _landed_lines(other["tool"]["landed"], k_tool), "home": None}}}
-    # the home lines as the part panel shows them (stored RM / tool versions, live part cost), landed with the same rules
-    part_type = register_setup.processes()[register.part_detail(part_id, with_rm=False)["process"]]["part_type"]
-    try:
-        hp = piece_cost.run(part_id)
-        kh = hp["value_inr"] / hp["value"] if hp["value"] else 1.0
-        out["home_piece"] = {"value_inr": hp["value_inr"], "currency": hp["currency"], "nodes": _nodes(hp, kh),
-                             "steps": hp["steps"], "inputs": hp.get("inputs", [])}
-        exw = (hp["value"] - hp["nodes"]["calc:logistics"]["value"]) * kh
-        hl = import_cost(exw, hp["nodes"]["in:total_weight_kg"]["value"], HOME, _hs("part", part_type), hp["as_of"], mode, use_fta, {})
-        out["landed"]["piece"]["home"] = _landed_lines(hl, 0)
-    except (piece_cost.PieceError, rates.RateError, ValueError, KeyError) as exc:
-        out["home_piece"] = {"error": str(exc)}
-    try:
-        ht = register.tool_trace(part_id)
-        out["home_tool"] = {"value_inr": ht["value_inr"], "currency": ht["currency"], "steps": ht.get("steps", []),
-                            "groups": ht.get("groups", []), "totals": ht.get("totals", {}),
-                            "nodes": _nodes(ht, ht["value_inr"] / ht["value"] if ht["value"] else 1.0)}
-        wkg = ht["nodes"]["tool_weight"]["value"] if "tool_weight" in ht["nodes"] else 0.0
-        tlh = import_cost(ht["value_inr"], wkg, HOME, _hs("tool", part_type), other["as_of"], mode, use_fta, {})
-        out["landed"]["tool"]["home"] = _landed_lines(tlh, 0)
-    except Exception as exc:                     # the tool block shows its own problem; the comparison shows what it can
-        out["home_tool"] = {"error": str(exc)}
-    out["saving_inr"] = {w: other_l["landed"] - out["landed"][w]["home"][-1]["inr"]
-                         for w, other_l in (("piece", other["landed"]), ("tool", other["tool"]["landed"])) if out["landed"][w]["home"]}
-    out["piece"]["steps"] = pc["steps"]
-    out["piece"]["inputs"] = pc.get("inputs", [])
-    out["tool"]["steps"] = tl.get("steps", [])
-    out["tool"]["groups"] = tl.get("groups", [])
-    out["tool"]["totals"] = tl.get("totals", {})
-    out["rows"] = {w: versus_rows(out, w) for w in ("tool", "piece")}
-    out["piece_trace"], out["tool_trace"] = pc, tl          # the comparison country's traces: every value can be opened
+    k, k_tool = res["forex"]["fx_inr_per_unit"], _k(tl)
+    out |= {"as_of": res["as_of"], "fx_inr_per_unit": k, "is_example": res["is_example"], "rates_used": res["rates_used"],
+            "rm": {"nodes": _nodes(rm, k)} if rm else None,
+            "tool": {"nodes": _nodes(tl, k_tool), "currency": tl["currency"], "fx_inr_per_unit": k_tool, "value_inr": tl["value_inr"]},
+            "piece": {"nodes": _nodes(pc, k), "value_inr": pc["value_inr"]},
+            "landed": {"piece": _landed_lines(res["landed"], k), "tool": _landed_lines(res["tool"]["landed"], k_tool)},
+            "landed_inr": {"piece": res["landed"]["landed"], "tool": res["tool"]["landed"]["landed"]},
+            "traces": {"rm": rm, "tool": tl, "piece": pc}}
     return out
 
 
-def _label_rows(v: dict, which: str) -> list[tuple[str, str]]:
-    """(node id, label) of the lines of the tool or part cost, in the order of the panel."""
-    tr = v["home_tool" if which == "tool" else "home_piece"]
-    other = v[which]
-    pick = lambda key: tr.get(key) or other.get(key)
+def versus(part_id: int, mode: str = "sea", use_fta: bool = True, countries: list[str] | None = None) -> dict:
+    """The RM, tool and part cost lines of the part (producing country, as the panel shows them) next to the same lines in
+    each selected country, in its currency and INR, with a forex row and all landed at the factory in INR (stage 48 / 50)."""
+    from . import register
+    d = register.part_detail(part_id, with_rm=False)
+    own, others = selected(d)
+    if countries:
+        others = [c.upper() for c in countries if c.upper() != own]
+    cmap = {c["code"]: c for c in costing_setup.tables()["countries"]}
+    for c in [own] + others:
+        if c not in cmap:
+            raise ValueError(f"Country '{c}' is not in Master data → Countries.")
+    part_type = register_setup.processes()[d["process"]]["part_type"]
+    out = {"part_id": part_id, "part_code": d["part_code"], "home": HOME, "mode": mode, "use_fta": use_fta,
+           "own": {"country": own, "name": cmap[own]["name"], "currency": cmap[own]["currency"]}, "countries": []}
+    # the producing country as the panel shows it: stored RM / tool versions, live part cost
+    o = out["own"]
+    try:
+        rt = register.rm_trace(part_id)
+        o["rm"] = {"nodes": _nodes(rt, _k(rt)) if rt.get("value") else {}, "fx_inr_per_unit": _k(rt)}
+    except Exception as exc:
+        o["rm"] = {"error": str(exc)}
+    try:
+        ht = register.tool_trace(part_id)
+        wkg = ht["nodes"]["tool_weight"]["value"] if "tool_weight" in ht["nodes"] else 0.0
+        tland = import_cost(ht["value_inr"], wkg, ht.get("country") or own, _hs("tool", part_type), ht.get("as_of") or rates.current_month(),
+                            mode, use_fta, {})
+        o["tool"] = {"nodes": _nodes(ht, _k(ht)), "currency": ht["currency"], "fx_inr_per_unit": _k(ht), "steps": ht.get("steps", []),
+                     "groups": ht.get("groups", []), "totals": ht.get("totals", {}), "landed": _landed_lines(tland, _k(ht)),
+                     "landed_inr": tland["landed"]}
+    except Exception as exc:
+        o["tool"] = {"error": str(exc)}
+    try:
+        hp = piece_cost.run(part_id)
+        exw = (hp["value"] - hp["nodes"]["calc:logistics"]["value"]) * _k(hp)
+        pland = import_cost(exw, hp["nodes"]["in:total_weight_kg"]["value"], own, _hs("part", part_type), hp["as_of"], mode, use_fta, {})
+        o["piece"] = {"nodes": _nodes(hp, _k(hp)), "fx_inr_per_unit": _k(hp), "steps": hp["steps"], "inputs": hp.get("inputs", []),
+                      "landed": _landed_lines(pland, _k(hp)), "landed_inr": pland["landed"]}
+    except (piece_cost.PieceError, rates.RateError, ValueError, KeyError) as exc:
+        o["piece"] = {"error": str(exc)}
+    for c in others:
+        b = _country_block(part_id, c, cmap, part_type, mode, use_fta)
+        for w in ("piece", "tool"):
+            if b.get("landed_inr") and o.get(w, {}).get("landed_inr") is not None:
+                b.setdefault("saving_inr", {})[w] = b["landed_inr"][w] - o[w]["landed_inr"]
+        out["countries"].append(b)
+    out["is_example"] = any(b.get("is_example") for b in out["countries"])
+    return out
+
+
+def _row_ids(v: dict, which: str) -> list[tuple[str, str]]:
+    """(node id, label) of the lines of the RM, tool or part cost, in the order of the panel."""
+    o = v["own"].get(which) or {}
+    first = next((b[which] for b in v["countries"] if b.get(which)), None) or {}
+    nodes = {**(first.get("nodes") or {}), **(o.get("nodes") or {})}
     if which == "tool":
-        tot = pick("totals") or {}
-        ids = ["tool_weight"] + [g["node"] for g in pick("groups") or []]
+        tot = o.get("totals") or {}
+        ids = ["tool_weight"] + [g["node"] for g in o.get("groups") or []]
         ids += [tot[k] for k in ("material_cost", "bought_out_cost") if k in tot]
-        ids += [x["node"] for x in pick("steps") or []]
+        ids += [x["node"] for x in o.get("steps") or []]
+    elif which == "piece":
+        ids = [x["node"] for x in o.get("inputs") or [] if x["variable"] in VERSUS_PIECE_INPUTS] + [x["node"] for x in o.get("steps") or []]
     else:
-        first = [x["node"] for x in pick("inputs") or [] if x["variable"] in VERSUS_PIECE_INPUTS]
-        ids = first + [x["node"] for x in pick("steps") or []]
-    nodes = {**other["nodes"], **(tr.get("nodes") or {})}
+        ids = [n for n in nodes if n.startswith(("weight", "calc:", "in:material_rate", "in:scrap"))]
     seen, out = set(), []
     for nid in ids:
         if nid not in seen and nid in nodes:
@@ -361,67 +400,87 @@ def _label_rows(v: dict, which: str) -> list[tuple[str, str]]:
     return out
 
 
-def versus_rows(v: dict, which: str) -> list[dict]:
-    """The lines of the tool or part cost (node, label, home value, unit, comparison value in its currency and in INR),
-    then the landed rows."""
-    head = v["home_tool" if which == "tool" else "home_piece"].get("nodes") or {}
-    other = v[which]["nodes"]
+def versus_rows(v: dict, which: str) -> list[list]:
+    """Rows: line | own (local) | own (INR) | each country (local) | (INR); a forex row; the landed rows (tool, part)."""
+    o = v["own"].get(which) or {}
     rows = []
-    for nid, label in _label_rows(v, which):
-        h, o = head.get(nid) or {}, other.get(nid) or {}
-        money = bool((h or o).get("money"))
-        rows.append({"node": nid, "label": label, "home": h.get("inr") if money else h.get("value"), "unit": "INR" if money else (h or o).get("unit", ""),
-                     "local": o.get("value"), "inr": o.get("inr"), "landed": False})
-    for hl, ol in zip(v["landed"][which]["home"] or [None] * len(LANDED_ROWS), v["landed"][which]["other"]):
-        rows.append({"node": f"landed:{ol['key']}", "label": ol["label"] + (f" ({ol['pct']:g} %)" if ol["pct"] is not None else ""),
-                     "home": hl["inr"] if hl else None, "unit": "INR", "local": ol["local"], "inr": ol["inr"], "landed": True})
+    cell = lambda n: [n.get("value"), n.get("inr") if n.get("money") else None] if n else [None, None]
+    fx = lambda b: (b.get("tool") or {}).get("fx_inr_per_unit") if which == "tool" and b.get("tool") else b.get("fx_inr_per_unit")
+    rows.append(["Forex: INR per 1 unit of the currency", o.get("fx_inr_per_unit"), None]
+                + [x for b in v["countries"] for x in (fx(b), None)])
+    for nid, label in _row_ids(v, which):
+        n = (o.get("nodes") or {}).get(nid) or {}
+        unit = "INR" if n.get("money") else n.get("unit", "")
+        rows.append([f"{label}" + (f" ({unit})" if unit and unit != "INR" else "")] + cell(n)
+                    + [x for b in v["countries"] for x in cell(((b.get(which) or {}).get("nodes") or {}).get(nid))])
+    if which in ("piece", "tool"):
+        own_l = o.get("landed") or [None] * len(LANDED_ROWS)
+        for i, (key, label) in enumerate(LANDED_ROWS):
+            hl = own_l[i]
+            r = [label, hl["local"] if hl else None, hl["inr"] if hl else None]
+            for b in v["countries"]:
+                bl = (b.get("landed") or {}).get(which)
+                r += [bl[i]["local"], bl[i]["inr"]] if bl else [None, None]
+            rows.append(r)
     return rows
 
 
-def versus_table(v: dict, which: str, labels: dict | None = None) -> list[list]:
-    """Rows: line | home value | unit | comparison (local) | comparison (INR) for the tool or part cost, then the landed rows."""
-    return [[(labels or {}).get(r["node"]) or r["label"], r["home"], r["unit"], r["local"], r["inr"]] for r in versus_rows(v, which)]
+def versus_head(v: dict) -> list[str]:
+    o = v["own"]
+    head = ["Line", f"{o['name']} ({o['currency']})", f"{o['name']} (INR)"]
+    for b in v["countries"]:
+        head += [f"{b['name']} ({b['currency']})", f"{b['name']} (INR)"]
+    return head
 
 
 def versus_filename(v: dict, ext: str) -> str:
-    return f"{v['part_code']}_cost_{v['home_name']}_vs_{v['name']}.{ext}".replace(" ", "_")
+    names = "_".join(b["name"] for b in v["countries"]) or "only"
+    return f"{v['part_code']}_cost_{v['own']['name']}_vs_{names}.{ext}".replace(" ", "_")
 
 
-def versus_excel(v: dict, labels: dict) -> bytes:
+BLOCKS = (("rm", "RM cost"), ("tool", "Tool cost"), ("piece", "Part cost"))
+
+
+def versus_excel(v: dict, labels: dict | None = None) -> bytes:
     import io
     from openpyxl import Workbook
     from openpyxl.styles import Font
     from .table_set import EXAMPLE_FILL, HEADER_FILL
     wb = Workbook()
-    head = ["Line", f"{v['home_name']} (INR or unit)", "Unit", f"{v['name']} ({v['currency']} or unit)", f"{v['name']} (INR)"]
-    for i, (which, title) in enumerate((("tool", "Tool cost"), ("piece", "Part cost"))):
+    head = versus_head(v)
+    codes = " vs ".join([v["own"]["country"]] + [b["country"] for b in v["countries"]])
+    for i, (which, title) in enumerate(BLOCKS):
         ws = wb.active if i == 0 else wb.create_sheet()
-        ws.title = f"{title} {v['home']} vs {v['country']}"
-        ws.append([f"{v['part_code']} · {title}: {v['home_name']} vs {v['name']} · {v['name']} rates of {v.get('as_of', '')} · "
-                   f"1 {v['currency']} = {v.get('fx_inr_per_unit', 0):.4f} INR · {'sea' if v['mode'] == 'sea' else 'air'} freight"])
+        ws.title = f"{title} {codes}"[:31]
+        ws.append([f"{v['part_code']} · {title}: " + " vs ".join([v["own"]["name"]] + [b["name"] for b in v["countries"]])
+                   + f" · {'sea' if v['mode'] == 'sea' else 'air'} freight · landed in India without IGST when its credit is taken"])
         if v.get("is_example"):
             ws.append(["Uses EXAMPLE rates – not for negotiation."])
             ws.cell(ws.max_row, 1).fill = EXAMPLE_FILL
         ws.append(head)
         for c in ws[ws.max_row]:
             c.font, c.fill = Font(bold=True, color="FFFFFF"), HEADER_FILL
-        for r in versus_table(v, which, labels.get(which)):
+        for r in versus_rows(v, which):
             ws.append(r)
         ws.column_dimensions["A"].width = 46
-        for col in "BCDE":
-            ws.column_dimensions[col].width = 20
+        for col in range(2, len(head) + 1):
+            ws.column_dimensions[chr(64 + col)].width = 18
     ws = wb.create_sheet("Rates used")
-    ws.append(["Rate #", "Category", "Item", "Country", "Month", "Value", "Unit", "Example"])
-    for x in v.get("rates_used", []):
-        ws.append([x["id"], x["category"], x["item"], x["country"], x["month"], x["value"], x["unit"], "EXAMPLE" if x["is_example"] else ""])
+    ws.append(["Country", "Rate #", "Category", "Item", "Month", "Value", "Unit", "Example"])
+    for b in v["countries"]:
+        for x in b.get("rates_used", []):
+            ws.append([b["country"], x["id"], x["category"], x["item"], x["month"], x["value"], x["unit"], "EXAMPLE" if x["is_example"] else ""])
+    for b in v["countries"]:
+        if b.get("error"):
+            ws.append([b["country"], "", "error", b["error"]])
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
 
 
-def versus_pdf(v: dict, labels: dict, part: dict) -> bytes:
+def versus_pdf(v: dict, labels: dict | None, part: dict) -> bytes:
     import io
-    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import mm
     from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
@@ -432,19 +491,25 @@ def versus_pdf(v: dict, labels: dict, part: dict) -> bytes:
     h2 = ParagraphStyle("h2", parent=ss["Heading2"], textColor=theme["ink"], fontSize=11, spaceBefore=8, spaceAfter=4)
     note = ParagraphStyle("n", parent=ss["Normal"], textColor=theme["grey"], fontSize=7.5)
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12 * mm, rightMargin=12 * mm, topMargin=12 * mm, bottomMargin=12 * mm,
-                            title=f"{v['part_code']} cost {v['home_name']} vs {v['name']}", author="Design to Cost")
+    names = [v["own"]["name"]] + [b["name"] for b in v["countries"]]
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=10 * mm, rightMargin=10 * mm, topMargin=10 * mm, bottomMargin=10 * mm,
+                            title=f"{v['part_code']} cost {' vs '.join(names)}", author="Design to Cost")
     st = {"k": ParagraphStyle("k", parent=ss["Normal"], textColor=theme["brand"], fontSize=8), "h1": h1}
     fmt = lambda x: "—" if x is None else f"{x:,.4f}" if abs(x) < 1000 else f"{x:,.0f}"
-    story = [drawing_style.pdf_header(st, f"COST: {v['home_name'].upper()} VS {v['name'].upper()}", f"{part['part_code']} · {part['name']}"),
-             Paragraph(f"{v['name']}: that country's approved rates of {v.get('as_of', '')} · 1 {v['currency']} = {v.get('fx_inr_per_unit', 0):.4f} INR · "
-                       f"{'sea' if v['mode'] == 'sea' else 'air'} freight · {'FTA rate where available' if v['use_fta'] else 'standard duty'} · "
-                       "landed cost without IGST when its credit is taken (Parameters igst_claimable).", note)]
+    story = [drawing_style.pdf_header(st, "COST: " + " VS ".join(n.upper() for n in names), f"{part['part_code']} · {part['name']}"),
+             Paragraph(f"Each country with its own approved rates · {'sea' if v['mode'] == 'sea' else 'air'} freight · "
+                       f"{'FTA rate where available' if v['use_fta'] else 'standard duty'} · landed in India without IGST when its "
+                       "credit is taken (Parameters igst_claimable).", note)]
     if v.get("is_example"):
         story += [Spacer(1, 2 * mm), _example_banner(ss, "Rates and duties are EXAMPLE values.")]
-    for which, title in (("tool", "Tool cost (per tool)"), ("piece", "Part cost (per piece)")):
-        rows = [[r[0], fmt(r[1]), r[2], fmt(r[3]), fmt(r[4])] for r in versus_table(v, which, labels.get(which))]
-        story += [Paragraph(title, h2), _table([["Line", v["home_name"], "Unit", f"{v['name']} ({v['currency']})", f"{v['name']} (INR)"]] + rows,
-                                               theme, [78 * mm, 28 * mm, 14 * mm, 32 * mm, 32 * mm])]
+    head = versus_head(v)
+    nval = len(head) - 1
+    widths = [70 * mm] + [(277 - 70) * mm / nval] * nval
+    for which, title in BLOCKS:
+        rows = [[r[0]] + [fmt(x) for x in r[1:]] for r in versus_rows(v, which)]
+        story += [Paragraph(title, h2), _table([head] + rows, theme, widths)]
+    for b in v["countries"]:
+        if b.get("error"):
+            story.append(Paragraph(f"<font color='#b91c1c'>■</font> {b['name']}: {b['error']}", ss["Normal"]))
     doc.build(story)
     return buf.getvalue()
