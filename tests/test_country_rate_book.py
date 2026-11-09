@@ -196,3 +196,21 @@ def test_ilo_explorer_csv_with_labels_and_old_bulk_csv_are_read():
     r = crb.parse_ilo(bulk)[0]
     assert (r["area"], r["cls"], r["cur"], r["year"], r["value"]) == ("CHN", "ECO_ISIC4_C", "CUR_TYPE_LCU", "2022", 5613.0)
     assert "EMTA_SEX_ECO" in r["flow"]
+
+
+def test_ilo_folder_finds_the_files_with_the_names_the_ilo_gives_them(tmp_path):
+    dl = tmp_path / "Downloads"
+    dl.mkdir()
+    (dl / "ILO,DF_EAR_EHRA_SEX_OCU_CUR_NB+IND+CHN.A..SEX_T...csv").write_bytes(
+        b"DATAFLOW,REF_AREA,FREQ,MEASURE,SEX,OCU,CUR,TIME_PERIOD,OBS_VALUE,SOURCE\n"
+        b"ILO:DF_EAR_EHRA_SEX_OCU_CUR_NB(1.0),IND,A,EAR,SEX_T,OCU_SKILL_L1,CUR_TYPE_LCU,2025,50.8,LFS\n")
+    (dl / "ILO,DF_EAR_EMTA_SEX_ECO_CUR_NB+IND+CHN.A..SEX_T.ECO_ISIC4_C..csv").write_bytes(
+        b"DATAFLOW,REF_AREA,FREQ,MEASURE,SEX,ECO,CUR,TIME_PERIOD,OBS_VALUE,SOURCE\n"
+        b"ILO:DF_EAR_EMTA_SEX_ECO_CUR_NB(1.0),CHN,A,EAR,SEX_T,ECO_ISIC4_C,CUR_TYPE_LCU,2022,5613,ADM\n")
+    (dl / "holiday.csv").write_bytes(b"a,b\n1,2\n")
+    out = tmp_path / "out"
+    assert crb.import_ilo(out, [dl, tmp_path / "<real name 1>.csv"], TODAY) == 2
+    h = crb.load_history(out)
+    assert h["ilo"]["monthly_manufacturing"]["CHN|ECO_ISIC4_C|CUR_TYPE_LCU"]["2022"]["value"] == 5613.0
+    log = h["runs"][-1]["log"]
+    assert any("2 earnings CSV" in line for line in log) and any("NOT FOUND" in line for line in log)

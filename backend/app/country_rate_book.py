@@ -231,9 +231,26 @@ def import_ilo(out_dir: Path, files: list[Path], today: date | None = None) -> i
     hist = load_history(out_dir)
     log: list[str] = []
     n = 0
+    expanded: list[Path] = []
     for f in files:
         f = Path(f)
-        if not f.is_file():
+        try:
+            is_dir = f.is_dir()
+        except OSError:
+            is_dir = False
+        if is_dir:                                   # a folder: every ILOSTAT earnings CSV in it (names as the ILO saves them)
+            found = sorted(p for p in f.iterdir() if p.suffix.lower() == ".csv"
+                           and any(t in p.name.upper() for t in ILO_TAGS))
+            log.append(f"ILOSTAT folder {f}: {len(found)} earnings CSV file(s) found")
+            expanded += found
+        else:
+            expanded.append(f)
+    for f in expanded:
+        try:
+            ok = f.is_file()
+        except OSError:                              # e.g. '<' or '>' in the name on Windows
+            ok = False
+        if not ok:
             log.append(f"ILOSTAT file NOT FOUND, skipped: {f} (check the name and folder; see README, country rate book)")
             continue
         try:
@@ -246,7 +263,7 @@ def import_ilo(out_dir: Path, files: list[Path], today: date | None = None) -> i
                    "EAR_EHRA_SEX_OCU_CUR_NB / EAR_EMTA_SEX_ECO_CUR_NB, or no 'both sexes' rows"))
         n += k
     hist.setdefault("runs", []).append({"at": datetime.now().isoformat(timespec="seconds"),
-                                        "log": [f"ILOSTAT file import: {n} values from {len(files)} file(s)"] + log})
+                                        "log": [f"ILOSTAT file import: {n} values from {len(expanded)} file(s)"] + log})
     out_dir.mkdir(parents=True, exist_ok=True)
     history_path(out_dir).write_text(json.dumps(hist, indent=1, sort_keys=True), encoding="utf-8")
     return n
@@ -1191,7 +1208,8 @@ def main(argv=None) -> int:
     ap.add_argument("--out", help="output folder (default: DTC_Data/country_rates or data/country_rates)")
     ap.add_argument("--offline", action="store_true", help="no download; build from the saved history")
     ap.add_argument("--ilo-file", action="append", default=[],
-                    help="ILOSTAT SDMX-CSV downloaded by hand (EAR_EHRA_SEX_OCU_CUR_NB / EAR_EMTA_SEX_ECO_CUR_NB); repeatable")
+                    help="ILOSTAT CSV downloaded by hand (EAR_EHRA_SEX_OCU_CUR_NB / EAR_EMTA_SEX_ECO_CUR_NB), or a folder "
+                         "(e.g. Downloads): every ILO earnings CSV in it; repeatable")
     a = ap.parse_args(argv)
     codes = [c.strip().upper() for c in a.countries.split(",")] if a.countries else None
     out = Path(a.out) if a.out else default_out()

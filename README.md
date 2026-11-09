@@ -1583,8 +1583,8 @@ One Excel workbook per country (all countries of Master data → Countries), las
   - hourly earnings by skill level: `https://sdmx.ilo.org/rest/data/ILO,DF_EAR_EHRA_SEX_OCU_CUR_NB/IND+CHN+KOR+JPN+THA+VNM+DEU+USA.A..SEX_T..?startPeriod=2018&format=csvfile`
   - monthly earnings by activity: `https://sdmx.ilo.org/rest/data/ILO,DF_EAR_EMTA_SEX_ECO_CUR_NB/IND+CHN+KOR+JPN+THA+VNM+DEU+USA.A..SEX_T.ECO_ISIC4_C.?startPeriod=2018&format=csvfile`
 
-  and run `DTC_Country_Rates.bat --ilo-file "<path of the first CSV>" --ilo-file "<path of the second CSV>"` with the real file
-  names. A CSV saved from the ILOSTAT data explorer (codes, or codes and labels) or the older ILOSTAT bulk CSV works too. A file
+  and run `DTC_Country_Rates.bat --ilo-file "C:\Users\<you>\Downloads"` - a folder takes every ILO earnings CSV in it with the
+  names the ILO gives them (or give each file with its own `--ilo-file`). A CSV saved from the ILOSTAT data explorer (codes, or codes and labels) or the older ILOSTAT bulk CSV works too. A file
   that is not found or not an ILOSTAT earnings CSV is reported (NOT FOUND / 0 values) and the workbooks are still built. Once
   imported, the figures stay in the history: import again only when ILO publishes a new year.
 - **What is not free:** steel and plastic grade prices per country (only the US PPI as a trend), machine hour rates, industrial
