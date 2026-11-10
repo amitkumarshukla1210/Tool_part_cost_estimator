@@ -130,7 +130,7 @@ What the later stages added (details in README):
 - Amit's PC: kit at `D:\Project\DTC Tool and mould`, app on port 8100, CalculiX 2.22 `ccx_static.exe` in
   `DTC_Data\tools\calculix\calculix_2.22_4win\calculix_2.22_4win`, Gmsh in the venv. FEA limits and `fea_mesh_mm` still EXAMPLE
   (large 1000 mm moulds: `fea_mesh_mm` 25-40).
-- Audit (PR 45, re-run after stage 41 with its checks): `python scripts/audit_e2e.py` drives the whole tool (15 cases, 883 calls), 0 findings; report `docs/audit_e2e_report.md`.
+- Audit (PR 45, re-run after stage 56 with checks of stages 42-56): `python scripts/audit_e2e.py` drives the whole tool (15 cases, 1,150 calls), 0 findings; FEA: iterative solver + `fea_max_elements` (a fine mould mesh had needed 6 GB); report `docs/audit_e2e_report.md`.
   Run it before every release. Many costs still use EXAMPLE rates (Master data → checklist) until I replace them.
 
 **Rules (always):**

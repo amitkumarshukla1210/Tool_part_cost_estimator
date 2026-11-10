@@ -37,7 +37,9 @@ NUM = (("fea_e_mpa", 210000.0, "MPa", "FEA: Young's modulus of the tool steel"),
        ("fea_mesh_mm", 10.0, "mm", "FEA: largest element size of the mesh"),
        ("fea_max_deflection_mm", 0.05, "mm", "FEA: largest allowed deflection of a load-carrying tool part"),
        ("fea_allow_stress_mpa", 300.0, "MPa", "FEA: largest allowed von Mises stress (yield ÷ safety factor)"),
-       ("fea_support_strip_mm", 60.0, "mm", "FEA: width of the support strips under a plate that spans (when no spacer block gives it)"))
+       ("fea_support_strip_mm", 60.0, "mm", "FEA: width of the support strips under a plate that spans (when no spacer block gives it)"),
+       ("fea_max_elements", 250000.0, "elements", "FEA: largest mesh the solver may get (memory of the PC: about 1 GB per 130,000 "
+        "second-order elements with the iterative solver); a bigger mesh stops with a message instead of filling the memory"))
 PARTS = {"sheet_metal": "Die plate, Bottom shoe"}
 DEFAULT_PARTS = "Cavity insert, Core insert, B plate (core side)"
 SPANNING = ("b plate", "bottom shoe")
@@ -161,7 +163,7 @@ def available() -> dict:
 _MESHER = r"""
 import json, sys
 import gmsh
-step, size, algo, out = sys.argv[1], float(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
+step, size, algo, out, most = sys.argv[1], float(sys.argv[2]), int(sys.argv[3]), sys.argv[4], int(float(sys.argv[5]))
 gmsh.initialize(["-noenv"])
 gmsh.option.setNumber("General.Terminal", 0)
 gmsh.model.add("part")
@@ -171,6 +173,11 @@ gmsh.option.setNumber("Mesh.MeshSizeMax", size)
 gmsh.option.setNumber("Mesh.Algorithm", algo)
 gmsh.option.setNumber("Mesh.SecondOrderLinear", 1)       # mid-side nodes on straight edges: no inverted elements on curved faces
 gmsh.model.mesh.generate(3)
+count = sum(len(t) for t in gmsh.model.mesh.getElements(3)[1])
+if count > most:                                         # too big for the PC: stop before the second-order step and the solver
+    print(f"TOO_MANY {count}")
+    gmsh.finalize()
+    sys.exit(3)
 gmsh.model.mesh.setOrder(2)
 tags, coords, _ = gmsh.model.mesh.getNodes()
 etypes, etags, enodes = gmsh.model.mesh.getElements(3)
@@ -186,10 +193,11 @@ gmsh.finalize()
 ATTEMPTS = ((1.0, 6), (1.0, 1), (0.5, 6), (0.5, 1), (0.25, 6))
 
 
-def _mesh(shape, size: float, start: int = 0, used: list | None = None):
+def _mesh(shape, size: float, start: int = 0, used: list | None = None, most: float = 250000):
     """Second-order tetrahedra of a CadQuery shape: (nodes {id: (x, y, z)}, elements [(id, [10 node ids])], element size used).
     Gmsh runs in its own Python process: it needs the main thread (signals) and keeps one global model.
-    start: the first of ATTEMPTS to try; used (a list) gets the number of the attempt that meshed."""
+    start: the first of ATTEMPTS to try; used (a list) gets the number of the attempt that meshed. most: the largest number of
+    elements (Design rules → fea_max_elements); a bigger mesh stops the check (a finer attempt would only be bigger)."""
     import json
     import sys
     import cadquery as cq
@@ -202,10 +210,15 @@ def _mesh(shape, size: float, start: int = 0, used: list | None = None):
                 continue
             out.unlink(missing_ok=True)
             try:
-                r = subprocess.run([sys.executable, "-c", _MESHER, str(step), str(size * factor), str(algo), str(out)],
+                r = subprocess.run([sys.executable, "-c", _MESHER, str(step), str(size * factor), str(algo), str(out), str(most)],
                                    capture_output=True, text=True, timeout=600)
             except subprocess.TimeoutExpired:
                 raise FeaError("Gmsh took more than 10 minutes: make fea_mesh_mm larger.") from None
+            if r.returncode == 3 and "TOO_MANY" in (r.stdout or ""):
+                n = int(r.stdout.split("TOO_MANY")[1].split()[0])
+                raise FeaError(f"The mesh at {size * factor:g} mm would have {n:,} elements, more than fea_max_elements ({most:,.0f}, "
+                               "Mould & die database → Design rules): the solver would need more memory than allowed. Make fea_mesh_mm "
+                               "larger, or raise fea_max_elements if this PC has the memory (about 1 GB per 130,000 elements).")
             if r.returncode == 0 and out.exists():
                 m = json.loads(out.read_text())
                 if m["elems"]:
@@ -231,7 +244,9 @@ def _inp(nodes, elems, fixed_z, pins, loads, E, nu, held: bool = False) -> str:
     out += [f"{i},1,3,0" if held else f"{i},3,3,0" for i in fixed_z]
     if not held:
         out += [f"{pins[0]},1,2,0", f"{pins[1]},2,2,0"]
-    out += ["*STEP", "*STATIC", "*CLOAD"] + [f"{i},3,{f:.6f}" for i, f in sorted(loads.items())]
+    # iterative solver: the same result as the direct one (B plate 250 x 230 x 60, 132,000 elements: 0.15239 vs 0.15243 mm,
+    # 348.6 MPa both) in about 1 GB instead of 6 GB and a quarter of the time
+    out += ["*STEP", "*STATIC, SOLVER=ITERATIVE CHOLESKY", "*CLOAD"] + [f"{i},3,{f:.6f}" for i, f in sorted(loads.items())]
     out += ["*NODE PRINT, NSET=NALL", "U", "*EL PRINT, ELSET=EALL", "S", "*END STEP"]
     return "\n".join(out) + "\n"
 
@@ -383,7 +398,7 @@ def _check_part(shape, size, force_n: float, patch: tuple, strip: float | None, 
     av = available()
     if not av["available"]:
         raise FeaError(av["message"])
-    nodes, elems, mesh_mm = _mesh(shape, R["fea_mesh_mm"], start, used)
+    nodes, elems, mesh_mm = _mesh(shape, R["fea_mesh_mm"], start, used, R["fea_max_elements"])
     zmin = min(p[2] for p in nodes.values())
     zmax = max(p[2] for p in nodes.values())
     xmin, xmax = min(p[0] for p in nodes.values()), max(p[0] for p in nodes.values())

@@ -121,3 +121,22 @@ def test_a_mesh_calculix_refuses_is_made_again(monkeypatch):
     monkeypatch.setattr(fea, "_check_part", lambda *a, **k: (_ for _ in ()).throw(fea.FeaError("CalculiX stopped: other")))
     with pytest.raises(fea.FeaError, match="other"):
         fea.check_part(None, (1, 1, 1), 1.0, (1, 1), None, {})
+
+
+@needs_programs
+def test_a_mesh_above_fea_max_elements_stops_before_the_solver(monkeypatch):
+    """Audit after stage 56: a fine mesh of a mould plate needed 6 GB in the direct solver and stopped the PC; now the mesh is
+    counted first and a mesh above Design rules → fea_max_elements stops with a message, without a finer try or the solver."""
+    calls = []
+    real = fea.subprocess.run
+    monkeypatch.setattr(fea.subprocess, "run", lambda cmd, *a, **k: calls.append(cmd) or real(cmd, *a, **k))
+    R = fea.rules("plastic") | {"fea_mesh_mm": 8.0, "fea_max_elements": 500}
+    with pytest.raises(fea.FeaError, match=r"more than fea_max_elements \(500"):
+        fea.check_part(cq.Workplane("XY").box(300, 200, 30, centered=False).val(), (300, 200, 30), 1e5, (300, 200), 20.0, R)
+    assert len(calls) == 1 and "-c" in calls[0]                       # one Gmsh run, no finer attempt, no CalculiX
+    assert fea.rules("plastic")["fea_max_elements"] == 250000
+
+
+@needs_programs
+def test_iterative_solver_is_used():
+    assert "*STATIC, SOLVER=ITERATIVE CHOLESKY" in fea._inp({1: (0, 0, 0), 2: (1, 0, 0)}, [], [1], (1, 2), {2: 1.0}, 210000, 0.3)
