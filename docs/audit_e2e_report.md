@@ -1,6 +1,6 @@
 # End-to-end audit report
 
-Run on the current code, 2026-11-08 02:41, 883 calls in 7.7 min.
+Run on the current code, 2026-11-10 00:08, 1150 calls in 15.3 min.
 
 | Case | Part type | Tools | RM INR | Tool CAPEX INR | Part cost INR | Findings |
 |---|---|---|---|---|---|---|
@@ -26,3 +26,4 @@ None.
 
 ## Slowest calls
 
+- 10 s robustness `/api/parts/20/drawing-data`

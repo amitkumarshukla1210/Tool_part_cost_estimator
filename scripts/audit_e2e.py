@@ -297,10 +297,41 @@ def run_case(a: Audit, name, file, material, process, volume, ptype) -> dict:
     a.call(name, "get", f"{P}/country-comparison", expect="ok" if ptype else "any")
     a.call(name, "get", f"{P}/country-comparison/export.xlsx", expect="ok" if ptype else "any", file_kind="xlsx")
     a.call(name, "get", f"{P}/country-comparison/export.pdf", expect="ok" if ptype else "any", file_kind="pdf")
+    # stages 42-56: mould systems, cavities, FEA, production data, saved files, simulation runs, toolmaker review, vs country
+    a.call(name, "get", f"{P}/cavities", expect="ok" if mould else "any")
+    a.call(name, "get", f"{P}/fea", expect="any")
+    a.call(name, "get", f"{P}/production-data", expect="any")
+    a.call(name, "get", f"{P}/production-data.xlsx", expect="any", file_kind="xlsx")
+    a.call(name, "get", f"{P}/tool-review", expect="ok" if tool else "any")
+    a.call(name, "get", f"{P}/tool-design/prepare", expect="any")
+    a.call(name, "get", f"{P}/correction.png", expect="any", file_kind="png")
+    vs = a.call(name, "get", f"{P}/vs-country", expect="ok" if ptype else "any")
+    if vs:
+        a.call(name, "get", f"{P}/vs-country/export.xlsx", expect="any", file_kind="xlsx")
+        a.call(name, "get", f"{P}/vs-country/export.pdf", expect="any", file_kind="pdf")
+    runs = a.call(name, "get", f"{P}/sim-runs") or []
+    for run in runs[:1]:
+        a.call(name, "get", f"{P}/sim-runs/{run['id']}")
+    sf = a.call(name, "get", f"{P}/saved-files")
+    for f in (sf if isinstance(sf, list) else (sf or {}).get("files", []))[:2]:
+        if isinstance(f, dict) and f.get("id"):
+            a.call(name, "get", f"{P}/saved-files/{f['id']}", expect="any")
     a.call(name, "get", f"{P}/suppliers")
     # project level
     J = f"/api/projects/{proj['id']}"
+    a.call(name, "post", f"{J}/rm-cost/recalculate", json={})
+    a.call(name, "post", f"{J}/tool-cost/recalculate", json={})
     a.call(name, "post", f"{J}/piece-cost/recalculate", json={})
+    cc = a.call(name, "get", f"{J}/cost-changes")                      # stage 55-56: cost change report
+    if cc:
+        t = cc["totals"]
+        if t["parts"] != len(cc["rows"]) or t["parts"] != t["changed"] + t["new"] + t["unchanged"] + t["no_cost"]:
+            a._find(name, "cost-changes", "totals do not add up", repr(t))
+        for r in cc["rows"]:
+            if r["lines"] and r["delta_inr"] is not None and abs(sum(x["delta_inr"] for x in r["lines"]) - r["delta_inr"]) > 1e-6 * max(1, abs(r["now"]["cost_inr"])):
+                a._find(name, "cost-changes", "cost lines do not add up to the change", r["part_code"])
+        a.call(name, "get", f"{J}/cost-changes.xlsx", file_kind="xlsx")
+        a.call(name, "get", f"{J}/cost-changes.pdf", file_kind="pdf")
     a.call(name, "post", f"{J}/capex/build", json={})
     dash = a.call(name, "get", f"{J}/dashboard")
     a.call(name, "get", f"{J}/dashboard.pdf", file_kind="pdf")
@@ -398,12 +429,16 @@ def robustness(a: Audit) -> None:
         a.call("robustness", "post", f"/api/parts/{pid}/{u}", json={})
     big = c.get(f"/api/parts/{pid}").json()
     _positive(a, "robustness", "part cost at 1e9 / year", big.get("piece_cost_inr"))
-    for u in ("", "/rm-cost", "/tool-cost", "/simulation", "/tool-design", "/drawing-data", "/machine-check", "/process-parameters", "/drawing.pdf"):
+    for u in ("", "/rm-cost", "/tool-cost", "/simulation", "/tool-design", "/drawing-data", "/machine-check", "/process-parameters", "/drawing.pdf",
+              "/cavities", "/fea", "/production-data", "/tool-review", "/vs-country", "/saved-files", "/sim-runs", "/sheet-compare"):
         a.call("robustness", "get", f"/api/parts/999999{u}", expect="any")
     a.call("robustness", "delete", f"/api/parts/{pid}", expect="any")
     for u in ("", "/tool-cost", "/drawing-data"):
         a.call("robustness", "get", f"/api/parts/{pid}{u}", expect="any")
     a.call("robustness", "get", "/api/projects/999999/dashboard", expect="any")
+    for u in ("/cost-changes", "/cost-changes.xlsx", "/cost-changes.pdf"):
+        a.call("robustness", "get", f"/api/projects/999999{u}", expect="any")
+    a.call("robustness", "get", f"/api/projects/{proj['id']}/cost-changes", expect="any", params={"since": "not-a-date"})
     a.call("robustness", "get", "/api/files/999999", expect="any")
 
 

@@ -1410,6 +1410,10 @@ clear of the part vs the lines tried, screws and dowels. The toolmaker review ch
 - Result: largest deflection and von Mises stress (element average) against `fea_max_deflection_mm` and `fea_allow_stress_mpa`, with a picture;
   steel `fea_e_mpa`, `fea_poisson`, element size `fea_mesh_mm`. Runs in the background with progress; every run is kept; the toolmaker review
   reads the latest run of the revision. A peak at a thin feature (a core pin of a boss) is real: the picture shows where.
+- **Memory (audit after stage 56):** CalculiX runs its *iterative* solver (same result as the direct one: B plate 250 × 230 × 60 mm,
+  132,000 elements, 0.15239 vs 0.15243 mm and 348.6 MPa both, in about 1 GB and 1.5 min instead of 6 GB and 6 min). The mesh is
+  counted before the solver: above `fea_max_elements` (Design rules, EXAMPLE 250,000 ≈ 2 GB) the check stops with a message
+  (make `fea_mesh_mm` larger, or raise the limit if the PC has the memory) instead of filling the PC's memory.
 - **Install** (once): on Windows run **`DTC_Install_FEA.bat`** (puts Gmsh in the app's Python), then copy **`ccx.exe`** of the Windows CalculiX build
   (from the official CalculiX site, with its .dll files) into `DTC_Data\tools\calculix`, and restart. Without the programs the check says
   *Not available* and how to install them; nothing is estimated instead. Linux: `pip install gmsh` and the `calculix-ccx` package.
