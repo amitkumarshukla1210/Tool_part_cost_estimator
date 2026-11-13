@@ -73,6 +73,10 @@ def test_mould_run_is_stored_and_read_by_the_review():
     assert b["support"] == "two edge strips" and b["force_n"] > 0 and "clamp force" in b["load_source"]
     cav = next(x for x in runs if x["name"] == "Cavity insert")
     assert cav["support"] == "full back face (top)" and 10 < cav["pressure_mpa"] < 200        # its moulding face points down
+    # audit: the core insert's Ø3 mm boss pins were one element thick and bent 1.7 mm sideways (906 MPa); fea_mesh_per_circle
+    # gives them several elements: about 0.012 mm and 125 MPa, like a solid steel insert on its full back face
+    core = next(x for x in runs if x["name"] == "Core insert")
+    assert core["max_deflection_mm"] < 0.05 and core["max_von_mises_mpa"] < 300 and core["support"] == "full back face (bottom)"
     assert client.get(f"/api/parts/{pid}/fea/{b['id']}.png").content[:4] == b"\x89PNG"
     s = client.get(f"/api/parts/{pid}/fea").json()
     assert all(p["run"] for t in s["tools"] for p in t["parts"])

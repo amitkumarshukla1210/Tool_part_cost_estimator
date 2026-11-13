@@ -39,7 +39,9 @@ NUM = (("fea_e_mpa", 210000.0, "MPa", "FEA: Young's modulus of the tool steel"),
        ("fea_allow_stress_mpa", 300.0, "MPa", "FEA: largest allowed von Mises stress (yield ÷ safety factor)"),
        ("fea_support_strip_mm", 60.0, "mm", "FEA: width of the support strips under a plate that spans (when no spacer block gives it)"),
        ("fea_max_elements", 250000.0, "elements", "FEA: largest mesh the solver may get (memory of the PC: about 1 GB per 130,000 "
-        "second-order elements with the iterative solver); a bigger mesh stops with a message instead of filling the memory"))
+        "second-order elements with the iterative solver); a bigger mesh stops with a message instead of filling the memory"),
+       ("fea_mesh_per_circle", 12.0, "elements", "FEA: elements around a full circle of a curved face (holes, core pins): a slender "
+        "core pin gets several elements across instead of one, which made it bend sideways (0 = element size fea_mesh_mm only)"))
 PARTS = {"sheet_metal": "Die plate, Bottom shoe"}
 DEFAULT_PARTS = "Cavity insert, Core insert, B plate (core side)"
 SPANNING = ("b plate", "bottom shoe")
@@ -163,7 +165,7 @@ def available() -> dict:
 _MESHER = r"""
 import json, sys
 import gmsh
-step, size, algo, out, most = sys.argv[1], float(sys.argv[2]), int(sys.argv[3]), sys.argv[4], int(float(sys.argv[5]))
+step, size, algo, out, most, curv = sys.argv[1], float(sys.argv[2]), int(sys.argv[3]), sys.argv[4], int(float(sys.argv[5])), float(sys.argv[6])
 gmsh.initialize(["-noenv"])
 gmsh.option.setNumber("General.Terminal", 0)
 gmsh.model.add("part")
@@ -171,6 +173,7 @@ gmsh.model.occ.importShapes(step)
 gmsh.model.occ.synchronize()
 gmsh.option.setNumber("Mesh.MeshSizeMax", size)
 gmsh.option.setNumber("Mesh.Algorithm", algo)
+gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", curv)  # elements per full circle: a slender core pin (Ø3) gets several elements
 gmsh.option.setNumber("Mesh.SecondOrderLinear", 1)       # mid-side nodes on straight edges: no inverted elements on curved faces
 gmsh.model.mesh.generate(3)
 count = sum(len(t) for t in gmsh.model.mesh.getElements(3)[1])
@@ -193,11 +196,12 @@ gmsh.finalize()
 ATTEMPTS = ((1.0, 6), (1.0, 1), (0.5, 6), (0.5, 1), (0.25, 6))
 
 
-def _mesh(shape, size: float, start: int = 0, used: list | None = None, most: float = 250000):
+def _mesh(shape, size: float, start: int = 0, used: list | None = None, most: float = 250000, curv: float = 12):
     """Second-order tetrahedra of a CadQuery shape: (nodes {id: (x, y, z)}, elements [(id, [10 node ids])], element size used).
     Gmsh runs in its own Python process: it needs the main thread (signals) and keeps one global model.
     start: the first of ATTEMPTS to try; used (a list) gets the number of the attempt that meshed. most: the largest number of
-    elements (Design rules → fea_max_elements); a bigger mesh stops the check (a finer attempt would only be bigger)."""
+    elements (Design rules → fea_max_elements); a bigger mesh stops the check (a finer attempt would only be bigger). curv: elements
+    around a full circle of a curved face (Design rules → fea_mesh_per_circle)."""
     import json
     import sys
     import cadquery as cq
@@ -210,7 +214,7 @@ def _mesh(shape, size: float, start: int = 0, used: list | None = None, most: fl
                 continue
             out.unlink(missing_ok=True)
             try:
-                r = subprocess.run([sys.executable, "-c", _MESHER, str(step), str(size * factor), str(algo), str(out), str(most)],
+                r = subprocess.run([sys.executable, "-c", _MESHER, str(step), str(size * factor), str(algo), str(out), str(most), str(curv)],
                                    capture_output=True, text=True, timeout=600)
             except subprocess.TimeoutExpired:
                 raise FeaError("Gmsh took more than 10 minutes: make fea_mesh_mm larger.") from None
@@ -398,7 +402,7 @@ def _check_part(shape, size, force_n: float, patch: tuple, strip: float | None, 
     av = available()
     if not av["available"]:
         raise FeaError(av["message"])
-    nodes, elems, mesh_mm = _mesh(shape, R["fea_mesh_mm"], start, used, R["fea_max_elements"])
+    nodes, elems, mesh_mm = _mesh(shape, R["fea_mesh_mm"], start, used, R["fea_max_elements"], R["fea_mesh_per_circle"])
     zmin = min(p[2] for p in nodes.values())
     zmax = max(p[2] for p in nodes.values())
     xmin, xmax = min(p[0] for p in nodes.values()), max(p[0] for p in nodes.values())
