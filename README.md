@@ -1702,6 +1702,16 @@ then / now / change, moved lines marked); the PDF (A4 landscape, for management)
 highlighted rows shaded and FLAG, and the cost lines of the changed parts with the moved lines in bold. EXAMPLE rates are
 flagged as everywhere else. API: `/api/projects/{id}/cost-changes.xlsx?since=YYYY-MM-DD` and `.pdf`.
 
+## User guide
+
+**Help → User guide (PDF)** (`frontend/docs/DTC_User_Guide.pdf`): every page of the tool (dashboard, cost changes, import, parts and the
+part panel, master data with codes and live prices, Price master, Rates, monthly automatic rates and the 24-month history, country rate
+book, estimate, harness & PCB, admin), the Windows kit, roles and tool groups, a monthly checklist, troubleshooting and the words used,
+with fresh screenshots. Rebuild it after a change of the app: `python docs/user_guide/build_user_guide.py` (starts the app on a copy of the
+master data, adds a small demo project, takes the screenshots with Playwright, writes the PDF and a Word copy to `data/DTC_User_Guide.docx`;
+`--history <country_rate_book_history.json>` fills the 24-month history for the Price master screenshot). The text is in `CONTENT` at the
+top of the script. The Work instruction stays the step-by-step worked example.
+
 ## Look & feel: Design to Cost theme
 
 Every page uses the company theme in `theme/`, following `theme/THEME.md`:

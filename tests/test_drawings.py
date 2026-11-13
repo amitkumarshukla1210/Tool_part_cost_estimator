@@ -66,6 +66,12 @@ def test_work_instruction_and_example_files_are_served():
     assert "DTC_Work_Instruction.pdf" in help_page and "every category" in help_page
 
 
+def test_user_guide_is_served_on_the_help_page():
+    r = client.get("/static/docs/DTC_User_Guide.pdf")
+    assert r.status_code == 200 and r.content[:4] == b"%PDF"
+    assert "DTC_User_Guide.pdf" in client.get("/help").text
+
+
 def test_two_cavity_mould_drawing_set_builds_and_cuts_are_noted_on_their_part():
     """A 2-cavity mould: the B / support plate hole table and the technical data overflowed the page (LayoutError);
     the cut labels (runner, cooling) were added to every plate through the shared notes list."""
