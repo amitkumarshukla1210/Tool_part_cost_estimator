@@ -1715,6 +1715,43 @@ then / now / change, moved lines marked); the PDF (A4 landscape, for management)
 highlighted rows shaded and FLAG, and the cost lines of the changed parts with the moved lines in bold. EXAMPLE rates are
 flagged as everywhere else. API: `/api/projects/{id}/cost-changes.xlsx?since=YYYY-MM-DD` and `.pdf`.
 
+## Heat-exchanger fin dies: fin die cost and fin part cost (stage 57)
+
+**Menu → Fin dies.** A generic progressive fin die for AC / heat-exchanger coil fins: any tube Ø, hole (collar) Ø, row pitch,
+hole pitch, rows across the strip and progressions per stroke, for the fin patterns **plain, louver, slit and wavy**. Type the
+fin spec (or keep the default = your IFB φ5 × 66R × 4P louver die, spec INFB02M-20250807), press *Calculate* (live, nothing
+saved) or *Save & calculate*; *Excel* and *PDF* download the cost sheet with your logo. Every value is clickable to its
+formula, inputs and rate versions (admin, as everywhere).
+
+| Result | How it is worked out |
+|---|---|
+| Fin die cost (₹, one die) | the tool cost engine (stage 4) with part type **fin**: fin die set (Mould bases, priced by weight × `base_make_factor`), BOM elements of part type fin (draw sub-dies, draw / pierce & burring / ironing / reflare punches, die buttons, louver / slit sets, wave dies, edge trim, row slit blades, cut-off, strippers, pilots, hitch-finger feed, digital wedges, auto-oiling & air-blow, springs / posts / screws, spare punches and blades) × grades HAP40 / SKH51 / PX-5 / P20 / SK3 × approved steel rates, processes (wire cut, jig and profile grinding, CNC, surface grinding, vacuum and plate heat treatment, fitting, design) × MHR + labour, try-out on the fin press with ≈ 500 kg foil, overhead, profit, packing, transport, warranty; CAPEX = × dies over the programme |
+| Stations | draw steps + ironing + louver + slit + wave stations (Mould & die database → **Fin patterns**) + `fin_fixed_stations` (pierce & burr, reflare, edge trim, pilot, row slit, feed, cut-off); die length = stations × max(feed, `station_min_mm`) + 2 × `die_end_mm`, width = foil + 2 × `die_side_mm` |
+| Fin press | the smallest fin press (Parameters fin → `trial_machine_process` = *Fin press*) whose tonnage ≥ the die force (Cost formulas **fin_force**: pierce + cut-off / edge trim / row slit, × forming factor × safety), whose foil width (Mould & die database → **Fin presses**) ≥ the strip and whose bed takes the die set; or the press you pick (a warning says when it does not suit). The die height range of the press is checked |
+| Fin pack cost (₹) | Cost formulas **fin_part**: foil used = strokes × foil width × feed × t × density; RM = foil × rate − scrap × scrap value; fin oil; press hours = strokes ÷ (SPM × OEE) with SPM = `fin_spm` × pattern speed factor ≤ press SPM max; × (MHR + operators × labour rate); stacking; regrinding (`fin_regrind_pct` of the die every `fin_regrind_strokes`); rejection, overhead, profit, packing; die amortisation over min(die life, programme strokes); logistics |
+| Per fin, per kg | pack cost ÷ fins per pack (pack length ÷ 25.4 × FPI) and ÷ net fin weight |
+
+**Master data added (rows only, EXAMPLE unless said):** Machines *FIN-125A* (YKC-48A-125: 125 t, 22 kW, table 2000 × 1360 mm,
+150-300 SPM, die height 280-330 mm, foil up to 1080 mm, coil Ø150 / Ø1200 - **your data**; life, residual, maintenance and the
+machine price EXAMPLE), *FIN-125SH* (YKC-48SH-125 named in your die spec, **to confirm**, data copied from the 48A), EXAMPLE
+FIN-045 / 063 / 080 / 200; their MHR by the MHR formulas (machine price and consumables = PRESS-200 until you enter yours).
+Mould & die database: *Fin patterns*, *Fin presses*, fin Sizing rules, Process time parameters, Mould bases (fin die sets),
+BOM elements, tool steels HAP40, SKH51, PX-5, SK3 (rates = ASP 23, M2, P20, O1 until you enter yours). Parameters of part type
+fin (try-out, press, OEE, SPM, oil, stacking, edge trim, shear, regrind; die life 200 M and regrind 40 M strokes from your spec).
+Materials: main material *Aluminium fin foil* with 40 sub-grades (1100, 1200, 3102, 8011, 8006 × O / H22 / H24 / H26 × plain /
+hydrophilic coated), RM and scrap rates = Aluminium 1100 sheet in every country until you enter supplier prices (foil premium and
+coating not yet in it); fin stock oil per litre (EXAMPLE ₹180, other countries by forex).
+
+**24-month history:** the new rates get their history like every rate (stage 54: foil by the aluminium index × forex, tool steels
+by the steel index, machine prices flat, all marked *Indicative history*). On your PC, rates that reach you with an update after
+the history was written are filled at the next start from the saved market history (no download); `price_history.missing()`
+counts the rates still without it.
+
+**Fin dies are your data** (table `fin_dies`: name, project, fin spec, last cost summary); the master data is only added to. API:
+`GET /api/fin-dies`, `GET /api/fin-dies/options`, `POST /api/fin-dies/calculate {spec}`, `POST /api/fin-dies`,
+`GET|PUT|DELETE /api/fin-dies/{id}`, `GET /api/fin-dies/{id}/cost`, `/export.xlsx`, `/export.pdf`. Next: stage 58 = fin die
+design (strip layout, 3D die, detail drawings, BOM, PO pack, review), stage 59 = FEA of the fin die.
+
 ## User guide
 
 **Help → User guide (PDF)** (`frontend/docs/DTC_User_Guide.pdf`): every page of the tool (dashboard, cost changes, import, parts and the

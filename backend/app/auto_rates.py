@@ -307,7 +307,11 @@ def status() -> dict:
 def run_if_due() -> dict | None:
     """App start: once per new month, in the background."""
     if state("last_month") == rates.current_month() and state("history_done") == "1":
-        return None
+        from . import price_history                 # stage 57: rates added by an update get their 24-month history too
+        res = price_history.fill_new()
+        if res and res["total"]:
+            set_state("history_last", f"{res['total']} month values ({res['months']}) for new rates")
+        return res
     return run()
 
 

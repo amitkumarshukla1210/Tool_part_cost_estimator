@@ -276,6 +276,19 @@ bom_extracts = Table(
     Column("created_at", DateTime, default=now),
 )
 
+# Heat-exchanger fin dies (roadmap stage 57): the fin spec typed on the Fin dies page and the last cost summary
+fin_dies = Table(
+    "fin_dies", meta,
+    Column("id", Integer, primary_key=True),
+    Column("project_id", ForeignKey("projects.id", ondelete="SET NULL")),
+    Column("name", String(200), nullable=False),
+    Column("spec", JSON, nullable=False),               # fin_die.SPEC keys + pattern, material, country, press
+    Column("result", JSON),                             # last cost summary: die / pack / per fin / per kg in INR, press, month
+    Column("created_by", String(100), default=""),
+    Column("created_at", DateTime, default=now),
+    Column("updated_at", DateTime, default=now, onupdate=now),
+)
+
 bom_extract_lines = Table(
     "bom_extract_lines", meta,
     Column("id", Integer, primary_key=True),
