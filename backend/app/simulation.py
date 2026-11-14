@@ -24,6 +24,7 @@ REQUIRED = ("min_draft_deg", "thin_ratio", "sink_ratio", "cycle_s", "clamp_t")
 SIM_VARS = concept.CONCEPT_VARS | {
     "max_wall_mm": "Thickest wall: 95th percentile of the measured thickness, by area (mm)",
     "min_wall_mm": "Thinnest wall: 5th percentile of the measured thickness, by area (mm)",
+    "thick_width_ratio": "Shape of the thickest section: its width across ÷ its thickness (about 1 = a solid boss / rod, much more = a plate)",
     "flow_length_mm": "Flow length estimate = part_l + part_h (gate on one edge) (mm)",
     "shot_weight_g": "Shot weight = part weight (body only, inserts excluded) × cavities (g)",
     "inserts_per_shot": "Moulded-in inserts × cavities",
@@ -37,6 +38,44 @@ def sample_env(part_type: str) -> dict:
     if part_type == "plastic":
         env |= {k: float(r["value"]) for k, r in register_setup.insert_rules().items()}
     return env
+
+
+# Thick-section shape and coring (audit after stage 56): rows added to Simulation rules (plastic, EXAMPLE); the shipped cooling_s
+# row takes the shape factors only while it is still the shipped formula (approved), as the update kit does.
+COOL_OLD = "max_wall_mm ** 2 / (9.8696 * diffusivity_mm2_s) * log(4 / 3.1416 * (melt_c - mould_c) / (eject_c - mould_c))"
+COOL_NEW = "max_wall_mm ** 2 / (cool_shape_factor * diffusivity_mm2_s) * log(cool_log_factor * (melt_c - mould_c) / (eject_c - mould_c))"
+SEED_RULES = [  # step, name, formula, unit, label
+    (7.5, "thick_is_rod", "1 if thick_width_ratio <= 1.6 else 0", "",
+     "Thickest section round (solid boss column, rod: about as wide as thick, width ÷ thickness ≤ 1.6) = 1, a plate = 0"),
+    (7.6, "cool_shape_factor", "23.13 if thick_is_rod > 0 else 9.8696", "",
+     "Cooling shape factor: a rod cools from all round (4 × 2.405² = 23.13), a plate from two faces (π² = 9.87)"),
+    (7.7, "cool_log_factor", "1.602 if thick_is_rod > 0 else 4 / 3.1416", "",
+     "Cooling log factor of the centre-line formula: rod 1.602, plate 4 / π = 1.273"),
+    (13.1, "cooling_cored_s", "wall_mm ** 2 / (9.8696 * diffusivity_mm2_s) * log(4 / 3.1416 * (melt_c - mould_c) / (eject_c - mould_c))", "s",
+     "Cooling time if the thick sections are cored out to the nominal wall"),
+    (13.2, "cycle_cored_s", "fill_s + cooling_cored_s + open_eject_s + insert_load_s", "s",
+     "Cycle time if the thick sections are cored out to the nominal wall"),
+]
+
+
+def seed() -> dict:
+    """Add the thick-section rows that are missing (plastic); change cooling_s only while it is still the shipped formula."""
+    d = mould_db.tables()
+    have = {(r["part_type"], r["name"]) for r in d["simulation_rules"]}
+    out = {"rules": 0, "cooling_s": 0}
+    for step, name, f, unit, label in SEED_RULES:
+        if ("plastic", name) not in have:
+            d["simulation_rules"].append({"part_type": "plastic", "step": step, "name": name, "formula": f, "unit": unit, "label": label,
+                                          "is_example": True, "notes": "EXAMPLE - audit after stage 56: thick boss columns cool as rods"})
+            out["rules"] += 1
+    for r in d["simulation_rules"]:
+        if r["part_type"] == "plastic" and r["name"] == "cooling_s" and r["formula"].replace(" ", "") == COOL_OLD.replace(" ", ""):
+            r["formula"] = COOL_NEW
+            r["label"] = "Cooling time of the thickest section (centre-line formula; rod or plate shape)"
+            out["cooling_s"] = 1
+    if out["rules"] or out["cooling_s"]:
+        mould_db.write(d)
+    return out
 
 
 def _rules(part_type: str) -> list[dict]:
@@ -142,10 +181,35 @@ def rim_corrected(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, th: np.ndarra
     return tmin
 
 
+def thick_width_ratio(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, th: np.ndarray, area: np.ndarray, thickest: float) -> float:
+    """Shape of the thickest section: from the middle of each face's section within 10 % of the thickest wall, the widths
+    across it in two directions square to the measured one; the larger width ÷ the thickness, area-weighted median.
+    About 1 = thick every way (a solid boss column, a rod: it cools from all round); much more = a plate (cools from two faces).
+    99 when no section is measured. The Simulation rules decide with it (thick_is_rod)."""
+    ok = np.isfinite(th) & (th >= 0.9 * thickest)
+    sel = np.nonzero(ok)[0]
+    if not len(sel) or thickest <= 0:
+        return 99.0
+    nn = n[idx[sel]]
+    mid = tri[idx[sel]].mean(axis=1) - nn * (th[sel] / 2)[:, None]
+    helper = np.where(np.abs(nn[:, [0]]) < 0.9, [[1.0, 0, 0]], [[0, 1.0, 0]])
+    u = np.cross(nn, helper)
+    u /= np.linalg.norm(u, axis=1)[:, None]
+    w = np.cross(nn, u)
+    d = np.stack([thickness_hits(tri, n, idx[sel], 0.0, v, mid)[0] for v in (u, -u, w, -w)], 1)
+    d = np.where(np.isfinite(d), d, np.inf)
+    ratio = np.maximum(d[:, 0] + d[:, 1], d[:, 2] + d[:, 3]) / th[sel]
+    o = np.argsort(ratio)
+    cum = np.cumsum(area[sel][o])
+    r = float(ratio[o][min(np.searchsorted(cum, cum[-1] / 2), len(o) - 1)])
+    return r if math.isfinite(r) else 99.0
+
+
 def thickness_hits(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, offset: float,
-                   dirs: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+                   dirs: np.ndarray | None = None, origins: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """thickness() and the face each ray hits (-1 = none): the opposite skin of the wall. dirs: other ray directions
-    (one per face of idx) instead of the inward normal."""
+    (one per face of idx) instead of the inward normal; origins: other start points (one per face; the length is then measured
+    from there)."""
     if not len(idx):
         return np.empty(0), np.empty(0, int)
     grid = _triangle_grid(tri)
@@ -153,7 +217,7 @@ def thickness_hits(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, offset: floa
     out = np.full(len(idx), np.nan)
     opp = np.full(len(idx), -1)
     for out_i, face_i in enumerate(idx):
-        origin = tri[face_i].mean(axis=0) - n[face_i] * offset
+        origin = tri[face_i].mean(axis=0) - n[face_i] * offset if origins is None else origins[out_i]
         direction = -n[face_i] if dirs is None else dirs[out_i]
         interval = _ray_box(origin, direction, lo, hi)
         if interval is None:
@@ -193,7 +257,7 @@ def thickness_hits(tri: np.ndarray, n: np.ndarray, idx: np.ndarray, offset: floa
             cell_pos[axis] += ray_step[axis]
             t_max[axis] += t_delta[axis]
         if math.isfinite(best):
-            out[out_i] = best + offset
+            out[out_i] = best + (offset if origins is None else 0.0)
             opp[out_i] = best_face
     return out, opp
 
@@ -247,7 +311,9 @@ def run(vertices, triangles, part_type: str, facts: dict, projected_area_mm2: di
     wall = facts.get("wall_mm") or pct(50)
     env = sample_env(part_type) | {k: 0.0 for k in SIM_VARS}
     env |= {k: float(x) for k, x in facts.items() if k in SIM_VARS}
-    env |= {"wall_mm": wall, "max_wall_mm": pct(95) if len(meas) else wall,
+    thickest = pct(95) if len(meas) else wall
+    shape_ratio = thick_width_ratio(tri, n, idx, th[idx], area[idx], thickest) if len(meas) else 99.0
+    env |= {"wall_mm": wall, "max_wall_mm": thickest, "thick_width_ratio": shape_ratio,
             "min_wall_mm": pct(5) if len(meas) else wall,
             "flow_length_mm": facts["part_l"] + facts["part_h"],
             "shot_weight_g": facts["part_weight_g"] * facts["cavities"],
@@ -274,7 +340,9 @@ def run(vertices, triangles, part_type: str, facts: dict, projected_area_mm2: di
     if maps["draft_low_cm2"] > 0:
         corr.append(f"Add draft of at least {env['min_draft_deg']:g}° on {maps['draft_low_cm2']:.1f} cm² of walls along the opening direction {c['opening_axis'].upper()}.")
     if maps["sink_risk_cm2"] > 0:
-        corr.append(f"Core out thick sections: {maps['sink_risk_cm2']:.1f} cm² is thicker than {env['sink_ratio']:g} × the {wall:.2f} mm wall (sink / porosity risk).")
+        cored = (f" Cored to the {wall:.2f} mm wall the cycle would be {env['cycle_cored_s']:.0f} s instead of {env['cycle_s']:.0f} s "
+                 "(the part cost shows the saving)." if env.get("cycle_cored_s") and env.get("cycle_s", 0) > env["cycle_cored_s"] + 0.5 else "")
+        corr.append(f"Core out thick sections: {maps['sink_risk_cm2']:.1f} cm² is thicker than {env['sink_ratio']:g} × the {wall:.2f} mm wall (sink / porosity risk)." + cored)
     if maps["thin_cm2"] > 0:
         corr.append(f"Check thin walls: {maps['thin_cm2']:.1f} cm² is thinner than {env['thin_ratio']:g} × the {wall:.2f} mm wall (short-shot risk).")
     if c["slides"] or c["lifters"]:

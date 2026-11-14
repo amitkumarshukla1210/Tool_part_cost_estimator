@@ -1240,6 +1240,11 @@ function pieceBlock(p) {
     <div class="table-wrap"><table class="cost-table" data-vsblock="piece"><tbody>
       ${tr.steps.map((x) => `<tr data-vsnode="${esc(x.node)}" class="${x.is_result ? "total" : ""}"><td>${esc(tr.nodes[x.node].label)}</td><td class="num">${v(x.node)} ${esc(tr.nodes[x.node].unit)}</td></tr>`).join("")}
       <tr class="total"><td>Part cost per piece (INR)</td><td class="num">${v("result:inr")}</td></tr></tbody></table></div>
+    ${tr.core_out ? `<p class="warn"><b>Design saving:</b> cored out to the nominal wall (Simulation → Core out thick sections) the cycle would be
+      ${fmt(tr.core_out.cycle_s, 0)} s instead of ${fmt(tr.core_out.cycle_now_s, 0)} s and the part cost
+      ₹${Number(tr.core_out.value_inr).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}:
+      <b>₹${Number(tr.core_out.saving_inr).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} less per part</b>.
+      <span class="note">${esc(tr.core_out.note)}</span></p>` : ""}
     <p class="note">Machine ${esc(tr.machine)} · operator grade ${esc(tr.grade)} · RM version ${tr.rm_version} · tool version ${tr.tool_version} ·
       ${esc(tr.country)} · ${esc(tr.as_of)}. Click any value for its formula, inputs and rate versions.
       ${s.latest ? `<a class="link" href="/api/parts/${p.id}/piece-cost/export.xlsx">Excel</a> · <a class="link" href="/api/parts/${p.id}/piece-cost/export.pdf">PDF</a>` : ""}</p>
