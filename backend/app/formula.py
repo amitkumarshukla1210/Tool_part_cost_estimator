@@ -77,6 +77,22 @@ VARIABLE_HELP = {
     "op_bend": "Sheet-metal dies: bending operations in the die",
     "op_draw": "Sheet-metal dies: drawing operations in the die",
     "op_trim": "Sheet-metal dies: trimming operations in the die",
+    # heat-exchanger fin dies (stage 57); stations, die_l, die_w and die_h above are the fin die's for part type fin
+    "die_rows": "Fin dies: rows across the strip",
+    "progressions": "Fin dies: progressions (holes per row) per stroke",
+    "holes_per_stroke": "Fin dies: holes per stroke = die_rows × progressions",
+    "row_pitch": "Fin dies: row pitch across the strip (mm)",
+    "hole_pitch": "Fin dies: hole pitch in a row, along the feed (mm)",
+    "hole_d": "Fin dies: fin hole (collar) diameter (mm)",
+    "foil_t": "Fin dies: foil thickness (mm), also t",
+    "foil_w": "Fin dies: foil width (mm)",
+    "feed": "Fin dies: feed per stroke = progressions × hole_pitch (mm)",
+    "draw_steps": "Fin dies: draw steps of the pattern (Fin patterns)",
+    "iron_st": "Fin dies: ironing stations of the pattern",
+    "louver_st": "Fin dies: louver stations of the pattern",
+    "slit_st": "Fin dies: slit stations of the pattern",
+    "wave_st": "Fin dies: wave stations of the pattern",
+    "rippled": "Fin dies: 1 when the pattern needs a rippled cut-off",
 }
 # The rules may also use the names in Mould & die database → Process time parameters of the part type
 # (removal rates, set-up hours, shares), e.g. setup_h + part_box_cm3 / 2 / cnc_rough_cm3_per_h.
@@ -170,6 +186,8 @@ SAMPLE = {name: 1.0 for name in VARIABLE_HELP} | {
     "annual_volume": 100000, "programme_years": 5, "programme_shots": 125000, "t": 2, "blank_l": 120, "blank_w": 60,
     "blank_perimeter": 360, "hole_count": 2, "hole_perimeter": 60, "bend_len": 60, "die_l": 200, "die_w": 140,
     "die_h": 25, "work_l": 120, "work_w": 60, "cut_len": 420, "punches": 3, "die_force_t": 40, "pitch": 125, "strip_w": 70,
+    "die_rows": 66, "progressions": 4, "holes_per_stroke": 264, "row_pitch": 12.7, "hole_pitch": 16, "hole_d": 5.2, "foil_t": 0.095,
+    "foil_w": 848, "feed": 64, "draw_steps": 3,
 }
 
 

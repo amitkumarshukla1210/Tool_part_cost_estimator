@@ -30,7 +30,7 @@ from . import costing_db, formula
 from .table_set import TableSet, col
 
 DEFAULT_PATH = costing_db.DEFAULT_PATH
-PART_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow", "machined")
+PART_TYPES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow", "machined", "fin")   # fin: heat-exchanger fin dies (stage 57)
 CATEGORIES = ("made", "bought_out", "process")
 # What a process rate is charged per (the unit of the rate in the library is "<currency>/<basis>").
 BASES = ("kg", "cm²", "mm", "m²", "unit")
@@ -381,12 +381,55 @@ TABLES = {
         col("is_example", "Example", "bool"),
         col("notes", "Notes", required=False),
     ]},
+    # Fin dies (roadmap stage 57): the stations each fin pattern adds, and the fin press line data per fin press
+    "fin_patterns": {"title": "Fin patterns", "unique": ("pattern",), "columns": [
+        col("pattern", "Pattern (plain, louver, slit, wavy, ...)"),
+        col("name", "Name"),
+        col("draw_steps", "Draw steps", "number"),
+        col("iron_stations", "Ironing stations", "number"),
+        col("louver_stations", "Louver stations", "number"),
+        col("slit_stations", "Slit stations", "number"),
+        col("wave_stations", "Wave stations", "number"),
+        col("rippled_cutoff", "Rippled cut-off (1 = yes)", "number"),
+        col("spm_factor", "Press speed factor (× plain)", "number"),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes", required=False),
+    ]},
+    "fin_presses": {"title": "Fin presses", "unique": ("machine_id",), "columns": [
+        col("machine_id", "Machine ID / model (Machines)"),
+        col("default_press", "Default press (yes for one)", "bool"),
+        col("capacity_kn", "Capacity (kN)", "number"),
+        col("stroke_mm", "Slide stroke (mm)", "number"),
+        col("spm_min", "SPM min", "number"),
+        col("spm_max", "SPM max", "number"),
+        col("die_height_min_mm", "Die height min (mm)", "number"),
+        col("die_height_max_mm", "Die height max (mm)", "number"),
+        col("slide_lift_mm", "Slide lifting height (mm)", "number", required=False),
+        col("slide_l_mm", "Slide size L (mm)", "number", required=False),
+        col("slide_w_mm", "Slide size W (mm)", "number", required=False),
+        col("table_l_mm", "Table size L (mm)", "number"),
+        col("table_w_mm", "Table size W (mm)", "number"),
+        col("max_foil_width_mm", "Max material (foil) width (mm)", "number"),
+        col("feed_length_mm", "Sucking / feed length (mm)", "number", required=False),
+        col("coil_id_min_mm", "Coil inner Ø min (mm)", "number", required=False),
+        col("coil_id_max_mm", "Coil inner Ø max (mm)", "number", required=False),
+        col("coil_od_max_mm", "Coil outer Ø max (mm)", "number"),
+        col("motor_kw", "Main motor (kW)", "number", required=False),
+        col("machine_l_mm", "Machine length (mm)", "number", required=False),
+        col("machine_w_mm", "Machine width (mm)", "number", required=False),
+        col("machine_h_mm", "Machine height (mm)", "number", required=False),
+        col("variants", "Stroke / SPM variants", required=False),
+        col("source", "Source (spec sheet, URL)", required=False),
+        col("is_example", "Example", "bool"),
+        col("notes", "Notes", required=False),
+    ]},
 }
 
 
 def _check(clean: dict) -> None:
-    from . import dim_tolerances, drawing_data, flow_sim, mould_systems, process_params, tool_review
+    from . import dim_tolerances, drawing_data, fin_die, flow_sim, mould_systems, process_params, tool_review
     mould_systems.validate(clean)
+    fin_die.validate(clean)
     flow_sim.validate(clean)
     drawing_data.validate(clean)
     dim_tolerances.validate(clean)

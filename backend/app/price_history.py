@@ -168,6 +168,25 @@ def backfill(hist: dict, end: str | None = None, months: int = MONTHS) -> dict:
     return {"months": f"{start}..{end}", "written": out, "total": len(new)}
 
 
+def missing(end: str | None = None, months: int = MONTHS) -> int:
+    """Rates whose first approved version is after the start of the window (their history is not written yet)."""
+    start = _months(end or rates.current_month(), months)[0]
+    with closing(rates._connect()) as con:
+        return con.execute("SELECT COUNT(*) FROM (SELECT category, item, country, MIN(month) AS first FROM rates "
+                           "WHERE status = 'approved' GROUP BY category, item, country) WHERE first > ?", (start,)).fetchone()[0]
+
+
+def fill_new(out_dir=None) -> dict | None:
+    """Stage 57: rates added after the 24-month history was written (new grades, machines and consumables that reach
+    you with an update) get their history from the saved market history file, without a download. None = nothing to do."""
+    if not missing():
+        return None
+    hist = crb.load_history(out_dir or crb.default_out())
+    if not hist.get("series"):
+        return None
+    return backfill(hist)
+
+
 def crb_round(v: float) -> float:
     from .country_rates import _round
     return _round(v)

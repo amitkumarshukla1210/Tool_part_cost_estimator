@@ -26,7 +26,8 @@ from .table_set import TableSet, col
 RM_FAMILIES = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow", "machined")
 TOOL_SCOPES = ("tool_clamp", "tool")
 COMPARE_SCOPE = "sheet_compare"                # progressive vs stage tools (stage 41), sheet_compare.py
-PIECE_SCOPES = ("piece", "harness", "pcb", COMPARE_SCOPE)  # costed by piece_cost.py / electro_cost.py / sheet_compare.py; source "piece" = a value the engine works out
+FIN_SCOPES = ("fin_part", "fin_force")         # heat-exchanger fins (stage 57), fin_die.py
+PIECE_SCOPES = ("piece", "harness", "pcb", COMPARE_SCOPE) + FIN_SCOPES  # costed by piece_cost.py / electro_cost.py / sheet_compare.py; source "piece" = a value the engine works out
 MACHINING_SCOPE = "machining"                  # machined parts (stage 37): machining time and fixture, machining.py
 SCOPES = ("mhr", "labour") + tuple(f"rm_{f}" for f in RM_FAMILIES) + TOOL_SCOPES + PIECE_SCOPES + (MACHINING_SCOPE,)
 SOURCES = ("rate", "machine", "parameter", "part", "tool", "piece", "machining")
@@ -36,7 +37,8 @@ RESULT_OF = ({"mhr": "Machine hour rate", "labour": "Labour rate"} | {f"rm_{f}":
              | {"tool_clamp": "Clamp force for the try-out machine", "tool": "Tool cost per tool", "piece": "Part cost per piece",
                                                                     "harness": "Harness cost", "pcb": "PCB assembly cost",
                                                                     "machining": "Fixture cost per set (machined parts)",
-                                                                    COMPARE_SCOPE: "Part cost per piece for one die type"})
+                                                                    COMPARE_SCOPE: "Part cost per piece for one die type",
+                                                                    "fin_part": "Fin pack cost", "fin_force": "Fin press force needed"})
 # Values worked out by the part cost engine (piece_cost.py) that the piece formulas can use (source = piece);
 # the Insert moulding rules (Part register setup) can be used by their key as well.
 PIECE_ITEMS = {

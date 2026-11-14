@@ -854,6 +854,92 @@ def bom_extract_page():
     return FileResponse(FRONTEND_DIR / "bom.html")
 
 
+# ---------- heat-exchanger fin dies (roadmap stage 57) ----------
+
+def _fin(fn, *a):
+    from . import fin_die
+    try:
+        return fn(*a)
+    except (fin_die.FinDieError, rates.RateError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/fin-dies")
+def fin_dies_list(project_id: Optional[int] = None):
+    from . import fin_die
+    return fin_die.list_all(project_id)
+
+
+@app.get("/api/fin-dies/options")
+def fin_dies_options():
+    from . import fin_die
+    return _fin(fin_die.options)
+
+
+@app.post("/api/fin-dies/calculate")
+def fin_dies_calculate(data: dict):
+    """Live fin die and fin part cost of a spec (nothing saved)."""
+    from . import fin_die
+    return _fin(fin_die.run, data.get("spec") or data)
+
+
+@app.post("/api/fin-dies")
+def fin_die_create(data: dict):
+    from . import fin_die
+    return _fin(fin_die.save, data, None, auth.username() or "")
+
+
+@app.get("/api/fin-dies/{fid}")
+def fin_die_get(fid: int):
+    from . import fin_die
+    return _fin(fin_die.get, fid)
+
+
+@app.put("/api/fin-dies/{fid}")
+def fin_die_update(fid: int, data: dict):
+    from . import fin_die
+    return _fin(fin_die.save, data, fid)
+
+
+@app.delete("/api/fin-dies/{fid}")
+def fin_die_delete(fid: int):
+    from . import fin_die
+    _fin(fin_die.delete, fid)
+    return {"deleted": fid}
+
+
+@app.get("/api/fin-dies/{fid}/cost")
+def fin_die_cost(fid: int):
+    from . import fin_die
+    return _fin(fin_die.calculate, fid)
+
+
+def _fin_file(fid: int, kind: str):
+    from . import fin_die
+    rec = _fin(fin_die.get, fid)
+    res = _fin(fin_die.run, rec["spec"])
+    safe = "".join(ch if (ch.isascii() and ch.isalnum()) or ch in "-_" else "_" for ch in rec["name"]).strip("_")[:60] or f"fin_die_{fid}"
+    if kind == "xlsx":
+        return _xlsx(fin_die.to_excel(res, rec["name"]), f"{safe}_fin_cost.xlsx")
+    return Response(fin_die.to_pdf(res, rec["name"]), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{safe}_fin_cost.pdf"'})
+
+
+@app.get("/api/fin-dies/{fid}/export.xlsx")
+def fin_die_xlsx(fid: int):
+    return _fin_file(fid, "xlsx")
+
+
+@app.get("/api/fin-dies/{fid}/export.pdf")
+def fin_die_pdf(fid: int):
+    return _fin_file(fid, "pdf")
+
+
+@app.get("/fin-dies")
+def fin_dies_page():
+    return FileResponse(FRONTEND_DIR / "fin.html")
+
+
 # ---------- part register: parts ----------
 
 def _filters(q, project_id, process, status, sourcing, rev, file_missing, target_min, target_max,
