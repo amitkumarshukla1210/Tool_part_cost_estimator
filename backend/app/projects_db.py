@@ -107,6 +107,7 @@ parts = Table(
     Column("piece_inputs", JSON),
     # sheet-metal tools (stage 9): die type, edited operation sequence, draw depth / bend radius typed over the model
     Column("sheet_inputs", JSON),
+    Column("fin_inputs", JSON),          # stage 60: fin part inputs typed over the fin STEP / proposal (pack length, FPI, rows, press ...)
     Column("piece_cost_inr", Float),
     # your changes of traced values for this part (traceability panel): {"rm" | "tool" | "piece": {node id: {...}}}
     Column("trace_overrides", JSON),
@@ -285,6 +286,7 @@ fin_dies = Table(
     Column("spec", JSON, nullable=False),               # fin_die.SPEC keys + pattern, material, country, press
     Column("result", JSON),                             # last cost summary: die / pack / per fin / per kg in INR, press, month
     Column("part_file", JSON),                          # stage 58: the uploaded part file {file_id, name}
+    Column("moved_part_id", Integer),                    # stage 60: the fin part this fin die was moved to (the Fin dies page is gone)
     Column("read", JSON),                               # stage 58: what the software read from it (before you confirmed)
     Column("created_by", String(100), default=""),
     Column("created_at", DateTime, default=now),
@@ -305,6 +307,22 @@ fin_fea_runs = Table(
     Column("by", String(100), default=""),
     Column("at", DateTime, default=now),
     Index("ix_fin_fea_runs_die", "fin_die_id"),
+)
+
+# FEA of a fin part's die (roadmap stage 60): as fin_fea_runs, per part of the register
+fin_fea_part_runs = Table(
+    "fin_fea_part_runs", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),
+    Column("spec_hash", String(20), nullable=False),
+    Column("item", String(40), nullable=False),
+    Column("name", String(200), default=""),
+    Column("kind", String(20), default="plate"),
+    Column("result", JSON),
+    Column("png", LargeBinary),
+    Column("by", String(100), default=""),
+    Column("at", DateTime, default=now),
+    Index("ix_fin_fea_part_runs_part", "part_id"),
 )
 
 bom_extract_lines = Table(

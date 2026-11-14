@@ -367,7 +367,8 @@ def update_variant(vid: int, data: dict) -> dict:
 PART_FIELDS = ("name", "material", "process", "sourcing", "status", "annual_volume", "programme_life_years", "tool_life_shots",
                "compare_countries",
                "target_piece_cost_inr", "notes", "unit_price", "price_currency", "price_source", "price_month",
-               "price_is_example", "dimensions", "country", "costing_month", "rm_inputs", "tool_country", "tool_inputs", "piece_inputs", "sheet_inputs")
+               "price_is_example", "dimensions", "country", "costing_month", "rm_inputs", "tool_country", "tool_inputs", "piece_inputs", "sheet_inputs",
+               "fin_inputs")
 
 
 def next_part_code(conn, project_code: str) -> str:
@@ -493,6 +494,10 @@ def _part_values(data, where="Part"):
             out[k] = _piece_inputs(v, where)
         elif k == "sheet_inputs":
             out[k] = _sheet_inputs(v, where)
+        elif k == "fin_inputs":                      # stage 60: checked by fin_part.save_inputs
+            if v is not None and not isinstance(v, dict):
+                raise RegisterError(f"{where}: fin inputs must be a set of values.")
+            out[k] = v or {}
         elif k == "price_is_example":
             out[k] = v is True or str(v).strip().lower() in ("1", "true", "yes", "on", "example")
         elif k == "dimensions":
@@ -706,7 +711,7 @@ def update_part(part_id: int, data: dict, refresh: bool = True) -> dict:
                                                            "comment": str(data.get("status_comment") or "").strip(),
                                                            "step_back": _is_step_back(old["status"], vals["status"])})
     if refresh and {"material", "process", "sourcing", "country", "costing_month", "rm_inputs", "tool_country",
-                    "tool_inputs", "annual_volume", "programme_life_years", "tool_life_shots"} & set(changes):
+                    "tool_inputs", "annual_volume", "programme_life_years", "tool_life_shots", "fin_inputs"} & set(changes):
         refresh_costs([part_id], "part details changed")
     return part_detail(part_id)
 
@@ -1187,6 +1192,12 @@ def _rm_compute(part_id: int, country: str | None = None) -> dict:
     if why:
         raise RMNotApplicable(why)
     family = _rm_family(d)
+    if family == "fin":                              # stage 60: the foil RM of one fin pack
+        from . import fin_die, fin_design, fin_part
+        try:
+            return fin_part.rm(part_id, country)
+        except (fin_part.FinPartError, fin_die.FinDieError, fin_design.ReadError, ValueError) as exc:
+            raise RMNotApplicable(str(exc)) from None
     try:
         t, nodes, warnings, d, rev = _geometry_trace(part_id)
     except RegisterError:
@@ -1482,7 +1493,7 @@ TOOL_INPUTS = {"cavities": "Cavities per tool", "hot_runner": "Hot runner", "sli
                "route": "Machined: turned or milled", "stock_shape": "Machined: bar stock shape", "setups": "Machined: set-ups per part"}
 TOOL_FLAGS = ("hot_runner", "warranty")
 TOOL_CHOICES = {"route": ("turned", "milled"), "stock_shape": ("round", "hex", "square", "flat", "plate")}
-TOOLED = tool_cost.PART_TYPES + ("sheet_metal", "machined")   # part types with a tool / fixture cost
+TOOLED = tool_cost.PART_TYPES + ("sheet_metal", "machined", "fin")   # part types with a tool / fixture cost (fin: stage 60)
 
 
 def _sheet_inputs(v, where):
@@ -1926,6 +1937,12 @@ def _tool_compute(part_id: int, country: str | None = None) -> dict:
     part_type = register_setup.processes()[d["process"]]["part_type"]
     if part_type == "machined":
         return _machining_compute(part_id, d, country)
+    if part_type == "fin":                           # stage 60: the fin die of a fin pack
+        from . import fin_die, fin_design, fin_part
+        try:
+            return fin_part.tool(part_id, country)
+        except (fin_part.FinPartError, fin_die.FinDieError, fin_design.ReadError, ValueError) as exc:
+            raise ToolNotApplicable(str(exc)) from None
     try:
         t, _, _, d, rev = _geometry_trace(part_id)
     except RegisterError:

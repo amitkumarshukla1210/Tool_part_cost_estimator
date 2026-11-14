@@ -1817,6 +1817,27 @@ punch safety 21 - all OK. Every run is stored (table `fin_fea_runs`, append only
 FEA out of date. The latest FEA of the current spec is in the **PO pack** and the ZIP (pictures + `fea_results.json`).
 API: `GET|POST /api/fin-dies/{id}/fea`, `GET /api/fin-dies/{id}/fea-jobs/{job}`, `GET /api/fin-dies/{id}/fea/{run}.png`.
 
+## Fin parts in Parts, like moulded and pressed parts (stage 60)
+
+The separate *Fin dies* tab is gone: a heat-exchanger **fin pack is a part** of a project, exactly like a plastic or sheet-metal part.
+
+| Step | Fin part |
+|---|---|
+| Add the part | Import / Parts: upload the **fin STEP** (one fin) in a project, process **Fin press (heat exchanger fin pack)**, material = a fin foil grade (main material *Aluminium fin foil* / *Copper fin foil*) |
+| One part | **one fin pack** (one coil's fins): annual volume = packs per year, BOM quantity = packs per product (indoor 1, outdoor 1), part cost = ₹ per pack (per fin and per kg in the trace) |
+| Fin spec | read from the STEP (stage 58), die size proposed from the press; **Fin die** box on the part panel → *Fin inputs*: blank = from the file (shown as the grey value), typed = yours (pattern, press, pack length, FPI, rows, progressions, SPM, foil of one AC set …); saving recalculates the costs. No STEP: upload a fin DXF / PDF there |
+| RM | the foil RM step of the fin pack cost (gross foil × rate − scrap), stored as RM versions |
+| Tool cost | the fin die (stage 57), stored as tool cost versions with its BOM (grades, makes, prices) and CAPEX = × dies |
+| Part cost | the fin pack cost (Cost formulas fin_part) with the stored fin die version, stored as part cost versions |
+| Design, FEA | the fin die design (stage 58: strip layout, 3D, drawings, BOM, PO pack, release ZIP) and the FEA (stage 59) in the Fin die box; every file is saved with revisions (stage 47) |
+| Everything else | BOM roll-up, dashboard, CAPEX plan, cost change report, India vs other countries and landed cost, tool group **Fin dies (heat exchanger)** for user access, like every part |
+
+Fin dies saved on the old page are **moved** at the first start: project *FINDIES · Fin dies (moved from the Fin dies page)*, one fin part
+`FIN-<id>` each, with its spec as Fin inputs and its fin STEP (the uploaded one, else one made from the spec) as revision A; /fin-dies
+opens Parts. API: `GET|PUT /api/parts/{id}/fin`, `POST /api/parts/{id}/fin/drawing`, `GET /api/parts/{id}/fin-design[/<file>]`,
+`GET|POST /api/parts/{id}/fin-fea`, `GET /api/parts/{id}/fin-fea/{run}.png`. Next: stage 61 = fin simulation (strip progression video,
+collar forming checks and collar forming FEA, report).
+
 ## User guide
 
 **Help → User guide (PDF)** (`frontend/docs/DTC_User_Guide.pdf`): every page of the tool (dashboard, cost changes, import, parts and the

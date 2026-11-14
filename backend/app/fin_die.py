@@ -764,7 +764,7 @@ def die_cost(s: dict) -> dict:
 
 # ---------------------------------------------------------------- part cost ----------
 
-def part_cost(s: dict, die: dict) -> dict:
+def part_cost(s: dict, die: dict, keep_trace: bool = False):
     from .piece_cost import graft
     setup = costing_setup.tables()
     country, cur, as_of = die["country"], die["currency"], die["as_of"]
@@ -866,7 +866,7 @@ def part_cost(s: dict, die: dict) -> dict:
             "steps": [{"name": r["name"], "label": r["label"], "node": f"calc:{r['name']}", "is_result": bool(r["is_result"])} for r in order],
             "press": m["machine_id"], "missing": missing}
     out["example"] = examples(out)
-    return out
+    return (out, t) if keep_trace else out
 
 
 def run(spec: dict | None) -> dict:

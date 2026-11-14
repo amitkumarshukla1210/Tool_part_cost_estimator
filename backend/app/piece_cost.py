@@ -141,6 +141,12 @@ def run(part_id: int, country: str | None = None) -> dict:
     if register.tool_eligibility(d):
         raise PieceError(register.tool_eligibility(d))
     part_type = register_setup.processes()[d["process"]]["part_type"]
+    if part_type == "fin":                           # stage 60: the fin pack cost (Cost formulas fin_part)
+        from . import fin_die, fin_design, fin_part
+        try:
+            return fin_part.piece(part_id, country)
+        except (fin_part.FinPartError, fin_die.FinDieError, fin_design.ReadError, ValueError) as exc:
+            raise PieceError(str(exc)) from None
     rev_id = d["current_revision_id"]
     if country:   # country comparison: RM and tool worked out live in that country
         from .tool_cost import ToolCostError

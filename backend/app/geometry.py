@@ -23,6 +23,7 @@ PART_TYPES = {
     "sheet_metal": "Sheet metal",
     "eps": "EPS (thermocole) shape moulding",
     "blow": "PET stretch blow moulding (bottles)",
+    "fin": "Heat-exchanger fin pack (fin press)",
 }
 
 # Tessellation tolerance (mm) used for projected area and the 3D viewer.

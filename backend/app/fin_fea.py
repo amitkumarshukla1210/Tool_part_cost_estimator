@@ -187,11 +187,8 @@ def check_plate(t: dict, force: float, R: dict, H: float | None = None) -> dict:
         raise FinFeaError(f"{t['name']}: {exc}") from None
 
 
-def run(fid: int, progress=None) -> dict:
-    """FEA of a saved fin die: plates at the full press capacity, punch buckling; every result stored."""
-    from . import auth
-    rec = fin_die.get(fid)
-    des = fin_die_draw.build(rec["spec"], fid, rec["name"])
+def compute(des: dict, progress=None) -> tuple[list, list, str]:
+    """The FEA of a fin die design (plates at the full press capacity, thicker when failing) and the punch buckling."""
     R = rules()
     av = fea.available()
     if not av["available"]:
@@ -200,7 +197,6 @@ def run(fid: int, progress=None) -> dict:
     tg = [t for t in targets(des, R["fea_slice_rows"], R["fea_lower_support"]) if any(t["key"].lower().startswith(x) or x.startswith(t["key"].lower()) for x in R["parts"])]
     say = progress or (lambda pct, text: None)
     results = []
-    h = spec_hash(rec["spec"])
     for i, t in enumerate(tg):
         say(5 + 85 * i / max(len(tg), 1), f"FEA {t['name']} ({i + 1} of {len(tg)})")
         res = check_plate(t, force, R)
@@ -219,17 +215,77 @@ def run(fid: int, progress=None) -> dict:
                                                                     "add support under the plate or check the load"}
         results.append((t, res))
     say(92, "Punch buckling")
-    punches = punch_checks(des, R)
+    return results, punch_checks(des, R), how
+
+
+def _store(table, owner: dict, h: str, results: list, punches: list, how: str) -> list[int]:
+    from . import auth
     who = auth.username() or ""
+    ids = []
     with db.engine().begin() as conn:
-        ids = []
         for t, res in results:
             png = res.pop("png", None)
-            ids.append(conn.execute(db.fin_fea_runs.insert().values(fin_die_id=fid, spec_hash=h, item=t["item"], name=t["name"], kind="plate",
-                                                                    result=res, png=png, by=who)).inserted_primary_key[0])
-        ids.append(conn.execute(db.fin_fea_runs.insert().values(fin_die_id=fid, spec_hash=h, item="PUNCHES", name="Punch buckling",
-                                                                kind="punches", result={"punches": punches, "force_how": how}, by=who)).inserted_primary_key[0])
-    return {"runs": ids}
+            ids.append(conn.execute(table.insert().values(**owner, spec_hash=h, item=t["item"], name=t["name"], kind="plate",
+                                                          result=res, png=png, by=who)).inserted_primary_key[0])
+        ids.append(conn.execute(table.insert().values(**owner, spec_hash=h, item="PUNCHES", name="Punch buckling", kind="punches",
+                                                      result={"punches": punches, "force_how": how}, by=who)).inserted_primary_key[0])
+    return ids
+
+
+def run(fid: int, progress=None) -> dict:
+    """FEA of a saved fin die (stage 59 page): every result stored."""
+    rec = fin_die.get(fid)
+    des = fin_die_draw.build(rec["spec"], fid, rec["name"])
+    results, punches, how = compute(des, progress)
+    return {"runs": _store(db.fin_fea_runs, {"fin_die_id": fid}, spec_hash(rec["spec"]), results, punches, how)}
+
+
+def run_part(part_id: int, progress=None) -> dict:
+    """Stage 60: FEA of a fin part's die (its confirmed fin spec); every result stored per part."""
+    from . import fin_part
+    des = fin_part.design(part_id)
+    results, punches, how = compute(des, progress)
+    return {"runs": _store(db.fin_fea_part_runs, {"part_id": part_id}, spec_hash(des["spec"]), results, punches, how)}
+
+
+def _latest(table, col, owner_id: int, h: str) -> dict:
+    with db.engine().connect() as conn:
+        rows = [dict(r._mapping) for r in conn.execute(select(table.c.id, table.c.spec_hash, table.c.item, table.c.name, table.c.kind,
+                                                              table.c.result, table.c.by, table.c.at)
+                                                       .where(col == owner_id).order_by(table.c.id))]
+    cur = {}
+    for r in rows:
+        if r["spec_hash"] == h:
+            cur[r["item"]] = r | {"at": str(r["at"])[:19]}
+    runs = list(cur.values())
+    plates = [r for r in runs if r["kind"] == "plate"]
+    punch = next((r for r in runs if r["kind"] == "punches"), None)
+    ok = bool(runs) and all(r["result"]["ok"] for r in plates) and all(p["ok"] for p in (punch or {}).get("result", {}).get("punches", []))
+    return {"available": fea.available(), "runs": runs, "ok": ok if runs else None, "out_of_date": bool(rows) and not runs, "count_all": len(rows)}
+
+
+def latest_part(part_id: int, spec: dict) -> dict:
+    return _latest(db.fin_fea_part_runs, db.fin_fea_part_runs.c.part_id, part_id, spec_hash(spec))
+
+
+def picture_part(part_id: int, run_id: int) -> bytes:
+    with db.engine().connect() as conn:
+        r = conn.execute(select(db.fin_fea_part_runs.c.png).where(db.fin_fea_part_runs.c.id == run_id,
+                                                                  db.fin_fea_part_runs.c.part_id == part_id)).first()
+    if not r or not r[0]:
+        raise FinFeaError("No picture for this FEA run.")
+    return r[0]
+
+
+def pictures_part(part_id: int, spec: dict) -> list[tuple[str, bytes]]:
+    out = []
+    for r in latest_part(part_id, spec)["runs"]:
+        if r["kind"] == "plate":
+            try:
+                out.append((f"{r['item']}_FEA.png", picture_part(part_id, r["id"])))
+            except FinFeaError:
+                pass
+    return out
 
 
 def latest(fid: int) -> dict:
