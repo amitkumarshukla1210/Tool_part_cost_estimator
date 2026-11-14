@@ -1795,7 +1795,27 @@ Sizes come from the Sizing rules fin (stage 57) and the new Design rules fin (st
 is a proposal for your die maker to check, like every tool design of the software. API: `POST /api/fin-dies/read-part` (file),
 `POST /api/fin-dies/propose {spec}`, `GET /api/fin-dies/{id}/design`, `GET /api/fin-dies/{id}/design/{strip.pdf | strip.dxf | fin.pdf |
 fin.dxf | fin.step | drawings.pdf | drawings-dxf.zip | die.step | die.stl | viewer.html | bom.xlsx | po-pack.pdf | all.zip}`.
-Next: stage 59 = FEA of the fin die.
+Stage 59 = the FEA of the fin die (next section).
+
+## FEA of the fin die at the full press capacity (stage 59)
+
+**Fin dies page → Fin die design → FEA at the full press capacity → Run FEA** (a few minutes in the background, with progress;
+Gmsh + CalculiX of stage 45 - without them the button says how to install them). Load = the **full press capacity** of the
+design's fin press (YKC-48SH-125: 125 t × g = 1,226 kN), your choice.
+
+| Part | Check |
+|---|---|
+| Pierce sub-die plate, first draw sub-die plate | real FEA of a slice of `fea_slice_rows` rows (EXAMPLE 4) with its button holes, carrying its share of the press force (slice width ÷ foil width): the holes repeat row by row and the load is even, so the slice deflects and is stressed as the whole plate (the whole plate would need ~2 million elements). Sits on its back face |
+| Lower die plate (die set) | real FEA under the whole press force on the die area; support `fea_lower_support`: **full** (EXAMPLE: the press table is bigger than the die set and the slugs are blown out) or **strips** (two `fea_support_strip_mm` strips along the long edges, on parallels) |
+| Draw, pierce & burr, ironing, reflare punches | buckling by formula: load per punch = press capacity ÷ every working punch; free length = punch length × `fea_punch_free_share`; Euler P = π²EI ÷ (KL)² or Johnson below the transition slenderness (`fea_punch_yield_mpa`); safety ≥ `fea_punch_sf_min`, compressive stress ≤ `fea_punch_allow_mpa` |
+
+Limits `fea_max_deflection_mm` (EXAMPLE 0.02 mm) and `fea_allow_stress_mpa` (300 MPa), Design rules fin. A plate that fails is
+analysed again at `fea_thicken_steps` × its thickness (1.25, 1.5, 2, rounded up to 5 mm) and the first thickness that passes is
+**suggested** (you change the Sizing rule / die set); a punch that fails gets the longest free length that passes. Your IFB die
+at 125 t: pierce plate 0.0048 mm / 26 MPa, draw plate 0.0050 mm / 27 MPa, lower plate 0.0003 mm / 0.7 MPa (full table), pierce
+punch safety 21 - all OK. Every run is stored (table `fin_fea_runs`, append only, with its picture); a changed fin spec marks the
+FEA out of date. The latest FEA of the current spec is in the **PO pack** and the ZIP (pictures + `fea_results.json`).
+API: `GET|POST /api/fin-dies/{id}/fea`, `GET /api/fin-dies/{id}/fea-jobs/{job}`, `GET /api/fin-dies/{id}/fea/{run}.png`.
 
 ## User guide
 

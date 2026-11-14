@@ -169,12 +169,51 @@ async function showDesign(id) {
         ${d.stations.length} stations of ${fmt(d.dims.station_len, 0)} mm, press ${esc(d.press || "-")}.</p>
       <div class="table-wrap"><table class="cost-table"><thead><tr><th>Station</th><th>Operation</th><th class="num">From die entry (mm)</th></tr></thead><tbody>
         ${d.stations.map((s) => `<tr><td>${s.no}</td><td>${esc(s.name)}</td><td class="num">${fmt(s.x0, 0)}</td></tr>`).join("")}</tbody></table></div>
+      <div id="feaOut"></div>
       <h4>Die parts and drawings</h4>
       <div class="table-wrap"><table class="cost-table"><thead><tr><th>Drawing</th><th>Part</th><th class="num">Qty</th><th>Material</th><th>Hardness</th><th>Size (mm)</th></tr></thead><tbody>
         ${d.parts.map((p) => `<tr><td>${esc(p.drawing)}</td><td>${esc(p.name)}</td><td class="num">${fmt(p.qty, 0)}</td><td>${esc(p.material)}</td><td>${esc(p.hardness)}</td>
           <td>${p.dims.map((x) => fmt(x, 2)).join(" × ")}</td></tr>`).join("")}</tbody></table></div>`;
+    await showFea(id);
   } catch (err) {
     $("designOut").innerHTML = `<div class="warn">Fin die design: ${esc(err.message)}</div>`;
+  }
+}
+
+// ---------- stage 59: FEA of the fin die at the full press capacity ----------
+async function showFea(id, msg) {
+  const f = await api(`/api/fin-dies/${id}/fea`);
+  const plates = f.runs.filter((r) => r.kind === "plate");
+  const punch = (f.runs.find((r) => r.kind === "punches") || {}).result;
+  const punches = punch ? punch.punches : f.punches_now;
+  const okb = (ok) => ok ? '<span class="badge badge-approved">OK</span>' : '<span class="badge badge-rejected">FAIL</span>';
+  $("feaOut").innerHTML = `<h4>FEA at the full press capacity</h4>
+    <div class="card toolbar"><button type="button" class="btn btn-primary" id="feaBtn" ${f.available.available ? "" : "disabled"}>Run FEA</button>
+      <span class="note" id="feaStatus">${esc(msg || (f.available.available ? (f.out_of_date ? "The fin spec changed since the last FEA: run it again." : plates.length ? `Last run ${esc(plates[0].at)} by ${esc(plates[0].by || "-")}` : "Not run yet (a few minutes in the background).") : f.available.message))}</span></div>
+    ${plates.length ? `<p class="note">${esc(plates[0].result.force_how)}</p><div class="table-wrap"><table class="cost-table"><thead><tr><th>Part</th><th>Support</th><th class="num">Deflection mm (limit)</th><th class="num">von Mises MPa (limit)</th><th>Result</th><th>Suggestion</th><th>Picture</th></tr></thead><tbody>
+      ${plates.map((r) => `<tr><td>${esc(r.name)}${r.result.slice ? `<br><span class="note">${esc(r.result.slice)}</span>` : ""}</td><td>${esc(r.result.support)}</td>
+        <td class="num">${fmt(r.result.max_deflection_mm, 4)} (${fmt(r.result.limit_deflection_mm, 3)})</td><td class="num">${fmt(r.result.max_von_mises_mpa, 1)} (${fmt(r.result.limit_stress_mpa, 0)})</td>
+        <td>${okb(r.result.ok)}</td><td>${esc((r.result.suggest || {}).text || "")}</td><td><a href="/api/fin-dies/${id}/fea/${r.id}.png" target="_blank">picture</a></td></tr>`).join("")}</tbody></table></div>` : ""}
+    ${punches && punches.length ? `<p class="note">Punch buckling (formula): ${esc(punches[0].formula)}; ${esc(punches[0].load_how)}.</p>
+      <div class="table-wrap"><table class="cost-table"><thead><tr><th>Punch</th><th class="num">Ø × free length mm</th><th class="num">Load N</th><th>Method</th><th class="num">Buckling N</th><th class="num">Safety (min)</th><th class="num">Stress MPa</th><th>Result</th><th>Suggestion</th></tr></thead><tbody>
+      ${punches.map((x) => `<tr><td>${esc(x.name)}</td><td class="num">${fmt(x.d_mm, 2)} × ${fmt(x.free_mm, 1)}</td><td class="num">${fmt(x.load_n, 0)}</td><td>${esc(x.method)}</td>
+        <td class="num">${fmt(x.buckling_n, 0)}</td><td class="num">${fmt(x.safety, 1)} (${fmt(x.limits.sf_min, 0)})</td><td class="num">${fmt(x.stress_mpa, 0)}</td><td>${okb(x.ok)}</td><td>${esc(x.suggest || "")}</td></tr>`).join("")}</tbody></table></div>` : ""}`;
+  const btn = $("feaBtn");
+  if (btn) btn.addEventListener("click", () => runFea(id));
+}
+
+async function runFea(id) {
+  try {
+    let job = await api(`/api/fin-dies/${id}/fea`, { method: "POST" });
+    $("feaBtn").disabled = true;
+    while (job.status === "queued" || job.status === "running") {
+      $("feaStatus").textContent = `${job.pct}% · ${job.text}`;
+      await new Promise((r) => setTimeout(r, 1500));
+      job = await api(`/api/fin-dies/${id}/fea-jobs/${job.id}`);
+    }
+    await showFea(id, job.status === "failed" ? `FEA failed: ${job.error}` : `FEA done in ${fmt(job.elapsed_s, 0)} s.`);
+  } catch (err) {
+    $("feaStatus").textContent = err.message;
   }
 }
 init().catch((err) => status($("status"), err.message, "error"));

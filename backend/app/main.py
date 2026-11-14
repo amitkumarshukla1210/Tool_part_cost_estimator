@@ -1003,12 +1003,68 @@ def fin_die_design_file(fid: int, kind: str):
     des = _fin_design(fid)
     makers = {"strip_pdf": lambda d: fin_die_draw.drawings_pdf(d, "strip"), "fin_pdf": lambda d: fin_die_draw.drawings_pdf(d, "fin"),
               "fin_dxf": lambda d: fin_design.fin_dxf(d["spec"]), "fin_step": lambda d: fin_design.fin_step(d["spec"])}
+    if kind in ("po-pack.pdf", "all.zip"):                   # stage 59: with the latest FEA of this fin spec
+        from . import fin_fea
+        fea = fin_fea.latest(fid)
+        makers["po_pack_pdf"] = lambda d: fin_die_draw.po_pack_pdf(d, fea)
+        makers["all_zip"] = lambda d: fin_die_draw.all_zip(d, fea, fin_fea.pictures(fid))
     body = (makers.get(fn) or getattr(fin_die_draw, fn))(des)
     if isinstance(body, str):
         body = body.encode()
     safe = fin_die_draw._safe(des["name"]) or des["prefix"]
     disp = "inline" if kind == "viewer.html" else "attachment"
     return Response(body, media_type=media, headers={"Content-Disposition": f'{disp}; filename="{safe}_{end}"'})
+
+
+# ---------- FEA of the fin die (roadmap stage 59) ----------
+
+def _fin_fea(fn, *a):
+    from . import fin_fea
+    try:
+        return fn(*a)
+    except (fin_fea.FinFeaError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/fin-dies/{fid}/fea")
+def fin_die_fea(fid: int):
+    """Latest FEA of the fin die's current spec, and the punch buckling check (always shown, by formula)."""
+    from . import fin_fea
+    out = _fin_fea(fin_fea.latest, fid)
+    try:
+        out["punches_now"] = fin_fea.punch_checks(_fin_design(fid))
+    except fin_fea.FinFeaError as exc:
+        out["punches_now"], out["punch_error"] = [], str(exc)
+    return out
+
+
+@app.post("/api/fin-dies/{fid}/fea")
+def fin_die_fea_run(fid: int):
+    """Start the fin die FEA (Gmsh + CalculiX) in the background; GET .../fea-jobs/{job_id} for the progress."""
+    from . import fea, fin_die, fin_fea, sim_jobs
+    _fin(fin_die.get, fid)
+    av = fea.available()
+    if not av["available"]:
+        raise HTTPException(400, av["message"])
+
+    def work(progress):
+        return fin_fea.run(fid, progress)["runs"][-1]
+    return sim_jobs.start(-fid, "fin_fea", work, auth.username() or "")
+
+
+@app.get("/api/fin-dies/{fid}/fea-jobs/{job_id}")
+def fin_die_fea_job(fid: int, job_id: str):
+    from . import sim_jobs
+    job = sim_jobs.get(job_id, -fid)
+    if not job:
+        raise HTTPException(404, "No such FEA job.")
+    return job
+
+
+@app.get("/api/fin-dies/{fid}/fea/{run_id}.png")
+def fin_die_fea_png(fid: int, run_id: int):
+    from . import fin_fea
+    return Response(_fin_fea(fin_fea.picture, fid, run_id), media_type="image/png")
 
 
 @app.get("/fin-dies")

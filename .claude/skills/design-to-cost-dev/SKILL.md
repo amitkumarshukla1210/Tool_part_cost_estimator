@@ -7,11 +7,11 @@ Project: **Design to Cost — Part Cost Estimator**, repository `amitkumarshukla
 I am Amit, Head of Operations / costing at an OEM (supply chain, production, strategic sourcing, projects; RM, part and tool cost,
 BOM cost and CAPEX, EBITDA, digital transformation). Answer simply, **INR first**.
 
-**State (14 Nov 2026):** stages 1–57 are built (57 = heat-exchanger fin dies, cost, PR 83), plus the audit fixes PR 78 (FEA iterative solver, `fea_max_elements`), PR 80 (FEA `fea_mesh_per_circle`, core insert pins) and PR 81 (plastic cooling rod or plate, coring saving) (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
+**State (14 Nov 2026):** stages 1–59 are built (57-59 = heat-exchanger fin dies: cost PR 83, design PR 84, FEA), plus the audit fixes PR 78 (FEA iterative solver, `fea_max_elements`), PR 80 (FEA `fea_mesh_per_circle`, core insert pins) and PR 81 (plastic cooling rod or plate, coring saving) (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
 cycle, PR 53; 43 = toolmaker review, 44 = design skills, both PR 55; 45 = tool internals, production data, FEA, 3D outputs, PR 57; fixes PR 59, 61, 62;
 46 = cavities, gate, overflow, ejection, cooling of the mould, PR 64; 47 = saved files with revisions, 48 = India vs China per cost line,
 49 = scrap reuse and scrap rate % of RM, all PR 66; 50 = several countries per part, traces for admin, tool life per part,
-suppliers removed, PR 68; 51 = country rate book, PR 70; 52 = monthly automatic country rates, PR 71; 53 = unique codes, live Price master link, main / sub materials, more grades, PR 72; 54 = 24-month history for every rate + more grades, PR 73; 55 = cost change report of a project (`cost_changes.py`), PR 75; 56 = its Excel and PDF; 57 = fin dies, PR 83); the next stage is **59** = fin die FEA (58 = fin die design, PR of stage 58). Everything of the old V4 branch is now on main (written new);
+suppliers removed, PR 68; 51 = country rate book, PR 70; 52 = monthly automatic country rates, PR 71; 53 = unique codes, live Price master link, main / sub materials, more grades, PR 72; 54 = 24-month history for every rate + more grades, PR 73; 55 = cost change report of a project (`cost_changes.py`), PR 75; 56 = its Excel and PDF; 57 = fin dies, PR 83); the next stage is **60** (57-59 = fin dies: cost PR 83, design PR 84, FEA). Everything of the old V4 branch is now on main (written new);
 the 4 old unmerged branches are NOT to be merged; neither is `rate-update-2026-11` (draft rates on an old main) as it is.
 To save tokens, do not read the whole README (1650+ lines): read the stage table in `ROADMAP.md` and only the README section of the topic I ask about.
 Stack: Python / FastAPI (`backend/app/`), plain HTML / JS (`frontend/`), SQLite (`data/projects.sqlite` = my data, `master_data/costing_db.sqlite`
@@ -136,8 +136,11 @@ What the later stages added (details in README):
 - 58: fin die design (`fin_design.py` reads STEP / DXF / PDF → spec + die size proposal from the press; `fin_die_draw.py` builds
   the design: stations, die parts FD-<id>-nn, strip layout PDF/DXF, 3D viewer / STEP / STL, detail drawings PDF + DXF ZIP, fin
   PDF/DXF/STEP, BOM xlsx, PO pack PDF, all.zip; API `/api/fin-dies/read-part`, `/propose`, `/{id}/design[/<file>]`; columns
-  fin_dies.part_file / read). Design rules fin (stage 58): fin_foil_use_pct, fin_prog_*, drawing tolerances (EXAMPLE).
-  Next: 59 = fin die FEA.
+  fin_dies.part_file / read). Design rules fin (stage 58): fin_foil_use_pct, fin_prog_*, drawing tolerances (EXAMPLE). PR 84.
+- 59: fin die FEA (`fin_fea.py`): load = full press capacity (my choice); FEA of pierce + draw sub-die plates as a row slice
+  (`fea_slice_rows`, share of the force) and the lower die plate (`fea_lower_support` full | strips); punch buckling Euler / Johnson
+  (`fea_punch_*`); failing plate → thickness suggested (`fea_thicken_steps`), punch → longest free length; table `fin_fea_runs`
+  (spec_hash = out of date when the spec changes); FEA in the PO pack and ZIP; jobs via sim_jobs with part id −fin die id.
 - To open a STEP: his CAD, eDrawings Viewer (SOLIDWORKS free downloads; not "3DEXPERIENCE Exchange", that is a SOLIDWORKS add-in),
   CAD Assistant, FreeCAD, or the app's own 3D viewer. Windows 3D Viewer opens the STL, not STEP.
 - Amit's PC: kit at `D:\Project\DTC Tool and mould`, app on port 8100, CalculiX 2.22 `ccx_static.exe` in

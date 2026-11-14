@@ -579,7 +579,7 @@ def bom_xlsx(des: dict) -> bytes:
     return buf.getvalue()
 
 
-def po_pack_pdf(des: dict) -> bytes:
+def po_pack_pdf(des: dict, fea: dict | None = None) -> bytes:
     """Purchase order pack: technical specification, BOM, accessories, guarantee, documents; then every drawing."""
     from pypdf import PdfReader, PdfWriter
     from reportlab.lib.pagesizes import A4
@@ -628,8 +628,9 @@ def po_pack_pdf(des: dict) -> bytes:
                      [[r["pos"], P(r["element"]), f"{r['qty']:g}", P(r["grade"]), P(r["hardness"]), P(r["drawings"])] for r in bom_rows(des)],
                      theme, [10 * mm, 62 * mm, 14 * mm, 40 * mm, 26 * mm, W - 152 * mm]),
               Paragraph("Drawings in this pack", h2),
-              _table([["Drawing", "Title"], [f"{des['prefix']}-00", "Strip / station layout"], [f"{des['prefix']}-F", "Fin (part)"]] +
+              _table([["Drawing", "Title"], [f"{des['prefix']}-00", P("Strip / station layout")], [f"{des['prefix']}-F", P("Fin (part)")]] +
                      [[p["drawing"], P(p["name"])] for p in des["parts"]], theme, [30 * mm, W - 30 * mm]),
+              *_fea_story(fea, theme, h2, P, W, mm),
               Spacer(1, 6 * mm),
               _table([[P("Buyer: for and on behalf of"), P("Die maker: for and on behalf of")], [P("Date / signature / stamp"), P("Date / signature / stamp")]],
                      theme, [W / 2, W / 2])]
@@ -643,11 +644,39 @@ def po_pack_pdf(des: dict) -> bytes:
     return res.getvalue()
 
 
-def all_zip(des: dict) -> bytes:
+def _fea_story(fea, theme, h2, P, W, mm) -> list:
+    """Stage 59: the latest FEA of this fin spec in the PO pack (plates at the full press capacity, punch buckling)."""
+    from reportlab.platypus import Paragraph
+    from .pdf_report import _table
+    if not fea or not fea.get("runs"):
+        return [Paragraph("FEA (stage 59)", h2), P("No FEA run for this fin die specification yet: run it on the Fin dies page.")]
+    plates = [r for r in fea["runs"] if r["kind"] == "plate"]
+    punch = next((r for r in fea["runs"] if r["kind"] == "punches"), None)
+    out = [Paragraph("FEA at the full press capacity (stage 59)", h2)]
+    if plates:
+        out.append(P(plates[0]["result"].get("force_how", "")))
+        out.append(_table([["Part", "Support", P("Deflection mm (limit)"), P("Mises MPa (limit)"), "Result", "Suggestion"]] +
+                          [[P(r["name"]), P(r["result"]["support"]), f"{r['result']['max_deflection_mm']:.4f} ({r['result']['limit_deflection_mm']:g})",
+                            f"{r['result']['max_von_mises_mpa']:.1f} ({r['result']['limit_stress_mpa']:g})", "OK" if r["result"]["ok"] else "FAIL",
+                            P((r["result"].get("suggest") or {}).get("text", ""))] for r in plates], theme,
+                          [44 * mm, 26 * mm, 26 * mm, 24 * mm, 14 * mm, W - 134 * mm]))
+    if punch:
+        out.append(_table([["Punch", "Ø × free mm", "Load N", "Buckling N", "Safety (min)", "Stress MPa", "Result"]] +
+                          [[P(x["name"]), f"{x['d_mm']:g} × {x['free_mm']:g}", f"{x['load_n']:,.0f}", f"{x['buckling_n']:,.0f}",
+                            f"{x['safety']:.1f} ({x['limits']['sf_min']:g})", f"{x['stress_mpa']:.0f}", "OK" if x["ok"] else "FAIL"]
+                           for x in punch["result"]["punches"]], theme, [44 * mm, 24 * mm, 20 * mm, 24 * mm, 22 * mm, 20 * mm, W - 154 * mm]))
+    return out
+
+
+def all_zip(des: dict, fea: dict | None = None, pictures: list | None = None) -> bytes:
     buf = io.BytesIO()
     n = _safe(des["name"]) or des["prefix"]
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr(f"{n}_PO_pack.pdf", po_pack_pdf(des))
+        z.writestr(f"{n}_PO_pack.pdf", po_pack_pdf(des, fea))
+        for pname, png in pictures or []:
+            z.writestr(f"FEA/{pname}", png)
+        if fea and fea.get("runs"):
+            z.writestr("FEA/fea_results.json", json.dumps(fea["runs"], default=str, indent=1))
         z.writestr(f"{n}_drawings.pdf", drawings_pdf(des))
         z.writestr(f"{n}_BOM.xlsx", bom_xlsx(des))
         z.writestr(f"{n}_die.step", step_bytes(des))
