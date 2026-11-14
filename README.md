@@ -1761,8 +1761,41 @@ counts the rates still without it.
 
 **Fin dies are your data** (table `fin_dies`: name, project, fin spec, last cost summary); the master data is only added to. API:
 `GET /api/fin-dies`, `GET /api/fin-dies/options`, `POST /api/fin-dies/calculate {spec}`, `POST /api/fin-dies`,
-`GET|PUT|DELETE /api/fin-dies/{id}`, `GET /api/fin-dies/{id}/cost`, `/export.xlsx`, `/export.pdf`. Next: stage 58 = fin die
-design (strip layout, 3D die, detail drawings, BOM, PO pack, review), stage 59 = FEA of the fin die.
+`GET|PUT|DELETE /api/fin-dies/{id}`, `GET /api/fin-dies/{id}/cost`, `/export.xlsx`, `/export.pdf`. Stage 58 = the fin die design (next section), stage 59 = FEA of the fin die.
+
+## Fin die design from the part file (stage 58)
+
+**Fin dies page → Part file.** Upload the fin as **STEP** (best), **DXF** or **PDF** and press *Read the fin from the file*:
+
+| File | What is read |
+|---|---|
+| STEP (3D fin) | the round holes across the plate: collar / hole Ø, hole centres → row pitch, hole pitch, fin rows, holes per fin, staggered or in line; collar wall → foil thickness; collar height → fin pitch → FPI; fin length × width; tilted faces → *louver* hint (else *plain*) |
+| DXF (2D fin) | circles and outline: the same except thickness, FPI and pattern (you type them) |
+| PDF | the drawing's text (vector PDF): collar Ø, tube Ø, pitches, thickness, FPI, pattern, "Ø5 × 66R"; every value is marked to check. A scanned PDF has no text: type the values. DWG: save it as DXF |
+
+The tube Ø is the largest standard tube that fits the collar (to confirm). The values fill the form, the ones to check are marked ⚠;
+nothing is used until you save. **Die size proposed from the press** (you can change it): rows across the strip = press foil width ×
+`fin_foil_use_pct` (EXAMPLE 80 %) − 2 × edge trim, ÷ row pitch, in whole fins; progressions by tube Ø (`fin_prog_small` 4 up to
+`fin_tube_small_mm` 5.5, `fin_prog_mid` 3 up to 7.5, else `fin_prog_large` 2). Your Ø5 fin on the YKC-48SH-125 gives
+**66 rows × 4P, foil 848 mm** = your IFB die. The part file is kept with the fin die (and what was read from it).
+
+**Fin die design** (after *Save & calculate*), drawing numbers FD-<id>-nn:
+
+| Output | Content |
+|---|---|
+| Strip / station layout (PDF, DXF) | every station along the die (draw steps, pierce & burr, ironing, louver / slit / wave, reflare, edge trim, pilot, row slit, feed, cut-off) with the hole pattern of one stroke, edge trim, row slits, cut-off, die length and foil width |
+| 3D fin die (viewer, STEP, STL) | die set plates, a sub-die plate, stripper and punch holder per station, the punch arrays, row slit blades, cut-off punch, guide posts and the strip; the offline 3D viewer (explode, select, see-through) |
+| Detail drawings (PDF set, DXF per part) | every die part: views at one scale, dimensions, hole patterns with tolerances (`hole_tol`, `pitch_tol`, `punch_tol`, `die_opening_tol`, `position_tol`, `plate_thk_tol`, `fit_punch`, `finish_working`), quantity, grade and hardness, heat treatment of the HSS / powder steel parts, title block with your logo |
+| Fin drawing (PDF, DXF, STEP) | the fin with its collared holes, pitches, FPI, foil |
+| Die BOM (Excel) | the stage 57 die BOM with grade, hardness, make, drawing numbers; sheets Drawings and Stations |
+| PO pack (PDF) | technical specification (object, fin pattern, material, die structure and size, cutting-part steels, trial material, YBL oil, guarantee, documents, accessories, standard parts), BOM, list of drawings, signature block, then every drawing |
+| Everything (ZIP) | all of the above + `design.json` |
+
+Sizes come from the Sizing rules fin (stage 57) and the new Design rules fin (stage 58): EXAMPLE until you replace them - the design
+is a proposal for your die maker to check, like every tool design of the software. API: `POST /api/fin-dies/read-part` (file),
+`POST /api/fin-dies/propose {spec}`, `GET /api/fin-dies/{id}/design`, `GET /api/fin-dies/{id}/design/{strip.pdf | strip.dxf | fin.pdf |
+fin.dxf | fin.step | drawings.pdf | drawings-dxf.zip | die.step | die.stl | viewer.html | bom.xlsx | po-pack.pdf | all.zip}`.
+Next: stage 59 = FEA of the fin die.
 
 ## User guide
 

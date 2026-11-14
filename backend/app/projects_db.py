@@ -284,6 +284,8 @@ fin_dies = Table(
     Column("name", String(200), nullable=False),
     Column("spec", JSON, nullable=False),               # fin_die.SPEC keys + pattern, material, country, press
     Column("result", JSON),                             # last cost summary: die / pack / per fin / per kg in INR, press, month
+    Column("part_file", JSON),                          # stage 58: the uploaded part file {file_id, name}
+    Column("read", JSON),                               # stage 58: what the software read from it (before you confirmed)
     Column("created_by", String(100), default=""),
     Column("created_at", DateTime, default=now),
     Column("updated_at", DateTime, default=now, onupdate=now),

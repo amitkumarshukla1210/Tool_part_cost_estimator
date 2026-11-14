@@ -13,7 +13,7 @@ BOM cost and CAPEX, EBITDA, digital transformation). Answer simply, **INR first*
 cycle, PR 53; 43 = toolmaker review, 44 = design skills, both PR 55; 45 = tool internals, production data, FEA, 3D outputs, PR 57; fixes PR 59, 61, 62;
 46 = cavities, gate, overflow, ejection, cooling of the mould, PR 64; 47 = saved files with revisions, 48 = India vs China per cost line,
 49 = scrap reuse and scrap rate % of RM, all PR 66; 50 = several countries per part, traces for admin, tool life per part,
-suppliers removed, PR 68; 51 = country rate book, PR 70; 52 = monthly automatic country rates, PR 71; 53 = unique codes, live Price master link, main / sub materials, more grades, PR 72; 54 = 24-month history for every rate + more grades, PR 73; 55 = cost change report of a project (`cost_changes.py`), PR 75; 56 = its Excel and PDF; 57 = fin dies, PR 83); the next stage is **58** = fin die design (ROADMAP rows 58 and 59 are planned). Everything of the old V4 branch is now on main (written new);
+suppliers removed, PR 68; 51 = country rate book, PR 70; 52 = monthly automatic country rates, PR 71; 53 = unique codes, live Price master link, main / sub materials, more grades, PR 72; 54 = 24-month history for every rate + more grades, PR 73; 55 = cost change report of a project (`cost_changes.py`), PR 75; 56 = its Excel and PDF; 57 = fin dies, PR 83); the next stage is **59** = fin die FEA (58 = fin die design, PR of stage 58). Everything of the old V4 branch is now on main (written new);
 the 4 old unmerged branches are NOT to be merged; neither is `rate-update-2026-11` (draft rates on an old main) as it is.
 To save tokens, do not read the whole README (1650+ lines): read the stage table in `ROADMAP.md` and only the README section of the topic I ask about.
 Stack: Python / FastAPI (`backend/app/`), plain HTML / JS (`frontend/`), SQLite (`data/projects.sqlite` = my data, `master_data/costing_db.sqlite`
@@ -135,8 +135,11 @@ What the later stages added (details in README):
   (indoor + outdoor), shared by foil kg (`fin_oil_l_per_ac_set`, spec `foil_kg_per_ac_set`). EXAMPLE: foil prices (= Al 1100 /
   Copper), YBL price ₹180/L, press prices (= PRESS-200), BOM rules and hours. `price_history.fill_new()` gives rates added later
   their 24-month history at app start. My IFB φ5 × 66R × 4P louver die (spec INFB02M-20250807) is the reference case.
-  Next: 58 = fin die design from the part file (2D DXF/DWG, 3D STEP, PDF) + RM grade → strip layout, 3D die, tool-part drawings,
-  BOM, PO pack PDF, CAD; 59 = fin die FEA. Full suite 511 tests (~19 min).
+- 58: fin die design (`fin_design.py` reads STEP / DXF / PDF → spec + die size proposal from the press; `fin_die_draw.py` builds
+  the design: stations, die parts FD-<id>-nn, strip layout PDF/DXF, 3D viewer / STEP / STL, detail drawings PDF + DXF ZIP, fin
+  PDF/DXF/STEP, BOM xlsx, PO pack PDF, all.zip; API `/api/fin-dies/read-part`, `/propose`, `/{id}/design[/<file>]`; columns
+  fin_dies.part_file / read). Design rules fin (stage 58): fin_foil_use_pct, fin_prog_*, drawing tolerances (EXAMPLE).
+  Next: 59 = fin die FEA.
 - To open a STEP: his CAD, eDrawings Viewer (SOLIDWORKS free downloads; not "3DEXPERIENCE Exchange", that is a SOLIDWORKS add-in),
   CAD Assistant, FreeCAD, or the app's own 3D viewer. Windows 3D Viewer opens the STL, not STEP.
 - Amit's PC: kit at `D:\Project\DTC Tool and mould`, app on port 8100, CalculiX 2.22 `ccx_static.exe` in

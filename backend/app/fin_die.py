@@ -925,6 +925,9 @@ def save(data: dict, fid: int | None = None, user: str = "") -> dict:
         raise FinDieError("Give the fin die a name.")
     spec = normalise(data.get("spec"))
     row = {"name": name, "project_id": data.get("project_id") or None, "spec": spec}
+    for k in ("part_file", "read"):                     # stage 58: part file and what was read from it
+        if k in data:
+            row[k] = data[k]
     with db.engine().begin() as con:
         if fid is None:
             fid = con.execute(db.fin_dies.insert().values(**row, created_by=user)).inserted_primary_key[0]

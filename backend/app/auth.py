@@ -48,7 +48,7 @@ PERMISSIONS = {
 }
 # Pure calculations that change nothing: anyone logged in may run them.
 CALC_PATHS = ("/api/analyze", "/api/gross-weight", "/api/capacity", "/api/mould/estimate", "/api/tool-cost", "/api/suggest-process",
-              "/api/fin-dies/calculate")
+              "/api/fin-dies/calculate", "/api/fin-dies/propose")
 MASTER_PATHS = ("/api/master-data", "/api/mould-db", "/api/costing-setup", "/api/register-setup", "/api/examples",
                 "/api/tool-materials", "/api/standard-parts", "/api/master-rows")
 RATE_PATHS = ("/api/rates", "/api/settings", "/api/price-master")
