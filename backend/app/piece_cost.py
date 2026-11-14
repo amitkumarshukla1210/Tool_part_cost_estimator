@@ -89,6 +89,30 @@ def calculated_cycle(part_id: int, part_type: str) -> tuple[float | None, str, b
         return None, str(exc), False
 
 
+def _core_out(part_id: int, t: Trace, names: dict, order: list, result: str) -> dict | None:
+    """The part cost if the thick sections were cored out to the nominal wall: the same piece formulas (as in this trace, your
+    changes included) with the cycle of Simulation rules → cycle_cored_s instead of cycle_s. None when it would not be shorter."""
+    from . import formula, register
+    try:
+        res = register._simulate(part_id)[2]["results"]
+    except (register.RegisterError, register.ToolNotApplicable, ValueError, KeyError):
+        return None
+    cored, now = res.get("cycle_cored_s"), t.value(names["cycle_s"]) if "cycle_s" in names else None
+    if not cored or not now or cored >= now - 0.5:
+        return None
+    env = {v: t.value(nid) for v, nid in names.items()} | {"cycle_s": float(cored)}
+    try:
+        for r in order:
+            env[r["name"]] = formula.evaluate(t.nodes[f"calc:{r['name']}"]["formula"], env)
+    except (formula.FormulaError, ArithmeticError):
+        return None
+    fx = t.value("result:inr") / t.value(result) if t.value(result) else 1.0
+    value = env[next(r["name"] for r in order if r["is_result"])]
+    return {"cycle_s": float(cored), "cycle_now_s": float(now), "value_inr": value * fx, "saving_inr": t.value("result:inr") - value * fx,
+            "note": "Same part cost formulas with the cycle if the thick sections are cored out to the nominal wall "
+                    "(Simulation rules → cycle_cored_s); the tool design keeps the part as drawn until it is changed."}
+
+
 def graft(t: Trace, sub: dict, prefix: str) -> str:
     """Copy another trace's nodes into t under a prefix; returns the copied root node id."""
     for nid, n in sub["nodes"].items():
@@ -188,7 +212,7 @@ def run(part_id: int, country: str | None = None) -> dict:
         tools_cap, cap_note = stage_c["tools_for_capacity"], f"Tools for capacity: {stage_c.get('note', 'Stage C')}"
     else:   # machined: one fixture set per machine; older versions without Stage C: the tools of the version
         tools_cap, cap_note = tool_tr.get("tools_count") or 1, stage_c.get("note") or f"Tools of tool cost version {tool['version']}"
-    cycle_example = False
+    cycle_example, from_sim = False, False
     if tool_tr.get("cycle_node") and "cycle_s" not in typed:   # machined (stage 37): the traced machining time
         cycle = graft(t, tool_tr, "mc:") and "mc:" + tool_tr["cycle_node"]
     elif "cycle_s" in typed:
@@ -198,6 +222,7 @@ def run(part_id: int, country: str | None = None) -> dict:
         if not calc:   # always the calculated cycle: the target of Parameters is not used for the part cost
             raise PieceError(f"Cycle time: it cannot be calculated ({why}). Type a cycle time on the part to cost it.")
         cycle = (round(calc, 3), "s", reg(why) | ({"is_example": True} if cycle_example else {}), False)
+        from_sim = part_type != "sheet_metal"
     items = {
         "rm_cost": (rm["net_rm_cost"], cur, reg(f"RM cost version {rm['version']} (rev {rm['rev']})"), True),
         "cycle_s": cycle,
@@ -263,6 +288,7 @@ def run(part_id: int, country: str | None = None) -> dict:
             "revision": {"id": rev_id, "rev": d["rev"]}, "rm_version": rm["version"], "tool_version": tool["version"],
             "steps": [{"name": r["name"], "node": f"calc:{r['name']}", "is_result": bool(r["is_result"])} for r in order],
             "inputs": [{"variable": k, "node": v} for k, v in names.items()]}
+    out["core_out"] = _core_out(part_id, t, names, order, result) if from_sim else None
     if "trace" in tool:                          # country run: the tool worked out in that country (stage 48 line by line)
         out["_tool_trace"] = tool_tr
     out["tool_summary"] = {"value": tool_tr["value"], "value_inr": tool_tr["value_inr"], "capex_inr": tool_tr.get("capex_inr"),

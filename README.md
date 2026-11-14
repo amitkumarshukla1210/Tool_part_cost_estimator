@@ -475,6 +475,15 @@ Large STEP files are tessellated once per server process and reused by the conce
 cards. An unchanged simulation is also reused for its report, video and process settings; a new revision or changed
 master-data input triggers a fresh calculation. The first run on a detailed model can still take a minute.
 
+**Thick sections: rod or plate, and the saving of coring them (audit after stage 56).** The cooling time is worked out for the
+thickest section (95th percentile of the measured wall). From the middle of that section the simulation also measures its width
+across, in two directions: about as wide as thick (`thick_width_ratio` ≤ 1.6, e.g. a solid boss column under a threaded insert)
+is a **rod**, which cools from all round (Simulation rules `cool_shape_factor` 23.13, `cool_log_factor` 1.602); anything wider is
+a **plate** (π², 4/π, as before). Example: the insert-moulded housing's Ø10 × 12 mm boss columns: cooling 93 s instead of 192 s,
+cycle 98 s, part cost ₹26.78 instead of ₹37.83. The *Core out thick sections* correction now gives the cycle if the section is
+cored to the nominal wall (`cooling_cored_s`, `cycle_cored_s`), and the part cost shows the **design saving** worked out with the
+same part cost formulas (housing: cycle 17 s, ₹17.82, **₹8.95 less per part**). All rows EXAMPLE.
+
 ## Design loop (roadmap stage 7)
 
 Each part's panel has a **Design loop** card: the status flow, *Move to* (the allowed next statuses, plus **↩ Back to** any

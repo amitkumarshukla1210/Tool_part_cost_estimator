@@ -106,3 +106,42 @@ def test_a_real_thick_section_is_still_found():
     boss = cup.union(cq.Workplane("XY").box(20, 20, 12).translate((0, 0, 7))).val()                  # 20 × 20 mm solid block
     r = run(boss, wall_mm=2.5)
     assert r["maps"]["sink_risk_cm2"] > 1 and any("Core out" in c for c in r["corrections"])
+
+
+def test_a_round_boss_column_cools_as_a_rod_and_coring_shows_the_cycle():
+    """Audit after stage 56: the solid Ø10 boss columns under the threaded inserts were cooled as a 9.9 mm plate (192 s). A round
+    thick section (about as wide as thick) now uses the rod factors of Simulation rules; the 'Core out' correction gives the cycle
+    if it is cored to the nominal wall."""
+    plate = cq.Workplane("XY").box(60, 40, 2.5, centered=(True, True, False))
+    boss = plate.union(cq.Workplane("XY").workplane(offset=2.5).circle(5).extrude(12)).val()
+    r = run(boss, wall_mm=2.5)
+    res = r["results"]
+    assert res["thick_width_ratio"] < 1.6 and res["thick_is_rod"] == 1
+    assert res["cool_shape_factor"] == pytest.approx(23.13) and res["cool_log_factor"] == pytest.approx(1.602)
+    plate_s = res["max_wall_mm"] ** 2 / (9.8696 * res["diffusivity_mm2_s"]) * math.log(4 / math.pi * (res["melt_c"] - res["mould_c"]) / (res["eject_c"] - res["mould_c"]))
+    assert res["cooling_s"] < 0.6 * plate_s                                  # a rod cools from all round
+    assert res["cycle_cored_s"] < res["cycle_s"]
+    assert any("Core out" in c and "the cycle would be" in c for c in r["corrections"])
+
+
+def test_a_plate_keeps_the_plate_cooling():
+    r = run(cq.Workplane("XY").box(80, 60, 3).val(), wall_mm=3)
+    res = r["results"]
+    assert res["thick_is_rod"] == 0 and res["cool_shape_factor"] == pytest.approx(9.8696)
+    assert res["cooling_s"] == pytest.approx(res["max_wall_mm"] ** 2 / (9.8696 * res["diffusivity_mm2_s"]) * math.log(4 / 3.1416 * (res["melt_c"] - res["mould_c"]) / (res["eject_c"] - res["mould_c"])), rel=1e-3)
+
+
+def test_cooling_row_changes_only_while_shipped():
+    assert simulation.seed() == {"rules": 0, "cooling_s": 0}
+    d = mould_db.tables()
+    row = next(r for r in d["simulation_rules"] if r["part_type"] == "plastic" and r["name"] == "cooling_s")
+    assert "cool_shape_factor" in row["formula"]
+    row["formula"] = simulation.COOL_OLD                                      # a user who kept the plate formula on purpose
+    row["label"] = "mine"
+    mould_db.write(d)
+    assert simulation.seed()["cooling_s"] == 1                                # the shipped text is updated (approved change)
+    d = mould_db.tables()
+    row = next(r for r in d["simulation_rules"] if r["part_type"] == "plastic" and r["name"] == "cooling_s")
+    row["formula"] = simulation.COOL_OLD + " * 1.1"                           # an own edit stays
+    mould_db.write(d)
+    assert simulation.seed()["cooling_s"] == 0
