@@ -9,11 +9,11 @@ Project: **Design to Cost — Part Cost Estimator**, repository `amitkumarshukla
 I am Amit, Head of Operations / costing at an OEM (supply chain, production, strategic sourcing, projects; RM, part and tool cost,
 BOM cost and CAPEX, EBITDA, digital transformation). Answer simply, **INR first**.
 
-**State (14 Nov 2026):** stages 1–56 are built, plus the audit fixes PR 78 (FEA iterative solver, `fea_max_elements`), PR 80 (FEA `fea_mesh_per_circle`, core insert pins) and PR 81 (plastic cooling rod or plate, coring saving) (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
+**State (14 Nov 2026):** stages 1–57 are built (57 = heat-exchanger fin dies, cost, PR 83), plus the audit fixes PR 78 (FEA iterative solver, `fea_max_elements`), PR 80 (FEA `fea_mesh_per_circle`, core insert pins) and PR 81 (plastic cooling rod or plate, coring saving) (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
 cycle, PR 53; 43 = toolmaker review, 44 = design skills, both PR 55; 45 = tool internals, production data, FEA, 3D outputs, PR 57; fixes PR 59, 61, 62;
 46 = cavities, gate, overflow, ejection, cooling of the mould, PR 64; 47 = saved files with revisions, 48 = India vs China per cost line,
 49 = scrap reuse and scrap rate % of RM, all PR 66; 50 = several countries per part, traces for admin, tool life per part,
-suppliers removed, PR 68; 51 = country rate book, PR 70; 52 = monthly automatic country rates, PR 71; 53 = unique codes, live Price master link, main / sub materials, more grades, PR 72; 54 = 24-month history for every rate + more grades, PR 73; 55 = cost change report of a project (`cost_changes.py`), PR 75; 56 = its Excel and PDF); the next stage is **57** (first free number in `ROADMAP.md`). Everything of the old V4 branch is now on main (written new);
+suppliers removed, PR 68; 51 = country rate book, PR 70; 52 = monthly automatic country rates, PR 71; 53 = unique codes, live Price master link, main / sub materials, more grades, PR 72; 54 = 24-month history for every rate + more grades, PR 73; 55 = cost change report of a project (`cost_changes.py`), PR 75; 56 = its Excel and PDF; 57 = fin dies, PR 83); the next stage is **58** = fin die design (ROADMAP rows 58 and 59 are planned). Everything of the old V4 branch is now on main (written new);
 the 4 old unmerged branches are NOT to be merged; neither is `rate-update-2026-11` (draft rates on an old main) as it is.
 To save tokens, do not read the whole README (1650+ lines): read the stage table in `ROADMAP.md` and only the README section of the topic I ask about.
 Stack: Python / FastAPI (`backend/app/`), plain HTML / JS (`frontend/`), SQLite (`data/projects.sqlite` = my data, `master_data/costing_db.sqlite`
@@ -125,6 +125,18 @@ What the later stages added (details in README):
   EXAMPLE, user "Indicative history", origin `history`, bulk insert, ~72k rows on the shipped data). Not run on the shipped
   master data (needs the FRED history on the PC). `material_grades` lists extended (stainless, EN steels, sheet, plastics,
   tool steels). `country_rate_book._norm` keeps word gaps.
+- 57 (PR 83): heat-exchanger fin dies (`fin_die.py`, page *Fin dies* `fin.html` / `fin.js`, table `fin_dies` = my data): new part type
+  `fin`; inputs = machine (Mould & die *Fin presses* = press database with the full spec, one *default press*: my **YKC-48SH-125**
+  from my spec sheet; YKC H-type series from https://www.yadonpress.com/shop/ykc-series-h-type-fin-press-line; "auto" = smallest
+  that fits by tonnage, foil width, bed), SPM (typed, range check; 0 = `fin_spm` × pattern factor), RM grade (135 fin foils: 11 Al
+  alloys × O/H22/H24/H26 × plain / hydrophilic / epoxy + 3 Cu), fin geometry (typed; stage 58 reads it from the part file). Patterns
+  plain / louver / slit / wavy (*Fin patterns*). Die cost = tool cost engine with part type fin (fin die BOM rules, HAP40 / SKH51 /
+  PX-5 / SK3). Part cost = Cost formulas `fin_part` (per pack / fin / kg); force = `fin_force`. Oil **YBL**: 1 L per 4 AC sets
+  (indoor + outdoor), shared by foil kg (`fin_oil_l_per_ac_set`, spec `foil_kg_per_ac_set`). EXAMPLE: foil prices (= Al 1100 /
+  Copper), YBL price ₹180/L, press prices (= PRESS-200), BOM rules and hours. `price_history.fill_new()` gives rates added later
+  their 24-month history at app start. My IFB φ5 × 66R × 4P louver die (spec INFB02M-20250807) is the reference case.
+  Next: 58 = fin die design from the part file (2D DXF/DWG, 3D STEP, PDF) + RM grade → strip layout, 3D die, tool-part drawings,
+  BOM, PO pack PDF, CAD; 59 = fin die FEA. Full suite 511 tests (~19 min).
 - To open a STEP: his CAD, eDrawings Viewer (SOLIDWORKS free downloads; not "3DEXPERIENCE Exchange", that is a SOLIDWORKS add-in),
   CAD Assistant, FreeCAD, or the app's own 3D viewer. Windows 3D Viewer opens the STL, not STEP.
 - Amit's PC: kit at `D:\Project\DTC Tool and mould`, app on port 8100, CalculiX 2.22 `ccx_static.exe` in
