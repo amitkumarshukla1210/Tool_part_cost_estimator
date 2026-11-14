@@ -1835,8 +1835,24 @@ The separate *Fin dies* tab is gone: a heat-exchanger **fin pack is a part** of 
 Fin dies saved on the old page are **moved** at the first start: project *FINDIES · Fin dies (moved from the Fin dies page)*, one fin part
 `FIN-<id>` each, with its spec as Fin inputs and its fin STEP (the uploaded one, else one made from the spec) as revision A; /fin-dies
 opens Parts. API: `GET|PUT /api/parts/{id}/fin`, `POST /api/parts/{id}/fin/drawing`, `GET /api/parts/{id}/fin-design[/<file>]`,
-`GET|POST /api/parts/{id}/fin-fea`, `GET /api/parts/{id}/fin-fea/{run}.png`. Next: stage 61 = fin simulation (strip progression video,
-collar forming checks and collar forming FEA, report).
+`GET|POST /api/parts/{id}/fin-fea`, `GET /api/parts/{id}/fin-fea/{run}.png`. Stage 61 = the fin simulation (next section).
+
+## Fin simulation: strip progression, collar forming checks and FEA (stage 61)
+
+**Fin part → Fin die box → Fin simulation → Run fin simulation** (a few seconds in the background; saved as a simulation run of the
+part with a **PDF report** and a **video**, like every simulation). The checks are shown live above the button.
+
+| Part | What it does |
+|---|---|
+| Collar forming checks (formula) | hole-edge strain ln((collar Ø + t) ÷ pierce Ø) ≤ `fin_edge_strain_max`; draw depth per draw step ≤ `fin_draw_step_max` × collar Ø; collar height (25.4 ÷ FPI − t) ≥ `fin_collar_min_mm` |
+| Press checks | die force ≤ press tonnage; SPM in the press range; feed per stroke ≤ press feed (sucking) length; foil width ≤ press material width |
+| Collar forming FEA | CalculiX, nonlinear (large deformation) axisymmetric model of the foil around one hole: pierce Ø to half the smaller pitch (`fin_form_rings` × `fin_form_layers` elements), elastic-plastic foil σ = K (ε0 + εp)^n (`fin_foil_*`), outer edge held (symmetry in the hole array), the pierced edge drawn up into the collar wall. Results: largest equivalent plastic strain and collar wall thinning (the smaller principal strain in the r-z plane) against `fin_form_strain_max` and `fin_thinning_max_pct`; the first `fin_form_skip_rings` ring at the drawn edge carries the boundary condition and is left out; deformed-mesh picture coloured by plastic strain |
+| Strip progression | a picture per station (the strip with the current station highlighted and the collar section after it: dome while drawing, pierced, collar wall, flare after the reflare) and a video of the strip feeding through the die |
+| Report | result (correction required or not), every check with its formula, the FEA table and picture, the station pictures, your logo |
+
+Your IFB fin (Ø5.2 collar from a Ø3.12 pierce, 0.095 mm, FPI 21): edge strain 0.53 (≤ 0.6), draw step 0.37 mm, collar 1.11 mm, FEA plastic
+strain 0.89 (≤ 1.2), collar thinning 47 % (≤ 50 %) - all OK. Foil data and limits are EXAMPLE (Design rules fin): replace them with your
+foil supplier's data and your trials. API: `GET|POST /api/parts/{id}/fin-sim`, files `/api/parts/{id}/sim-runs/{run}/pdf|video`.
 
 ## User guide
 
