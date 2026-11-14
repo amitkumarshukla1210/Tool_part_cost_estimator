@@ -7,7 +7,7 @@ Project: **Design to Cost — Part Cost Estimator**, repository `amitkumarshukla
 I am Amit, Head of Operations / costing at an OEM (supply chain, production, strategic sourcing, projects; RM, part and tool cost,
 BOM cost and CAPEX, EBITDA, digital transformation). Answer simply, **INR first**.
 
-**State (9 Nov 2026):** stages 1–56 are built (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
+**State (14 Nov 2026):** stages 1–56 are built, plus the audit fixes PR 78 (FEA iterative solver, `fea_max_elements`), PR 80 (FEA `fea_mesh_per_circle`, core insert pins) and PR 81 (plastic cooling rod or plate, coring saving) (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
 cycle, PR 53; 43 = toolmaker review, 44 = design skills, both PR 55; 45 = tool internals, production data, FEA, 3D outputs, PR 57; fixes PR 59, 61, 62;
 46 = cavities, gate, overflow, ejection, cooling of the mould, PR 64; 47 = saved files with revisions, 48 = India vs China per cost line,
 49 = scrap reuse and scrap rate % of RM, all PR 66; 50 = several countries per part, traces for admin, tool life per part,
@@ -92,7 +92,7 @@ What the later stages added (details in README):
   `scrap_reuse_pct`, virgin_g = input − reused (RM cost on virgin), sold_g sold at `scrap_value` = RM rate ×
   `scrap_rate_pct_of_rm` % when > 0, else the fixed scrap rate; part (RM inputs) > material (new optional Materials columns,
   `master_data.MATERIAL_PARAMETERS`) > family (Parameters); starting 0 = as before. EXAMPLE: both %, China rates / duties /
-  freight. Full suite: ~26 min, 459 tests; audit 0 findings.
+  freight. Full suite: ~26 min, 459 tests (now ~30 min, 501 tests); audit 0 findings.
 - 50 (PR 68): part fields `compare_countries` (JSON) and `tool_life_shots`. RM inputs block (above the RM table): producing country
   (stored, BOM / dashboard / PO) + *Also cost in* multi-select (default Register settings `compare_country` CN; `landed.selected`).
   `landed.versus` = own country as the panel shows it (stored versions) + every selected country live (`_country_block`: RM, tool,
@@ -135,7 +135,8 @@ What the later stages added (details in README):
 - No hard-coded rates or rules: every value comes from master data or a formula in master data and is traceable on screen.
 - Rates are monthly and append-only; only approved rates are used; approving needs the permission *Approve rates*; new prices are drafts.
 - EXAMPLE values stay flagged until replaced; never invent market data or history.
-- Never overwrite `master_data/` or my data: only ADD rows (an idempotent `seed()`), never change or delete existing rows; then run
+- Never overwrite `master_data/` or my data: only ADD rows (an idempotent `seed()`), never change or delete existing rows (if one must
+  change, ask me first; then change it only while it is still the shipped text); then run
   `python -m backend.app.upgrade_tools fingerprints` and commit `backend/app/shipped_rows.json`.
 - If main already has a feature, main wins; if unsure, ask me.
 - No release ZIPs or big binaries in the repository.
