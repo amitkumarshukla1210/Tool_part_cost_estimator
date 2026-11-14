@@ -1172,6 +1172,30 @@ def part_fin_fea_png(part_id: int, run_id: int):
     return Response(_finp(fin_fea.picture_part, part_id, run_id), media_type="image/png")
 
 
+# ---------- fin simulation (roadmap stage 61) ----------
+
+@app.get("/api/parts/{part_id}/fin-sim")
+def part_fin_sim(part_id: int):
+    """Collar forming and press checks now, and the saved fin simulation runs (PDF report + strip video)."""
+    from . import fin_sim
+    try:
+        return fin_sim.live(part_id)
+    except fin_sim.FinSimError as exc:
+        raise HTTPException(400, str(exc)) from None
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.post("/api/parts/{part_id}/fin-sim")
+def part_fin_sim_run(part_id: int):
+    """Run the fin simulation in the background (checks, collar forming FEA, strip pictures and video, report); saved as a run."""
+    from . import fin_sim, sim_jobs
+    _fin_part_design(part_id)
+    return sim_jobs.start(part_id, "fin_sim", lambda progress: fin_sim.run_part(part_id, progress), register.user())
+
+
 @app.get("/fin-dies")
 def fin_dies_page():
     """Stage 60: fin dies are fin parts in Parts now (the saved ones were moved to the project 'Fin dies (moved ...)')."""

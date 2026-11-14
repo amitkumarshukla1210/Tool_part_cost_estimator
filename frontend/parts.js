@@ -2231,6 +2231,41 @@ $("panelBody").addEventListener("click", async (e) => {
 });
 
 
+// ---------- stage 61: fin simulation (strip progression, collar forming checks and FEA, report + video) ----------
+async function finSimLoad(p, msg) {
+  const box = $("finSim");
+  if (!box) return;
+  let f;
+  try { f = await api(`/api/parts/${p.id}/fin-sim`); } catch (err) { box.innerHTML = `<h4>Fin simulation</h4><p class="note">${esc(err.message)}</p>`; return; }
+  if (part !== p) return;
+  const ok = (x) => x ? '<span class="badge badge-approved">OK</span>' : '<span class="badge badge-rejected">FAIL</span>';
+  const last = f.runs[0];
+  box.innerHTML = `<h4>Fin simulation</h4>
+    <p><button type="button" class="btn btn-primary small" id="finSimRun">Run fin simulation</button>
+      <span class="note" id="finSimStatus">${esc(msg || "Strip progression, collar forming checks and collar forming FEA; report PDF and video, saved as a run.")}</span></p>
+    <div class="table-wrap"><table class="cost-table"><thead><tr><th>Check (now)</th><th class="num">Value</th><th>Limit</th><th>Result</th><th>Formula</th></tr></thead><tbody>
+      ${f.checks.map((c) => `<tr><td>${esc(c.name)}</td><td class="num">${fmt(c.value, 3)} ${esc(c.unit)}</td><td>${esc(c.limit)}</td><td>${ok(c.ok)}</td><td>${esc(c.formula)}${c.note ? ` · ${esc(c.note)}` : ""}</td></tr>`).join("")}</tbody></table></div>
+    ${last ? `<p class="note"><b>Last run</b> ${esc((last.created_at || "").slice(0, 16).replace("T", " "))} by ${esc(last.created_by)}
+      ${last.results && last.results.peeq_max != null ? ` · collar FEA: plastic strain ${fmt(last.results.peeq_max, 3)}, thinning ${fmt(last.results.thinning_max_pct, 1)} %` : ""}
+      ${last.corrections.length ? ` · <b>check: ${last.corrections.map(esc).join(", ")}</b>` : " · no correction required"}
+      · <a class="link" href="/api/parts/${p.id}/sim-runs/${last.id}/pdf">⬇ Report (PDF)</a> · <a class="link" href="/api/parts/${p.id}/sim-runs/${last.id}/video">▶ Strip video</a></p>` : ""}`;
+}
+
+document.addEventListener("click", async (e) => {
+  if (e.target.id !== "finSimRun" || !part) return;
+  const p = part;
+  try {
+    let job = await api(`/api/parts/${p.id}/fin-sim`, { method: "POST" });
+    e.target.disabled = true;
+    while (job.status === "queued" || job.status === "running") {
+      $("finSimStatus").textContent = `${job.pct}% · ${job.text}`;
+      await new Promise((r) => setTimeout(r, 1500));
+      job = await api(`/api/parts/${p.id}/sim-jobs/${job.id}`);
+    }
+    if (part === p) finSimLoad(p, job.status === "failed" ? `Fin simulation failed: ${job.error}` : `Done in ${fmt(job.elapsed_s, 0)} s.`);
+  } catch (err) { $("finSimStatus").textContent = err.message; }
+});
+
 // ---------- stage 60: fin parts (heat-exchanger fin pack) - fin inputs, fin die design, FEA on the part panel ----------
 const FIN_FILES = [["po-pack.pdf", "PO pack (PDF)"], ["drawings.pdf", "All drawings (PDF)"], ["strip.pdf", "Strip layout (PDF)"], ["strip.dxf", "Strip layout (DXF)"],
   ["fin.pdf", "Fin drawing (PDF)"], ["fin.dxf", "Fin (DXF)"], ["fin.step", "Fin (STEP)"], ["drawings-dxf.zip", "Die part drawings (DXF, ZIP)"],
@@ -2268,7 +2303,9 @@ async function finLoad(p) {
       <p class="downloads">${FIN_FILES.map(([k, l]) => `<a class="btn btn-outline small" href="/api/parts/${p.id}/fin-design/${k}" ${k === "viewer.html" ? 'target="_blank"' : ""}>${esc(l)}</a>`).join(" ")}</p>
       <details><summary class="link">Die parts and drawings (${d.parts.length})</summary><div class="table-wrap"><table class="cost-table"><thead><tr><th>Drawing</th><th>Part</th><th class="num">Qty</th><th>Material</th><th>Hardness</th><th>Size (mm)</th></tr></thead><tbody>
         ${d.parts.map((x) => `<tr><td>${esc(x.drawing)}</td><td>${esc(x.name)}</td><td class="num">${fmt(x.qty, 0)}</td><td>${esc(x.material)}</td><td>${esc(x.hardness)}</td><td>${x.dims.map((v) => fmt(v, 2)).join(" × ")}</td></tr>`).join("")}</tbody></table></div></details>`}
-    <div id="finFea">${finFeaHtml(p, fea)}</div>`;
+    <div id="finFea">${finFeaHtml(p, fea)}</div>
+    <div id="finSim"><h4>Fin simulation</h4><p class="note">Loading…</p></div>`;
+  finSimLoad(p);
   $("finForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target), body = {};
