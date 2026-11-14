@@ -20,9 +20,9 @@ from sqlalchemy import and_, func, not_, or_, select
 from . import auth, register_setup
 from . import projects_db as db
 
-GROUPS = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow", "machined")
+GROUPS = ("plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow", "machined", "fin")
 LABELS = {"plastic": "Plastic moulding", "die_casting": "Die casting", "foundry": "Foundry", "sheet_metal": "Sheet metal",
-          "eps": "EPS (thermocole)", "blow": "Blow moulding", "machined": "Machining"}
+          "eps": "EPS (thermocole)", "blow": "Blow moulding", "machined": "Machining", "fin": "Fin dies (heat exchanger)"}
 
 
 def groups(user: dict | None = None) -> set | None:

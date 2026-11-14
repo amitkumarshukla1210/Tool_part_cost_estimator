@@ -23,7 +23,7 @@ from pathlib import Path
 from .table_set import TableSet, col
 
 ROOT = Path(__file__).resolve().parents[2]
-PART_TYPES = ("", "plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow", "machined")
+PART_TYPES = ("", "plastic", "die_casting", "foundry", "sheet_metal", "eps", "blow", "machined", "fin")
 
 
 class RegisterSetupError(ValueError):

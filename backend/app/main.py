@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
@@ -1067,9 +1067,115 @@ def fin_die_fea_png(fid: int, run_id: int):
     return Response(_fin_fea(fin_fea.picture, fid, run_id), media_type="image/png")
 
 
+# ---------- fin parts in the part register (roadmap stage 60) ----------
+
+def _finp(fn, *a):
+    from . import fin_design, fin_die, fin_fea, fin_part
+    try:
+        return fn(*a)
+    except (fin_part.FinPartError, fin_die.FinDieError, fin_design.ReadError, fin_fea.FinFeaError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/parts/{part_id}/fin")
+def part_fin(part_id: int):
+    """Fin part: the confirmed fin spec (read from the STEP, proposal, typed), or why there is none."""
+    from . import fin_part
+    return _finp(fin_part.summary, part_id)
+
+
+@app.put("/api/parts/{part_id}/fin")
+def part_fin_save(part_id: int, data: dict):
+    from . import fin_part
+    out = _finp(fin_part.save_inputs, part_id, data)
+    _FIN_PART_DESIGNS.clear()
+    return out
+
+
+@app.post("/api/parts/{part_id}/fin/drawing")
+async def part_fin_drawing(part_id: int, file: UploadFile = File(...)):
+    """A fin DXF / PDF drawing when there is no STEP: what is read is kept on the part for you to confirm."""
+    from . import fin_part
+    content = await file.read()
+    _FIN_PART_DESIGNS.clear()
+    return _finp(fin_part.read_drawing, part_id, content, file.filename or "fin")
+
+
+_FIN_PART_DESIGNS: dict = {}
+
+
+def _fin_part_design(part_id: int):
+    import json as _json
+    from . import fin_part
+    f = _finp(fin_part.spec_for, part_id)
+    key = (part_id, f["part"]["part_code"], f["part"]["name"], _json.dumps(f["spec"], sort_keys=True, default=str))
+    if key not in _FIN_PART_DESIGNS:
+        if len(_FIN_PART_DESIGNS) > 8:
+            _FIN_PART_DESIGNS.pop(next(iter(_FIN_PART_DESIGNS)))
+        _FIN_PART_DESIGNS[key] = _finp(fin_part.design, part_id)
+    return _FIN_PART_DESIGNS[key]
+
+
+@app.get("/api/parts/{part_id}/fin-design")
+def part_fin_design(part_id: int):
+    from . import fin_die_draw
+    return fin_die_draw.summary(_fin_part_design(part_id))
+
+
+@app.get("/api/parts/{part_id}/fin-design/{kind}")
+def part_fin_design_file(part_id: int, kind: str):
+    """The fin die design files of a fin part (saved with revisions like every part file, stage 47)."""
+    from . import fin_design, fin_die_draw, fin_fea
+    if kind not in FIN_FILES:
+        raise HTTPException(404, f"No design file '{kind}'.")
+    fn, media, end = FIN_FILES[kind]
+    des = _fin_part_design(part_id)
+    makers = {"strip_pdf": lambda d: fin_die_draw.drawings_pdf(d, "strip"), "fin_pdf": lambda d: fin_die_draw.drawings_pdf(d, "fin"),
+              "fin_dxf": lambda d: fin_design.fin_dxf(d["spec"]), "fin_step": lambda d: fin_design.fin_step(d["spec"])}
+    if kind in ("po-pack.pdf", "all.zip"):
+        fea = fin_fea.latest_part(part_id, des["spec"])
+        makers["po_pack_pdf"] = lambda d: fin_die_draw.po_pack_pdf(d, fea)
+        makers["all_zip"] = lambda d: fin_die_draw.all_zip(d, fea, fin_fea.pictures_part(part_id, d["spec"]))
+    body = _finp(makers.get(fn) or getattr(fin_die_draw, fn), des)
+    if isinstance(body, str):
+        body = body.encode()
+    safe = fin_die_draw._safe(des["prefix"])
+    disp = "inline" if kind == "viewer.html" else "attachment"
+    return Response(body, media_type=media, headers={"Content-Disposition": f'{disp}; filename="{safe}_{end}"'})
+
+
+@app.get("/api/parts/{part_id}/fin-fea")
+def part_fin_fea(part_id: int):
+    from . import fin_fea
+    des = _fin_part_design(part_id)
+    out = _finp(fin_fea.latest_part, part_id, des["spec"])
+    try:
+        out["punches_now"] = fin_fea.punch_checks(des)
+    except fin_fea.FinFeaError as exc:
+        out["punches_now"], out["punch_error"] = [], str(exc)
+    return out
+
+
+@app.post("/api/parts/{part_id}/fin-fea")
+def part_fin_fea_run(part_id: int):
+    from . import fea, fin_fea, sim_jobs
+    _fin_part_design(part_id)
+    av = fea.available()
+    if not av["available"]:
+        raise HTTPException(400, av["message"])
+    return sim_jobs.start(part_id, "fin_fea", lambda progress: fin_fea.run_part(part_id, progress)["runs"][-1], register.user())
+
+
+@app.get("/api/parts/{part_id}/fin-fea/{run_id}.png")
+def part_fin_fea_png(part_id: int, run_id: int):
+    from . import fin_fea
+    return Response(_finp(fin_fea.picture_part, part_id, run_id), media_type="image/png")
+
+
 @app.get("/fin-dies")
 def fin_dies_page():
-    return FileResponse(FRONTEND_DIR / "fin.html")
+    """Stage 60: fin dies are fin parts in Parts now (the saved ones were moved to the project 'Fin dies (moved ...)')."""
+    return RedirectResponse("/parts")
 
 
 # ---------- part register: parts ----------
@@ -2026,6 +2132,11 @@ def _server_startup():
     if auth.server_mode():
         projects_db.engine()
         auth.bootstrap_admin()       # optional: first admin from DTC_ADMIN_PASSWORD; otherwise /setup asks for it
+    try:                                                         # stage 60: fin dies of the old Fin dies page → fin parts
+        from . import fin_part
+        fin_part.move_saved_fin_dies()
+    except Exception:  # noqa: BLE001 - never stops the app; the page /fin-dies redirects to Parts either way
+        pass
     if os.environ.get("DTC_AUTO_RATES", "").strip() == "1":     # Windows kit: monthly rate update once per new month
         from . import auto_rates
         auto_rates.start_in_background()

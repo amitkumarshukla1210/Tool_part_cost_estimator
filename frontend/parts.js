@@ -112,6 +112,7 @@ async function openPart(id) {
   bomChoices = choices;
   supplierList = suppliers;
   if (sh && !sh.problem) p.layout = await get(`/api/parts/${id}/sheet-layout`);
+  p.isFin = (meta.processes.find((x) => x.code === p.process) || {}).part_type === "fin";
   // the part cost works out the cycle time from the simulation of the 3D model (stage 42): seconds on a large part.
   // The panel opens now; the part cost fills in when it is ready.
   const wantPiece = !p.is_assembly && p.tool?.applicable;
@@ -119,6 +120,7 @@ async function openPart(id) {
   p.piecePending = wantPiece;
   renderPart();
   $("panel").hidden = false;
+  if (p.isFin) finLoad(p);
   p.piecePromise = wantPiece ? get(`/api/parts/${id}/piece-cost`).then((r) => {
     p.piecePending = false;
     p.piece = r;
@@ -419,7 +421,7 @@ function toolBlock(p) {
       inputs, sources and rate versions.${stored ? ` Stored ${esc(v.created_at.slice(0, 16).replace("T", " "))} by ${esc(v.created_by)} · ${esc(v.reason)}.` : ""}
       ${stored ? `<a class="link" href="/api/parts/${p.id}/tool-cost/export.xlsx">Excel</a> · <a class="link" href="/api/parts/${p.id}/tool-cost/export.pdf">PDF</a>` : ""}
       ${p.file_id ? ` · <a class="link" href="/?part=${p.id}">Open in Estimate (full BOM)</a>` : ""}</p>
-    <p class="note downloads">${tr.dies ? "<b>Tool drawings per stage</b>: in the Dies table above." :
+    ${tr.part_type === "fin" ? '<div id="finBox" class="card"><p class="note">Loading the fin die…</p></div>' : `<p class="note downloads">${tr.dies ? "<b>Tool drawings per stage</b>: in the Dies table above." :
       `<b>Mould concept drawing</b> (plan, plate stack, main BOM): <a class="link" href="/api/parts/${p.id}/tool-drawing.pdf">PDF</a> ·
       <a class="link" href="/api/parts/${p.id}/tool-drawing.dxf">DXF</a>.`}
       <a class="btn btn-primary small" href="/api/parts/${p.id}/po-pack.zip" title="Part STEP and drawing, tool drawings and cost sheets per stage, blank / strip, costs">⬇ PO pack (ZIP)</a></p>
@@ -430,8 +432,9 @@ function toolBlock(p) {
       <button type="button" class="btn btn-primary small" id="tdRun">Make the tool design</button>
       ${tr.dies ? "" : '<button type="button" class="btn btn-outline small" id="tdCavities">Cavities…</button>'}
       <button type="button" class="btn btn-outline small" id="tdMachine">Production machine…</button> <span class="status" id="tdStatus"></span>
-      <div id="cvBox"></div><div id="mcBox"></div><div id="tdOut"></div></details>`;
+      <div id="cvBox"></div><div id="mcBox"></div><div id="tdOut"></div></details>`}`;
   }
+  if (tr?.part_type === "fin") { if (tr?.lines) html += bomEditor(p, tr); return html; }   // stage 60: fin inputs are in the Fin die box
   if (tr?.lines) html += bomEditor(p, tr);
   const typed = p.tool_inputs || {};
   const live = t.live || {};
@@ -2225,4 +2228,92 @@ $("panelBody").addEventListener("click", async (e) => {
       alert(err.message);
     }
   }
+});
+
+
+// ---------- stage 60: fin parts (heat-exchanger fin pack) - fin inputs, fin die design, FEA on the part panel ----------
+const FIN_FILES = [["po-pack.pdf", "PO pack (PDF)"], ["drawings.pdf", "All drawings (PDF)"], ["strip.pdf", "Strip layout (PDF)"], ["strip.dxf", "Strip layout (DXF)"],
+  ["fin.pdf", "Fin drawing (PDF)"], ["fin.dxf", "Fin (DXF)"], ["fin.step", "Fin (STEP)"], ["drawings-dxf.zip", "Die part drawings (DXF, ZIP)"],
+  ["die.step", "3D fin die (STEP)"], ["die.stl", "3D fin die (STL)"], ["viewer.html", "🧊 3D viewer"], ["bom.xlsx", "Die BOM (Excel)"], ["all.zip", "Release pack (ZIP)"]];
+const FIN_READ = { tube_od_mm: "Tube Ø", hole_d_mm: "Collar Ø", row_pitch_mm: "Row pitch", hole_pitch_mm: "Hole pitch", fin_rows: "Fin rows", fin_holes: "Holes per fin",
+  staggered: "Staggered", foil_t_mm: "Foil thickness", fpi: "FPI", pattern: "Pattern" };
+
+async function finLoad(p) {
+  const box = $("finBox");
+  if (!box) return;
+  const [f, d, fea] = await Promise.all([api(`/api/parts/${p.id}/fin`).catch((e) => ({ ok: false, problem: e.message })),
+    api(`/api/parts/${p.id}/fin-design`).catch((e) => ({ error: e.message })), api(`/api/parts/${p.id}/fin-fea`).catch((e) => ({ error: e.message }))]);
+  if (part !== p) return;
+  const s = f.spec || {}, typed = f.typed || {}, read = f.read || {};
+  const field = (k) => { const [label, unit, , lo, hi] = (f.spec_fields || {})[k] || [k, ""];
+    return `<label>${esc(label)} (${esc(unit)}) <input type="number" step="any" min="${lo}" max="${hi}" name="${k}" value="${typed[k] ?? ""}" placeholder="${s[k] ?? ""}" /></label>`; };
+  const keys = ["tube_od_mm", "hole_d_mm", "row_pitch_mm", "hole_pitch_mm", "fin_rows", "fin_holes", "foil_t_mm", "fpi", "die_rows", "progressions", "foil_width_mm",
+    "pack_length_mm", "spm", "foil_kg_per_ac_set", "tools_count"];
+  box.innerHTML = `<h4>Fin die (heat-exchanger fin pack) · one part = one fin pack</h4>
+    ${f.ok ? "" : `<p class="warn">${esc(f.problem)}</p>`}
+    ${f.read ? `<p class="note"><b>Read from ${esc(read.source || "the part file")}</b>: ${Object.entries(FIN_READ).filter(([k]) => k in read).map(([k, l]) =>
+        `${(read.check || []).includes(k) ? "⚠ " : ""}${esc(l)} ${read[k] == null ? "–" : esc(String(read[k]))}`).join(" · ")}.
+      ${f.proposal ? `<br>Die size proposed: ${esc(f.proposal.how)}.` : ""} Blank fields below use these values; type a value to change it.</p>` : ""}
+    <form id="finForm" class="grid3" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px 12px">
+      <label>Fin pattern <select name="pattern"><option value="">${esc(s.pattern || "from the file")}</option>${(f.patterns || []).map((x) => `<option ${typed.pattern === x ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label>
+      <label>Fin press <select name="press"><option value="">Default (${esc(f.default_press || "")})</option><option value="auto" ${typed.press === "auto" ? "selected" : ""}>Smallest that fits</option>
+        ${(f.presses || []).map((x) => `<option ${typed.press === x ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label>
+      ${keys.map(field).join("")}
+      <div class="dialog-actions" style="grid-column:1/-1"><button type="submit" class="btn btn-primary small">Save fin inputs (recalculates)</button>
+        <label class="note">Fin drawing without a STEP (DXF / PDF): <input type="file" id="finDrawing" accept=".dxf,.pdf" /></label>
+        <span class="status" id="finStatus"></span></div></form>
+    ${d.error ? `<p class="note">${esc(d.error)}</p>` : `<h4>Fin die design · ${esc(d.prefix)}</h4>
+      <p class="note">Die ${fmt(d.dims.die_l, 0)} × ${fmt(d.dims.die_w, 0)} mm on die set ${fmt(d.dims.base_l, 0)} × ${fmt(d.dims.base_w, 0)} mm, ${d.stations.length} stations
+        (${d.stations.map((x) => esc(x.name)).join(" → ")}), press ${esc(d.press || "-")}.</p>
+      <p class="downloads">${FIN_FILES.map(([k, l]) => `<a class="btn btn-outline small" href="/api/parts/${p.id}/fin-design/${k}" ${k === "viewer.html" ? 'target="_blank"' : ""}>${esc(l)}</a>`).join(" ")}</p>
+      <details><summary class="link">Die parts and drawings (${d.parts.length})</summary><div class="table-wrap"><table class="cost-table"><thead><tr><th>Drawing</th><th>Part</th><th class="num">Qty</th><th>Material</th><th>Hardness</th><th>Size (mm)</th></tr></thead><tbody>
+        ${d.parts.map((x) => `<tr><td>${esc(x.drawing)}</td><td>${esc(x.name)}</td><td class="num">${fmt(x.qty, 0)}</td><td>${esc(x.material)}</td><td>${esc(x.hardness)}</td><td>${x.dims.map((v) => fmt(v, 2)).join(" × ")}</td></tr>`).join("")}</tbody></table></div></details>`}
+    <div id="finFea">${finFeaHtml(p, fea)}</div>`;
+  $("finForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target), body = {};
+    for (const [k, v] of fd.entries()) if (v !== "") body[k] = ["pattern", "press"].includes(k) ? v : Number(v);
+    try { await api(`/api/parts/${p.id}/fin`, { method: "PUT", body: JSON.stringify(body) }); await openPart(p.id); }
+    catch (err) { status($("finStatus"), err.message, "error"); }
+  });
+  $("finDrawing").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const fd = new FormData(); fd.append("file", file);
+    try { await api(`/api/parts/${p.id}/fin/drawing`, { method: "POST", body: fd }); await openPart(p.id); }
+    catch (err) { status($("finStatus"), err.message, "error"); }
+  });
+}
+
+function finFeaHtml(p, f) {
+  if (!f || f.error) return `<h4>FEA at the full press capacity</h4><p class="note">${esc((f || {}).error || "")}</p>`;
+  const plates = f.runs.filter((r) => r.kind === "plate");
+  const pr = (f.runs.find((r) => r.kind === "punches") || {}).result;
+  const punches = pr ? pr.punches : f.punches_now || [];
+  const ok = (x) => x ? '<span class="badge badge-approved">OK</span>' : '<span class="badge badge-rejected">FAIL</span>';
+  return `<h4>FEA at the full press capacity</h4>
+    <p><button type="button" class="btn btn-primary small" id="finFeaRun" ${f.available.available ? "" : "disabled"}>Run FEA</button>
+      <span class="note" id="finFeaStatus">${esc(f.available.available ? (f.out_of_date ? "The fin spec changed since the last FEA: run it again." : plates.length ? `Last run ${plates[0].at} by ${plates[0].by || "-"}` : "Not run yet (a few minutes in the background).") : f.available.message)}</span></p>
+    ${plates.length ? `<p class="note">${esc(plates[0].result.force_how)}</p><div class="table-wrap"><table class="cost-table"><thead><tr><th>Part</th><th class="num">Deflection mm (limit)</th><th class="num">von Mises MPa (limit)</th><th>Result</th><th>Suggestion</th><th></th></tr></thead><tbody>
+      ${plates.map((r) => `<tr><td>${esc(r.name)}</td><td class="num">${fmt(r.result.max_deflection_mm, 4)} (${fmt(r.result.limit_deflection_mm, 3)})</td><td class="num">${fmt(r.result.max_von_mises_mpa, 1)} (${fmt(r.result.limit_stress_mpa, 0)})</td>
+        <td>${ok(r.result.ok)}</td><td>${esc((r.result.suggest || {}).text || "")}</td><td><a class="link" target="_blank" href="/api/parts/${p.id}/fin-fea/${r.id}.png">picture</a></td></tr>`).join("")}</tbody></table></div>` : ""}
+    ${punches.length ? `<div class="table-wrap"><table class="cost-table"><thead><tr><th>Punch (buckling)</th><th class="num">Ø × free mm</th><th class="num">Load N</th><th class="num">Buckling N</th><th class="num">Safety (min)</th><th>Result</th><th>Suggestion</th></tr></thead><tbody>
+      ${punches.map((x) => `<tr><td>${esc(x.name)}</td><td class="num">${fmt(x.d_mm, 2)} × ${fmt(x.free_mm, 1)}</td><td class="num">${fmt(x.load_n, 0)}</td><td class="num">${fmt(x.buckling_n, 0)}</td>
+        <td class="num">${fmt(x.safety, 1)} (${fmt(x.limits.sf_min, 0)})</td><td>${ok(x.ok)}</td><td>${esc(x.suggest || "")}</td></tr>`).join("")}</tbody></table></div>` : ""}`;
+}
+
+document.addEventListener("click", async (e) => {
+  if (e.target.id !== "finFeaRun" || !part) return;
+  const p = part;
+  try {
+    let job = await api(`/api/parts/${p.id}/fin-fea`, { method: "POST" });
+    e.target.disabled = true;
+    while (job.status === "queued" || job.status === "running") {
+      $("finFeaStatus").textContent = `${job.pct}% · ${job.text}`;
+      await new Promise((r) => setTimeout(r, 1500));
+      job = await api(`/api/parts/${p.id}/sim-jobs/${job.id}`);
+    }
+    const f = await api(`/api/parts/${p.id}/fin-fea`);
+    if (part === p) { $("finFea").innerHTML = finFeaHtml(p, f); if (job.status === "failed") $("finFeaStatus").textContent = `FEA failed: ${job.error}`; }
+  } catch (err) { $("finFeaStatus").textContent = err.message; }
 });
