@@ -45,10 +45,11 @@
     <section class="bg-grey page-head">
       <div class="container">
         <div class="section-head">
-          <p class="kicker">Stage 57</p>
+          <p class="kicker">Stages 57 · 58</p>
           <h2>Heat-exchanger fin dies</h2>
-          <p>Generic progressive fin die (any tube Ø, pitch, rows and progressions; plain, louver, slit or wavy fins): the fin die cost
-            from its BOM and the fin part cost per fin pack, per fin and per kg. Every value is traced to master data and approved rates.</p>
+          <p>Generic progressive fin die (any tube Ø, pitch, rows and progressions; plain, louver, slit or wavy fins). Upload the fin part
+            (STEP, DXF or PDF), confirm what is read, and get the fin die cost, the fin part cost per pack, per fin and per kg, and the fin die
+            design: strip layout, 3D die, drawings of every die part, BOM, PO pack and CAD files. Every value is traced to master data.</p>
         </div>
         <div class="card toolbar">
           <label>Fin die <select id="finList"></select></label>
@@ -64,6 +65,12 @@
     <section class="page-body">
       <div class="container">
         <form class="card" id="finForm">
+          <div class="card toolbar" id="partBox">
+            <label>Part file (STEP, DXF or PDF) <input type="file" id="partFile" accept=".step,.stp,.dxf,.pdf" /></label>
+            <button type="button" class="btn btn-outline" id="readBtn">Read the fin from the file</button>
+            <span class="note" id="partName"></span>
+          </div>
+          <div id="readOut"></div>
           <div class="grid3">
             <label>Name <input name="name" id="fName" placeholder="e.g. φ5 × 66R × 4P louver" /></label>
             <label>Project <select name="project_id" id="fProject"><option value="">None</option></select></label>
@@ -71,6 +78,7 @@
             <label>Fin foil <select name="material" id="fMaterial"></select></label>
             <label>Producing country <select name="country" id="fCountry"></select></label>
             <label>Fin press <select name="press" id="fPress"></select></label>
+            <label><input type="checkbox" id="fStagger" /> Holes staggered (rows offset by half a pitch)</label>
           </div>
           <h4>Fin and die geometry</h4>
           <div class="grid3" id="fNums"></div>
@@ -81,6 +89,7 @@
           <p class="status" id="status" role="status"></p>
         </form>
         <div id="out"></div>
+        <div id="designOut"></div>
       </div>
     </section>
   </main>

@@ -935,6 +935,82 @@ def fin_die_pdf(fid: int):
     return _fin_file(fid, "pdf")
 
 
+# ---------- fin die design from the part file (roadmap stage 58) ----------
+
+@app.post("/api/fin-dies/read-part")
+async def fin_die_read_part(file: UploadFile = File(...), spec: str = Form("")):
+    """Read the fin from a STEP / DXF / PDF part file; returns what was read, the spec filled from it and the die size proposal."""
+    import json as _json
+    from . import fin_design
+    content = await file.read()
+    try:
+        read = fin_design.read_part(content, file.filename or "part")
+    except fin_design.ReadError as exc:
+        raise HTTPException(400, str(exc)) from None
+    with projects_db.engine().begin() as conn:
+        row = file_store.put(content, file.filename or "part", "fin_part", conn)
+    base = _json.loads(spec) if spec else None
+    filled = fin_design.to_spec(read, base)
+    proposal = _fin(fin_design.propose, filled)
+    filled |= {"die_rows": proposal["die_rows"], "progressions": proposal["progressions"], "foil_width_mm": proposal["foil_width_mm"]}
+    return {"file": {"file_id": row["id"], "name": file.filename}, "read": read, "spec": filled, "proposal": proposal}
+
+
+@app.post("/api/fin-dies/propose")
+def fin_die_propose(data: dict):
+    from . import fin_design
+    return _fin(fin_design.propose, data.get("spec") or data)
+
+
+_FIN_DESIGNS: dict = {}
+
+
+def _fin_design(fid: int):
+    import json as _json
+    from . import fin_die, fin_die_draw
+    rec = _fin(fin_die.get, fid)
+    key = (fid, rec["name"], _json.dumps(rec["spec"], sort_keys=True, default=str))
+    if key not in _FIN_DESIGNS:
+        if len(_FIN_DESIGNS) > 8:
+            _FIN_DESIGNS.pop(next(iter(_FIN_DESIGNS)))
+        _FIN_DESIGNS[key] = _fin(fin_die_draw.build, rec["spec"], fid, rec["name"])
+    return _FIN_DESIGNS[key]
+
+
+@app.get("/api/fin-dies/{fid}/design")
+def fin_die_design(fid: int):
+    from . import fin_die_draw
+    return fin_die_draw.summary(_fin_design(fid))
+
+
+FIN_FILES = {  # kind: (function, media type, file name end)
+    "strip.pdf": ("strip_pdf", "application/pdf", "strip_layout.pdf"), "strip.dxf": ("strip_dxf", "application/dxf", "strip_layout.dxf"),
+    "fin.pdf": ("fin_pdf", "application/pdf", "fin_drawing.pdf"), "fin.dxf": ("fin_dxf", "application/dxf", "fin.dxf"),
+    "fin.step": ("fin_step", "application/step", "fin.step"), "drawings.pdf": ("drawings_pdf", "application/pdf", "drawings.pdf"),
+    "drawings-dxf.zip": ("dxf_zip", "application/zip", "drawings_dxf.zip"), "die.step": ("step_bytes", "application/step", "die.step"),
+    "die.stl": ("stl_bytes", "model/stl", "die.stl"), "viewer.html": ("viewer_html", "text/html", "3D_viewer.html"),
+    "bom.xlsx": ("bom_xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "BOM.xlsx"),
+    "po-pack.pdf": ("po_pack_pdf", "application/pdf", "PO_pack.pdf"), "all.zip": ("all_zip", "application/zip", "fin_die_design.zip"),
+}
+
+
+@app.get("/api/fin-dies/{fid}/design/{kind}")
+def fin_die_design_file(fid: int, kind: str):
+    from . import fin_design, fin_die_draw
+    if kind not in FIN_FILES:
+        raise HTTPException(404, f"No design file '{kind}'.")
+    fn, media, end = FIN_FILES[kind]
+    des = _fin_design(fid)
+    makers = {"strip_pdf": lambda d: fin_die_draw.drawings_pdf(d, "strip"), "fin_pdf": lambda d: fin_die_draw.drawings_pdf(d, "fin"),
+              "fin_dxf": lambda d: fin_design.fin_dxf(d["spec"]), "fin_step": lambda d: fin_design.fin_step(d["spec"])}
+    body = (makers.get(fn) or getattr(fin_die_draw, fn))(des)
+    if isinstance(body, str):
+        body = body.encode()
+    safe = fin_die_draw._safe(des["name"]) or des["prefix"]
+    disp = "inline" if kind == "viewer.html" else "attachment"
+    return Response(body, media_type=media, headers={"Content-Disposition": f'{disp}; filename="{safe}_{end}"'})
+
+
 @app.get("/fin-dies")
 def fin_dies_page():
     return FileResponse(FRONTEND_DIR / "fin.html")
