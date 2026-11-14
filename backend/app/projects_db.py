@@ -291,6 +291,22 @@ fin_dies = Table(
     Column("updated_at", DateTime, default=now, onupdate=now),
 )
 
+# FEA of a fin die (roadmap stage 59): one row per plate run (with its picture) and one for the punch buckling, append only
+fin_fea_runs = Table(
+    "fin_fea_runs", meta,
+    Column("id", Integer, primary_key=True),
+    Column("fin_die_id", ForeignKey("fin_dies.id", ondelete="CASCADE"), nullable=False),
+    Column("spec_hash", String(20), nullable=False),     # the fin spec the run was made for (a changed spec = out of date)
+    Column("item", String(40), nullable=False),          # drawing number, or PUNCHES
+    Column("name", String(200), default=""),
+    Column("kind", String(20), default="plate"),         # plate | punches
+    Column("result", JSON),
+    Column("png", LargeBinary),
+    Column("by", String(100), default=""),
+    Column("at", DateTime, default=now),
+    Index("ix_fin_fea_runs_die", "fin_die_id"),
+)
+
 bom_extract_lines = Table(
     "bom_extract_lines", meta,
     Column("id", Integer, primary_key=True),
