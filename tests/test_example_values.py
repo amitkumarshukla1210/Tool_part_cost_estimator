@@ -88,7 +88,7 @@ def test_replace_and_keep_master_data_rows():
 
     keep = client.post("/api/examples/row", json={"set": "setup", "table": "machines", "key": {"machine_id": "VMC-850"}})
     assert keep.status_code == 200
-    assert table(checklist(), "setup", "machines")["example"] == 53
+    assert table(checklist(), "setup", "machines")["example"] == 59   # 60 EXAMPLE machines (6 fin presses of stage 57) - VMC-850 kept
     bad = client.post("/api/examples/row", json={"set": "setup", "table": "machines", "key": {"machine_id": "VMC-850"},
                                                  "value": 5})
     assert bad.status_code == 400 and "edit this row in Master data" in bad.json()["detail"]
