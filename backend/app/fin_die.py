@@ -50,32 +50,40 @@ PATTERN_ROWS = [
     ("wavy", "Wavy / corrugated fin (wave station, rippled cut-off)", 3, 0, 0, 0, 1, 1, 0.85),
 ]
 
-# Fin presses (Machines rows): id, name, tonnage t, power kW, bed L × W mm, floor m², example, notes
-# Fin press line data (Fin presses rows): id, max foil width, SPM min / max, die height min / max, coil OD max, coil ID
-YKC_NOTE = ("Technical data from your YKC-48A-125 machine specification (1250 kN, 150-300 SPM, die height 280-330 mm, "
-            "material width 1080 mm, coil Ø150 / Ø1200, 22 kW, table 2000 × 1360 mm, machine 10000 × 4500 × 3800 mm). "
-            "Life, residual, maintenance, load factor and the machine price are EXAMPLE until you enter yours.")
+# Fin presses. Technical data per model: the Machines row (tonnage, motor, table = bed, floor area = machine L × W) for the MHR,
+# and the Fin presses row (press line data). YKC series H-type: manufacturer's specification table (SOURCE_YADON);
+# YKC-48SH-125: your machine specification sheet (the default press). Life, residual, maintenance, load factor and the
+# machine price are EXAMPLE until you enter yours.
+SOURCE_YADON = "https://www.yadonpress.com/shop/ykc-series-h-type-fin-press-line"
+SOURCE_YOURS = "Your YKC-48SH-125 machine specification (Excel)"
+DEFAULT_PRESS = "YKC-48SH-125"
+_STD3 = "stroke 40 mm 150-300 SPM; 60 mm 150-230 SPM; 50 mm 150-260 SPM"
+_BIG3 = "stroke 80 mm 150-200 SPM; 70 mm 150-220 SPM; 60 mm 150-230 SPM"
+# model: kN, stroke mm, SPM min, SPM max, die height min / max, slide lift, slide L × W, table L × W, foil width, feed (sucking)
+# length, coil ID min / max, coil OD, motor kW, machine L × W × H, variants, source
 PRESSES = [
-    # machine_id, name, tonnage, kW, bed L, bed W, floor m², machine notes, foil W, spm min, spm max, die h min, die h max, coil OD, coil ID, line example
-    ("FIN-125A", "Fin press YKC-48A-125 (125 t)", 125, 22, 2000, 1360, 45, YKC_NOTE, 1080, 150, 300, 280, 330, 1200, 150, False),
-    ("FIN-125SH", "Fin press YKC-48SH-125 (125 t) - to confirm", 125, 22, 2000, 1360, 45,
-     "TO CONFIRM: your fin die spec INFB02M-20250807 names the YKC-48SH-125; data copied from the YKC-48A-125 until you "
-     "have the 48SH data sheet. Life, residual, maintenance and the machine price are EXAMPLE.", 1080, 150, 300, 280, 330, 1200, 150, True),
-    ("FIN-045", "Fin press 45 t", 45, 7.5, 1100, 800, 20, "EXAMPLE fin press - replace with your machine", 400, 150, 300, 220, 270, 1000, 150, True),
-    ("FIN-063", "Fin press 63 t", 63, 11, 1400, 1000, 28, "EXAMPLE fin press - replace with your machine", 600, 150, 300, 240, 290, 1000, 150, True),
-    ("FIN-080", "Fin press 80 t", 80, 15, 1700, 1150, 35, "EXAMPLE fin press - replace with your machine", 800, 150, 280, 260, 310, 1200, 150, True),
-    ("FIN-200", "Fin press 200 t", 200, 37, 2600, 1650, 60, "EXAMPLE fin press - replace with your machine", 1300, 120, 250, 300, 360, 1400, 150, True),
+    ("YKC-48SH-125", 1250, 40, 150, 300, 280, 330, 130, 1500, 1350, 2000, 1360, 1080, 900, 150, 150, 1200, 22, 10000, 4500, 3800, "", SOURCE_YOURS),
+    ("YKC-18-45", 450, 40, 150, 300, 260, 310, 80, 720, 780, 1300, 770, 400, 1000, 150, 150, 1000, 7.5, 7500, 3500, 3200, _STD3, SOURCE_YADON),
+    ("YKC-24-63", 630, 40, 150, 300, 260, 310, 80, 800, 920, 1350, 900, 550, 1000, 150, 150, 1000, 7.5, 7500, 3500, 3500, _STD3, SOURCE_YADON),
+    ("YKC-24A-63", 630, 40, 150, 300, 260, 310, 80, 1100, 920, 1600, 900, 550, 1000, 150, 150, 1000, 11, 10000, 4000, 3200, "", SOURCE_YADON),
+    ("YKC-36-80", 800, 40, 150, 300, 280, 330, 100, 1055, 1220, 1600, 1200, 820, 900, 150, 150, 1200, 15, 10000, 4000, 3500, "", SOURCE_YADON),
+    ("YKC-36A-100", 1000, 40, 150, 300, 280, 330, 120, 1300, 1190, 1800, 1200, 820, 900, 150, 150, 1200, 18.5, 10000, 4000, 3500, "", SOURCE_YADON),
+    ("YKC-48A-125", 1250, 40, 150, 300, 280, 330, 130, 1500, 1350, 2000, 1360, 1080, 900, 150, 150, 1200, 22, 10000, 4500, 3800, "", SOURCE_YADON),
+    ("YKC-48H-125", 1250, 30, 150, 400, 280, 330, 130, 1500, 1350, 2000, 1360, 1080, 900, 150, 150, 1200, 22, 10000, 4500, 3800, "", SOURCE_YADON),
+    ("YKC-60A-160", 1600, 40, 150, 300, 280, 330, 150, 1450, 1540, 2000, 1500, 1200, 900, 150, 150, 1200, 22, 10000, 4800, 3800, "", SOURCE_YADON),
+    ("YKC-160", 1600, 80, 150, 230, 280, 330, 130, 1300, 1190, 2000, 1200, 500, 900, 480, 550, 1200, 22, 10000, 4000, 3500, _BIG3, SOURCE_YADON),
+    ("YKC-200", 2000, 80, 150, 230, 280, 330, 130, 1300, 1190, 2000, 1200, 500, 900, 480, 550, 1200, 22, 10000, 4000, 3500, _BIG3, SOURCE_YADON),
 ]
+PRESS_COLS = ("machine_id", "capacity_kn", "stroke_mm", "spm_min", "spm_max", "die_height_min_mm", "die_height_max_mm", "slide_lift_mm",
+              "slide_l_mm", "slide_w_mm", "table_l_mm", "table_w_mm", "max_foil_width_mm", "feed_length_mm", "coil_id_min_mm",
+              "coil_id_max_mm", "coil_od_max_mm", "motor_kw", "machine_l_mm", "machine_w_mm", "machine_h_mm", "variants", "source")
 PRESS_PROCESS = "Fin press"
-
-
-def press_note(mid: str, example: bool) -> str:
-    if not example:
-        return "Your YKC-48A-125 specification"
-    if mid == "FIN-125SH":
-        return "TO CONFIRM: copied from the YKC-48A-125 until you have the YKC-48SH-125 data sheet"
-    return "EXAMPLE fin press line data - replace with your machine's"
 PRESS_PRICE_REF = "PRESS-200"          # machine price / consumables copied (EXAMPLE) from this machine until you enter yours
+
+
+def press_rows_seed() -> list[dict]:
+    return [dict(zip(PRESS_COLS, p)) for p in PRESSES]
+
 
 # Parameters rows of part type fin: parameter, value, unit, description (EXAMPLE unless the note says it is your spec)
 PARAMETERS = [
@@ -93,7 +101,8 @@ PARAMETERS = [
     ("fin_oee_pct", 75, "%", "Fin press line OEE (coil changes, die adjustment, stops)"),
     ("fin_operators", 0.5, "persons", "Operators per fin press line (one runs two lines)"),
     ("fin_stack_s_per_pack", 45, "s", "Stacking / collecting / handling time per fin pack"),
-    ("fin_oil_l_per_kstroke", 0.8, "L/1000 strokes", "Evaporative fin oil used per 1000 strokes"),
+    ("fin_oil_l_per_ac_set", 0.25, "L/AC set", "Fin oil (YBL) used per AC set, indoor + outdoor coils: 1 litre per 4 AC sets (your experience)"),
+    ("default_fin_press", DEFAULT_PRESS, "", "Fin press used when the fin die spec names none (your press)"),
     ("fin_pierce_factor", 0.6, "× hole Ø", "Pierce hole before burring = factor × collar hole Ø (slug scrap)"),
     ("fin_edge_trim_mm", 5, "mm", "Edge trim each side of the strip (foil width = rows × row pitch + 2 × this)"),
     ("fin_shear_mpa", 75, "MPa", "Shear strength of the fin foil (Al H24 / H26) for the die force"),
@@ -189,19 +198,29 @@ BOM = [
 ]
 
 # Fin foil materials (Materials, part type fin): alloy, tempers, density; plain and hydrophilic coated
-FOIL_ALLOYS = [("1100", 2.71), ("1200", 2.71), ("3102", 2.72), ("8011", 2.71), ("8006", 2.73)]
+FOIL_ALLOYS = [("1050", 2.71), ("1100", 2.71), ("1145", 2.70), ("1200", 2.71), ("3003", 2.73), ("3005", 2.73), ("3102", 2.72),
+               ("7072", 2.72), ("8006", 2.73), ("8011", 2.71), ("8079", 2.71)]
 FOIL_TEMPERS = ("O", "H22", "H24", "H26")
-FOIL_COATS = ("plain", "hydrophilic coated")
+FOIL_COATS = ("plain", "hydrophilic coated", "epoxy coated (anti-corrosion)")
+# copper fin foil (main material Copper fin foil): grade, density
+COPPER_FOILS = [("Cu fin foil C1100-O (ETP)", 8.94), ("Cu fin foil C1100-H (ETP)", 8.94), ("Cu fin foil C1220-O (DHP)", 8.94)]
+COPPER_TYPE, COPPER_RATE_REF = "Copper fin foil", "Copper"
 FOIL_TYPE = "Aluminium fin foil"
 FOIL_RATE_REF = "Aluminium 1100 / 1050 (commercially pure)"   # its approved RM and scrap rates copied (EXAMPLE) per country
 FOIL_NOTE = ("EXAMPLE fin foil grade (stage 57): density typical; price = {ref} until you enter your supplier price "
              "(foil conversion premium and coating not yet in it)")
-OIL_ITEM = "Fin stock oil (per litre)"
-OIL_REF_INR = 180            # INR per litre, EXAMPLE (seeded only where no oil rate exists; other countries by forex)
+OIL_ITEM = "Fin oil YBL (per litre)"
+OIL_REF_INR = 180            # INR per litre, EXAMPLE until you enter the YBL price (other countries by forex)
 
 
 def foil_grades() -> list[tuple[str, float]]:
     return [(f"Al fin foil {a}-{t} {c}", d) for a, d in FOIL_ALLOYS for t in FOIL_TEMPERS for c in FOIL_COATS]
+
+
+def all_foils() -> list[tuple[str, float, str, str]]:
+    """(grade, density, main material, rate reference) of every fin foil."""
+    return ([(n, d, FOIL_TYPE, FOIL_RATE_REF) for n, d in foil_grades()]
+            + [(n, d, COPPER_TYPE, COPPER_RATE_REF) for n, d in COPPER_FOILS])
 
 
 # Cost formulas: (scope, name, label, formula, unit, is_result, description)
@@ -227,9 +246,11 @@ FORMULAS = [
      "Fin area less the pierced slugs (the collar is drawn from the foil)"),
     (PART_SCOPE, "scrap_kg", "Scrap per pack", "gross_kg - net_kg", "kg", False, "Slugs, edge trim and rows slit off"),
     (PART_SCOPE, "rm_cost", "Foil RM cost (net of scrap)", "gross_kg * rm_rate - scrap_kg * scrap_rate", "{cur}", False, ""),
-    (PART_SCOPE, "oil_cost", "Fin oil", "strokes_per_pack / 1000 * fin_oil_l_per_kstroke * oil_rate", "{cur}", False, ""),
-    (PART_SCOPE, "spm", "Press speed", "min(fin_spm * spm_factor, press_spm_max)", "strokes/min", False,
-     "Plain-fin speed × pattern factor, not above the press SPM max"),
+    (PART_SCOPE, "oil_l", "Fin oil (YBL) per pack", "gross_kg * fin_oil_l_per_ac_set / foil_kg_per_ac_set", "L", False,
+     "Oil of one AC set (1 L per 4 AC sets) shared by foil kg: this pack's foil ÷ the foil of one AC set (indoor + outdoor)"),
+    (PART_SCOPE, "oil_cost", "Fin oil (YBL)", "oil_l * oil_rate", "{cur}", False, ""),
+    (PART_SCOPE, "spm", "Press speed", "spm_typed if spm_typed > 0 else min(fin_spm * spm_factor, press_spm_max)", "strokes/min", False,
+     "The SPM you typed; else the plain-fin speed × pattern factor, not above the press SPM max"),
     (PART_SCOPE, "press_h", "Press hours per pack", "strokes_per_pack / (spm * 60 * fin_oee_pct / 100)", "h", False, ""),
     (PART_SCOPE, "process_cost", "Fin press line", "press_h * (mhr + fin_operators * labour_rate)", "{cur}", False, "Press hours × (MHR + operators × labour rate)"),
     (PART_SCOPE, "stacking_cost", "Stacking & handling", "fin_stack_s_per_pack / 3600 * labour_rate", "{cur}", False, ""),
@@ -257,13 +278,14 @@ FIN_ITEMS = {
     "foil_w": ("Foil width", "mm"), "feed": ("Feed per stroke", "mm"), "density": ("Foil density", "g/cm³"),
     "fin_rows": ("Fin rows (coil depth)", "rows"), "fin_holes": ("Holes along one fin", "holes"), "fpi": ("Fins per inch", "FPI"),
     "pack_length": ("Fin pack length", "mm"), "spm_factor": ("Pattern speed factor", "×"),
-    "press_spm_max": ("Press SPM max", "strokes/min"), "rm_rate": ("Foil rate", "{cur}/kg"), "scrap_rate": ("Scrap value", "{cur}/kg"),
+    "press_spm_max": ("Press SPM max", "strokes/min"), "spm_typed": ("SPM typed in the fin die spec (0 = not typed)", "strokes/min"),
+    "foil_kg_per_ac_set": ("Foil of one AC set, indoor + outdoor coils", "kg"), "rm_rate": ("Foil rate", "{cur}/kg"), "scrap_rate": ("Scrap value", "{cur}/kg"),
     "mhr": ("Machine hour rate of the fin press", "{cur}/h"), "labour_rate": ("Operator labour rate", "{cur}/h"),
     "die_cost": ("Cost of one fin die", "{cur}"), "packs_per_year": ("Fin packs per year", "packs/yr"),
     "programme_years": ("Programme years", "years"),
 }
 FORCE_INPUTS = ("holes_per_stroke", "hole_d", "foil_t", "foil_w", "feed", "die_rows")
-PART_PARAMS = ("fin_spm", "fin_oee_pct", "fin_operators", "fin_stack_s_per_pack", "fin_oil_l_per_kstroke", "fin_die_life_strokes",
+PART_PARAMS = ("fin_spm", "fin_oee_pct", "fin_operators", "fin_stack_s_per_pack", "fin_oil_l_per_ac_set", "fin_die_life_strokes",
                "fin_regrind_strokes", "fin_regrind_pct", "fin_pierce_factor", "rejection_pct", "part_overhead_pct", "packing_pct")
 FORCE_PARAMS = ("fin_pierce_factor", "fin_shear_mpa", "fin_form_force_factor", "press_safety_factor")
 PART_RATES = (("oil_rate", "Fin oil per litre", "process_unit", OIL_ITEM, "{cur}/L"),
@@ -279,8 +301,8 @@ def _example_rate(cat, item, country, value, unit, cur, month, source) -> None:
 def _seed_rates() -> int:
     from .material_grades import _approved, _copy_rates, _has_rate
     n = 0
-    for name, _ in foil_grades():
-        n += _copy_rates("material", FOIL_RATE_REF, name) + _copy_rates("material_scrap", FOIL_RATE_REF, name)
+    for name, _d, _t, ref in all_foils():
+        n += _copy_rates("material", ref, name) + _copy_rates("material_scrap", ref, name)
     for code, ref, *_ in TOOL_STEELS:
         n += _copy_rates("tool_material", ref, code)
     for p in PRESSES:
@@ -299,7 +321,7 @@ def _seed_rates() -> int:
             except rates.RateError:
                 continue
         _example_rate("process_unit", OIL_ITEM, country, value, f"{cur}/L", cur, month,
-                      f"EXAMPLE placeholder (stage 57): fin stock oil ₹{OIL_REF_INR}/L converted by forex - replace with your supplier price")
+                      f"EXAMPLE placeholder (stage 57): YBL fin oil ₹{OIL_REF_INR}/L converted by forex - replace with the YBL price")
         n += 1
     return n
 
@@ -316,12 +338,12 @@ def seed() -> dict:
             out["parameters"] += 1
     mats = {(r["part_type"], r["material"]) for r in md["Materials"]}
     first = True
-    for name, density in foil_grades():
+    for name, density, main, ref in all_foils():
         if (PART_TYPE, name) not in mats:
             row = {k: "" for k in md["Materials"][0]} if md["Materials"] else {}
-            row |= {"part_type": PART_TYPE, "material": name, "material_type": FOIL_TYPE,
-                    "recommended": "yes" if first and not any(r["part_type"] == PART_TYPE for r in md["Materials"]) else "",
-                    "density_g_cm3": density, "notes": FOIL_NOTE.format(ref=FOIL_RATE_REF)}
+            row |= {"part_type": PART_TYPE, "material": name, "material_type": main,
+                    "recommended": "yes" if name in (DEFAULT_MATERIAL, COPPER_FOILS[0][0]) else "",
+                    "density_g_cm3": density, "notes": FOIL_NOTE.format(ref=ref)}
             md["Materials"].append(row)
             out["materials"] += 1
         first = False
@@ -330,11 +352,15 @@ def seed() -> dict:
 
     cs = costing_setup.tables()
     mids = {m["machine_id"] for m in cs["machines"]}
-    for mid, name, ton, kw, bl, bw, floor_m2, notes, *_rest in PRESSES:
-        if mid not in mids:
-            cs["machines"].append({"machine_id": mid, "name": name, "process": PRESS_PROCESS, "power_kw": kw, "load_factor_pct": 60,
-                                   "floor_area_m2": floor_m2, "life_years": 15, "residual_pct": 10, "maintenance_pct": 4,
-                                   "tonnage_t": ton, "length_mm": bl, "width_mm": bw, "is_example": True, "notes": notes})
+    for r in press_rows_seed():
+        if r["machine_id"] not in mids:
+            cs["machines"].append({"machine_id": r["machine_id"], "name": f"Fin press {r['machine_id']} ({r['capacity_kn'] / 10:g} t)",
+                                   "process": PRESS_PROCESS, "power_kw": r["motor_kw"], "load_factor_pct": 60,
+                                   "floor_area_m2": round(r["machine_l_mm"] * r["machine_w_mm"] / 1e6, 1), "life_years": 15,
+                                   "residual_pct": 10, "maintenance_pct": 4, "tonnage_t": r["capacity_kn"] / 10,
+                                   "length_mm": r["table_l_mm"], "width_mm": r["table_w_mm"], "is_example": True,
+                                   "notes": f"Technical data: {r['source']}. Load factor, life, residual, maintenance and the machine "
+                                            "price are EXAMPLE until you enter yours."})
             out["machines"] += 1
     fhave = {(r["scope"], r["name"]) for r in cs["cost_formulas"]}
     for scope, name, label, text, unit, res, desc in FORMULAS:
@@ -372,11 +398,11 @@ def seed() -> dict:
                                        "slit_stations": sl, "wave_stations": wv, "rippled_cutoff": rip, "spm_factor": spf,
                                        "is_example": True, "notes": EXAMPLE})
     have = {r["machine_id"] for r in db["fin_presses"]}
-    for mid, _n, _t, _k, _bl, _bw, _f, _notes, fw, smin, smax, hmin, hmax, od, cid, ex in PRESSES:
-        if mid not in have:
-            db["fin_presses"].append({"machine_id": mid, "max_foil_width_mm": fw, "spm_min": smin, "spm_max": smax,
-                                      "die_height_min_mm": hmin, "die_height_max_mm": hmax, "coil_od_max_mm": od, "coil_id_mm": cid,
-                                      "is_example": ex, "notes": press_note(mid, ex)})
+    for r in press_rows_seed():
+        if r["machine_id"] not in have:
+            db["fin_presses"].append(r | {"is_example": False, "default_press": r["machine_id"] == DEFAULT_PRESS,
+                                          "notes": ("Your machine, the default press" if r["machine_id"] == DEFAULT_PRESS else
+                                                    "Manufacturer's specification table") + (f"; variants: {r['variants']}" if r["variants"] else "")})
     for table, rows in (("sizing_rules", SIZING), ("time_parameters", TIMES)):
         have = {(r["part_type"], r["parameter"]) for r in db[table]}
         for k, v, unit, desc in rows:
@@ -422,6 +448,8 @@ def validate(clean: dict) -> None:
     for i, r in enumerate(clean.get("fin_presses", []), start=2):
         if r["spm_max"] < r["spm_min"] or r["die_height_max_mm"] < r["die_height_min_mm"] or r["max_foil_width_mm"] <= 0:
             raise mould_db.MouldDbError(f"Fin presses row {i}: SPM / die height max must not be below min, foil width more than 0.")
+    if sum(1 for r in clean.get("fin_presses", []) if r.get("default_press")) > 1:
+        raise mould_db.MouldDbError("Fin presses: mark only one press as the default press.")
 
 
 # ---------------------------------------------------------------- the fin spec ----------
@@ -443,6 +471,8 @@ SPEC = {
     "packs_per_year": ("Fin packs per year", "packs/yr", 100000, 1, 1e8),
     "programme_years": ("Programme years", "years", 5, 0.5, 30),
     "tools_count": ("Fin dies over the programme", "dies", 1, 1, 50),
+    "spm": ("Press speed SPM (0 = plain-fin speed × pattern factor)", "strokes/min", 0, 0, 1000),
+    "foil_kg_per_ac_set": ("Foil of one AC set, indoor + outdoor coils (for the oil)", "kg", 5.0, 0.1, 500),
 }
 DEFAULT_MATERIAL = "Al fin foil 8011-H24 hydrophilic coated"
 
@@ -476,6 +506,14 @@ def normalise(spec: dict | None) -> dict:
     s["staggered"] = bool(s.get("staggered", True))
     s["warranty"] = bool(s.get("warranty", True))
     return s
+
+
+def default_press() -> str:
+    """The press marked default in Fin presses, else Parameters fin → default_fin_press."""
+    row = next((r for r in mould_db.tables()["fin_presses"] if r.get("default_press")), None)
+    if row:
+        return row["machine_id"]
+    return str((_parameter_row(PART_TYPE, "default_fin_press") or {}).get("value") or "")
 
 
 def pattern_row(pattern: str) -> dict:
@@ -648,14 +686,22 @@ class _FinDieRun(_Run):
             cands.append((m, ln, why))
         out = {"force_node": force_node, "force_t": force, "process": process, "machine": None, "line": None, "rejected": []}
         chosen = None
-        if self.s["press"]:
-            hit = next(((m, ln, why) for m, ln, why in cands if m["machine_id"] == self.s["press"]), None)
+        want, how = self.s["press"], "your choice (Fin die spec)"
+        if not want:
+            want = default_press()
+            how = "the default fin press (Fin presses → default press, else Parameters fin → default_fin_press)"
+        if want and want != "auto":
+            hit = next(((m, ln, why) for m, ln, why in cands if m["machine_id"] == want), None)
             if not hit:
-                raise ToolCostError(f"Press '{self.s['press']}' is not a fin press (Machines process '{process}' with a Fin presses row).")
+                raise ToolCostError(f"Press '{want}' is not a fin press (Machines process '{process}' with a Fin presses row).")
             chosen = hit
-            how = "your choice (Fin die spec)"
             if hit[2]:
-                self.sized["warnings"].append(f"Your press {hit[0]['machine_id']} does not suit this die: {'; '.join(hit[2])}.")
+                self.sized["warnings"].append(f"Press {hit[0]['machine_id']} does not suit this die: {'; '.join(hit[2])}. "
+                                              "Choose a bigger press or 'smallest that fits'.")
+            spm = self.s.get("spm") or 0
+            if spm and not hit[1]["spm_min"] <= spm <= hit[1]["spm_max"]:
+                self.sized["warnings"].append(f"SPM {spm:g} is outside the {hit[0]['machine_id']} range "
+                                              f"{hit[1]['spm_min']:g}-{hit[1]['spm_max']:g} SPM.")
         else:
             fits = sorted((c for c in cands if not c[2]), key=lambda c: (c[0]["tonnage_t"] or 0, c[1]["max_foil_width_mm"]))
             out["rejected"] = [f"{m['machine_id']}: {'; '.join(why)}" for m, _ln, why in cands if why]
@@ -759,7 +805,8 @@ def part_cost(s: dict, die: dict) -> dict:
         "hole_pitch": ("spec", s["hole_pitch_mm"]), "hole_d": ("spec", s["hole_d_mm"]), "foil_t": ("spec", s["foil_t_mm"]),
         "fin_rows": ("spec", s["fin_rows"]), "fin_holes": ("spec", s["fin_holes"]), "fpi": ("spec", s["fpi"]),
         "pack_length": ("spec", s["pack_length_mm"]), "packs_per_year": ("spec", s["packs_per_year"]),
-        "programme_years": ("spec", s["programme_years"]),
+        "programme_years": ("spec", s["programme_years"]), "spm_typed": ("spec", s["spm"]),
+        "foil_kg_per_ac_set": ("spec", s["foil_kg_per_ac_set"]),
     }
     names = {}
     for inp in (r for r in setup["formula_inputs"] if r["scope"] == PART_SCOPE):
@@ -840,7 +887,7 @@ def options() -> dict:
     md = master_data.tables()
     cs = costing_setup.tables()
     lines = press_rows()
-    return {"spec": SPEC, "default": default_spec(), "patterns": mould_db.tables()["fin_patterns"],
+    return {"spec": SPEC, "default": default_spec(), "default_press": default_press(), "patterns": mould_db.tables()["fin_patterns"],
             "presses": [m | {"line": lines[m["machine_id"]]} for m in cs["machines"] if m["machine_id"] in lines],
             "materials": [r["material"] for r in md["Materials"] if r["part_type"] == PART_TYPE],
             "countries": [{"code": c["code"], "name": c.get("name") or c["code"], "currency": c["currency"]} for c in cs["countries"]]}
@@ -909,7 +956,7 @@ def delete(fid: int) -> None:
 def _spec_rows(s: dict) -> list[list]:
     rows = [["Fin pattern", s["pattern"], ""], ["Foil", s["material"], ""]]
     rows += [[label, s[k], unit] for k, (label, unit, *_r) in SPEC.items()]
-    return rows + [["Country", s["country"] or "default", ""], ["Press", s["press"] or "smallest that fits", ""]]
+    return rows + [["Country", s["country"] or "default", ""], ["Press", {"": "default press", "auto": "smallest that fits"}.get(s["press"], s["press"]), ""]]
 
 
 def to_excel(res: dict, name: str = "Fin die") -> bytes:

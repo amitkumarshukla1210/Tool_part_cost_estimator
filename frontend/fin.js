@@ -10,8 +10,8 @@ async function init() {
   $("fPattern").innerHTML = opts.patterns.map((p) => `<option value="${esc(p.pattern)}">${esc(p.name)}</option>`).join("");
   $("fMaterial").innerHTML = opts.materials.map((m) => `<option>${esc(m)}</option>`).join("");
   $("fCountry").innerHTML = '<option value="">Default country</option>' + opts.countries.map((c) => `<option value="${esc(c.code)}">${esc(c.name)} (${esc(c.currency)})</option>`).join("");
-  $("fPress").innerHTML = '<option value="">Smallest fin press that fits</option>' + opts.presses.map((p) =>
-    `<option value="${esc(p.machine_id)}">${esc(p.machine_id)} · ${esc(p.name)}${p.is_example ? " (EXAMPLE)" : ""}</option>`).join("");
+  $("fPress").innerHTML = `<option value="">Default press (${esc(opts.default_press)})</option><option value="auto">Smallest fin press that fits</option>` +
+    opts.presses.map((p) => `<option value="${esc(p.machine_id)}">${esc(p.machine_id)} · ${fmt(p.line.capacity_kn / 10, 0)} t · foil ≤ ${fmt(p.line.max_foil_width_mm, 0)} mm · ${fmt(p.line.spm_min, 0)}-${fmt(p.line.spm_max, 0)} SPM</option>`).join("");
   $("fNums").innerHTML = Object.entries(opts.spec).map(([k, [label, unit, , lo, hi]]) =>
     `<label>${esc(label)} (${esc(unit)}) <input type="number" step="any" min="${lo}" max="${hi}" name="${k}" id="n_${k}" /></label>`).join("");
   const projects = await api("/api/projects").catch(() => []);
@@ -26,7 +26,7 @@ function fill(rec) {
   $("fProject").value = rec.project_id || "";
   const s = rec.spec;
   $("fPattern").value = s.pattern; $("fMaterial").value = s.material; $("fCountry").value = s.country || ""; $("fPress").value = s.press || "";
-  Object.keys(opts.spec).forEach((k) => { $("n_" + k).value = s[k]; });
+  Object.keys(opts.spec).forEach((k) => { $("n_" + k).value = s[k] ?? opts.default[k]; });   // fields added later: their default
   ["xlsx", "pdf", "delBtn"].forEach((id) => ($(id).hidden = !current));
   if (current) { $("xlsx").href = `/api/fin-dies/${current.id}/export.xlsx`; $("pdf").href = `/api/fin-dies/${current.id}/export.pdf`; }
 }

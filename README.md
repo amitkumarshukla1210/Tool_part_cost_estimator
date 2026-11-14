@@ -1731,16 +1731,28 @@ formula, inputs and rate versions (admin, as everywhere).
 | Fin pack cost (₹) | Cost formulas **fin_part**: foil used = strokes × foil width × feed × t × density; RM = foil × rate − scrap × scrap value; fin oil; press hours = strokes ÷ (SPM × OEE) with SPM = `fin_spm` × pattern speed factor ≤ press SPM max; × (MHR + operators × labour rate); stacking; regrinding (`fin_regrind_pct` of the die every `fin_regrind_strokes`); rejection, overhead, profit, packing; die amortisation over min(die life, programme strokes); logistics |
 | Per fin, per kg | pack cost ÷ fins per pack (pack length ÷ 25.4 × FPI) and ÷ net fin weight |
 
-**Master data added (rows only, EXAMPLE unless said):** Machines *FIN-125A* (YKC-48A-125: 125 t, 22 kW, table 2000 × 1360 mm,
-150-300 SPM, die height 280-330 mm, foil up to 1080 mm, coil Ø150 / Ø1200 - **your data**; life, residual, maintenance and the
-machine price EXAMPLE), *FIN-125SH* (YKC-48SH-125 named in your die spec, **to confirm**, data copied from the 48A), EXAMPLE
-FIN-045 / 063 / 080 / 200; their MHR by the MHR formulas (machine price and consumables = PRESS-200 until you enter yours).
-Mould & die database: *Fin patterns*, *Fin presses*, fin Sizing rules, Process time parameters, Mould bases (fin die sets),
-BOM elements, tool steels HAP40, SKH51, PX-5, SK3 (rates = ASP 23, M2, P20, O1 until you enter yours). Parameters of part type
-fin (try-out, press, OEE, SPM, oil, stacking, edge trim, shear, regrind; die life 200 M and regrind 40 M strokes from your spec).
-Materials: main material *Aluminium fin foil* with 40 sub-grades (1100, 1200, 3102, 8011, 8006 × O / H22 / H24 / H26 × plain /
-hydrophilic coated), RM and scrap rates = Aluminium 1100 sheet in every country until you enter supplier prices (foil premium and
-coating not yet in it); fin stock oil per litre (EXAMPLE ₹180, other countries by forex).
+**Inputs per fin die:** the **machine** (a fin press from the press database; blank = the default press, *smallest that fits* =
+the smallest whose tonnage, foil width and bed take the die), the **SPM** (typed; 0 = `fin_spm` × pattern speed factor ≤ the
+press SPM max; outside the press range = warning), the **RM grade** (fin foil) and the fin geometry (stage 58 reads it from your
+part drawing). Fin oil **YBL**: 1 litre per 4 AC sets (indoor + outdoor), Parameters fin → `fin_oil_l_per_ac_set` = 0.25 L,
+shared by foil kg: oil per pack = foil kg of the pack × 0.25 ÷ foil kg of one AC set (typed, default 5 kg) × the YBL rate.
+
+**Press database (Mould & die database → Fin presses, one row per machine, add as many as you have):** capacity, stroke,
+SPM min / max, die height, slide lift, slide and table size, max foil width, feed (sucking) length, coil ID / OD, motor,
+machine size, stroke / SPM variants, source, *default press* (one). Seeded: **YKC-48SH-125 = your machine specification
+(default press)** and the YKC H-type series from the manufacturer's table (https://www.yadonpress.com/shop/ykc-series-h-type-fin-press-line):
+YKC-18-45, 24-63, 24A-63, 36-80, 36A-100, 48A-125, 48H-125, 60A-160, 160, 200. Each press is also a Machines row (tonnage,
+motor kW, table = bed, floor = machine L × W) so its MHR comes from the MHR formulas; load factor, life, residual,
+maintenance and the machine price (= PRESS-200) are EXAMPLE until you enter yours.
+
+**Other master data added (rows only, EXAMPLE unless said):** Mould & die database: *Fin patterns*, fin Sizing rules,
+Process time parameters, Mould bases (fin die sets), BOM elements, tool steels HAP40, SKH51, PX-5, SK3 (rates = ASP 23, M2,
+P20, O1 until you enter yours). Parameters of part type fin (try-out, OEE, SPM, stacking, edge trim, shear, regrind, default
+press; die life 200 M and regrind 40 M strokes from your die spec; oil 1 L per 4 AC sets from your experience). Materials:
+main material *Aluminium fin foil* with 132 sub-grades (1050, 1100, 1145, 1200, 3003, 3005, 3102, 7072, 8006, 8011, 8079 ×
+O / H22 / H24 / H26 × plain / hydrophilic coated / epoxy coated) and *Copper fin foil* (C1100-O, C1100-H, C1220-O); RM and
+scrap rates = Aluminium 1100 sheet / Copper in every country until you enter supplier prices (foil premium and coating not yet
+in it); *Fin oil YBL (per litre)* EXAMPLE ₹180, other countries by forex, until you enter the YBL price.
 
 **24-month history:** the new rates get their history like every rate (stage 54: foil by the aluminium index × forex, tool steels
 by the steel index, machine prices flat, all marked *Indicative history*). On your PC, rates that reach you with an update after

@@ -155,7 +155,7 @@ def test_bad_setup_is_rejected(change, message):
 def test_api_overview_and_errors():
     r = client.get("/api/mhr", params={"country": "IN", "as_of": MONTH})
     body = r.json()
-    assert r.status_code == 200 and len(body["machines"]) == 60 and len(body["labour"]) == 4
+    assert r.status_code == 200 and len(body["machines"]) == 65 and len(body["labour"]) == 4
     assert all("error" not in m for m in body["machines"])
     # a month with no approved rates still renders, with the reason per row
     old = client.get("/api/mhr", params={"country": "IN", "as_of": "2020-01"}).json()
@@ -182,7 +182,7 @@ def test_api_save_and_approve_and_edit_draft():
 def test_excel_export_and_import_as_drafts():
     xlsx = client.get("/api/rates/download")
     ws = load_workbook(io.BytesIO(xlsx.content))["Rates"]
-    assert ws.max_row - 1 == len([1 for _ in rates.history("forex", "USD")]) + 591 + 748 + 36 + 97 + 126 + 256 + 9 + 378 + 162 + 143 + 918 + 1485 + 873   # 873 = stage 57 fin foil RM / scrap, fin die tool steels, fin press price / consumables and fin oil in every country; 1485 = EXAMPLE prices of the stage 54 grades; 918 = EXAMPLE prices of the stage 53 grades (RM, scrap, tool steel) in every country; 143 = bar, chips and fixture rates in 9 countries + duty of HS 8487 / 8466 (stage 37); 162 = new EXAMPLE grades in every country (stage 29); 378 = 21 large machines × 18 price / consumable rates (stage 28); 9 = EN8 plate steel in every country (stage 25); 256 = EPS and stretch blow materials, machines, tool aluminium, steam and duty rates (stages 18, 19); 126 = new machine prices, consumables, wire conversion, bare-board rates (stage 15); 97 = freight, duty, import rates (stage 11); 748 = country material/tool-steel/process rates seeded in stage 3; 36 = toolmaker terms (stage 4)
+    assert ws.max_row - 1 == len([1 for _ in rates.history("forex", "USD")]) + 591 + 748 + 36 + 97 + 126 + 256 + 9 + 378 + 162 + 143 + 918 + 1485 + 2673   # 2673 = stage 57: 135 fin foils RM + scrap (2430), 4 fin die tool steels (36), 11 YKC fin presses price + consumables (198), YBL fin oil (9) in 9 countries; 1485 = EXAMPLE prices of the stage 54 grades; 918 = EXAMPLE prices of the stage 53 grades (RM, scrap, tool steel) in every country; 143 = bar, chips and fixture rates in 9 countries + duty of HS 8487 / 8466 (stage 37); 162 = new EXAMPLE grades in every country (stage 29); 378 = 21 large machines × 18 price / consumable rates (stage 28); 9 = EN8 plate steel in every country (stage 25); 256 = EPS and stretch blow materials, machines, tool aluminium, steam and duty rates (stages 18, 19); 126 = new machine prices, consumables, wire conversion, bare-board rates (stage 15); 97 = freight, duty, import rates (stage 11); 748 = country material/tool-steel/process rates seeded in stage 3; 36 = toolmaker terms (stage 4)
     new = io.BytesIO()
     from openpyxl import Workbook
     wb = Workbook()
