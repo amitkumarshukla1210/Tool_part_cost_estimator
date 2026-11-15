@@ -9,11 +9,11 @@ Project: **Design to Cost — Part Cost Estimator**, repository `amitkumarshukla
 I am Amit, Head of Operations / costing at an OEM (supply chain, production, strategic sourcing, projects; RM, part and tool cost,
 BOM cost and CAPEX, EBITDA, digital transformation). Answer simply, **INR first**.
 
-**State (14 Nov 2026):** stages 1–62 are built (57-62 = heat-exchanger fin dies: cost PR 83, design PR 84, FEA PR 85, fin parts in Parts PR 86, fin simulation PR 87, oil & air system), plus the audit fixes PR 78 (FEA iterative solver, `fea_max_elements`), PR 80 (FEA `fea_mesh_per_circle`, core insert pins) and PR 81 (plastic cooling rod or plate, coring saving) (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
+**State (15 Nov 2026):** stages 1–64 are built (63 = search on long dropdowns, 64 = fin parts in the country comparison and landed cost, both PR 90; PR 89 = foil width follows typed die rows + fin cases in the audit) (57-62 = heat-exchanger fin dies: cost PR 83, design PR 84, FEA PR 85, fin parts in Parts PR 86, fin simulation PR 87, oil & air system), plus the audit fixes PR 78 (FEA iterative solver, `fea_max_elements`), PR 80 (FEA `fea_mesh_per_circle`, core insert pins) and PR 81 (plastic cooling rod or plate, coring saving) (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
 cycle, PR 53; 43 = toolmaker review, 44 = design skills, both PR 55; 45 = tool internals, production data, FEA, 3D outputs, PR 57; fixes PR 59, 61, 62;
 46 = cavities, gate, overflow, ejection, cooling of the mould, PR 64; 47 = saved files with revisions, 48 = India vs China per cost line,
 49 = scrap reuse and scrap rate % of RM, all PR 66; 50 = several countries per part, traces for admin, tool life per part,
-suppliers removed, PR 68; 51 = country rate book, PR 70; 52 = monthly automatic country rates, PR 71; 53 = unique codes, live Price master link, main / sub materials, more grades, PR 72; 54 = 24-month history for every rate + more grades, PR 73; 55 = cost change report of a project (`cost_changes.py`), PR 75; 56 = its Excel and PDF; 57 = fin dies, PR 83); the next stage is **63** (57-62 = fin dies: cost PR 83, design PR 84, FEA PR 85, fin parts in Parts PR 86, fin simulation PR 87, oil & air system). Everything of the old V4 branch is now on main (written new);
+suppliers removed, PR 68; 51 = country rate book, PR 70; 52 = monthly automatic country rates, PR 71; 53 = unique codes, live Price master link, main / sub materials, more grades, PR 72; 54 = 24-month history for every rate + more grades, PR 73; 55 = cost change report of a project (`cost_changes.py`), PR 75; 56 = its Excel and PDF; 57 = fin dies, PR 83); the next stage is **65** (57-62 = fin dies: cost PR 83, design PR 84, FEA PR 85, fin parts in Parts PR 86, fin simulation PR 87, oil & air system). Everything of the old V4 branch is now on main (written new);
 the 4 old unmerged branches are NOT to be merged; neither is `rate-update-2026-11` (draft rates on an old main) as it is.
 To save tokens, do not read the whole README (1650+ lines): read the stage table in `ROADMAP.md` and only the README section of the topic I ask about.
 Stack: Python / FastAPI (`backend/app/`), plain HTML / JS (`frontend/`), SQLite (`data/projects.sqlite` = my data, `master_data/costing_db.sqlite`
@@ -159,6 +159,14 @@ What the later stages added (details in README):
   pipe_m), BOM elements (nozzles, manifolds, piping, valves, timer, couplers, tank, fitting) replacing the lump sum (retired only while
   shipped text), 3D nozzles / manifolds, strip O / A marks, schematic FD-…-OA (PDF + DXF), PO pack item 11, fin simulation checks
   (air use, mist oil per pack).
+- 63 (PR 90): `frontend/select-search.js` on every logged-in page: a <select> with ≥ 12 choices opens a list with a search
+  box (any word, value / code or group heading; arrows / Enter / click / Esc); the select keeps the value and fires change,
+  position fixed, opens inside an open <dialog>, follows table scroll. Part panel grade hint: 3 grades + "+ N more · choose".
+  Browser test via node Playwright (`tests/js/select_search_check.js`, run by `tests/test_select_search.py`).
+- 64 (PR 90): fin in landed cost / country comparison: HS codes fin pack 7616, fin die 8207 (`fin_part.seed_hs`, EXAMPLE);
+  `fin_part.piece` gives `is_example` and `_tool_trace` (country run); Al fin foil → aluminium index, Cu fin foil → copper
+  (`GRADE_INDEX` / `family_of`); `price_history`: a month with only a flat history copy (FLAT source) gets an indexed version
+  on top (append-only), `flat_indexable(series)`, run by `fill_new` at app start. Full suite 562 passed, 1 skipped (~40 min).
 - To open a STEP: his CAD, eDrawings Viewer (SOLIDWORKS free downloads; not "3DEXPERIENCE Exchange", that is a SOLIDWORKS add-in),
   CAD Assistant, FreeCAD, or the app's own 3D viewer. Windows 3D Viewer opens the STL, not STEP.
 - Amit's PC: kit at `D:\Project\DTC Tool and mould`, app on port 8100, CalculiX 2.22 `ccx_static.exe` in
