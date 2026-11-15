@@ -1773,6 +1773,10 @@ counts the rates still without it.
 | DXF (2D fin) | circles and outline: the same except thickness, FPI and pattern (you type them) |
 | PDF | the drawing's text (vector PDF): collar Ø, tube Ø, pitches, thickness, FPI, pattern, "Ø5 × 66R"; every value is marked to check. A scanned PDF has no text: type the values. DWG: save it as DXF |
 
+Tested on your real Creo fin OU220ALALF010_16P (louver, one row, 35 collars Ø5.2 at 16 mm, 560 × 12.7 mm, 0.095 mm): the foil
+thickness is the distance between the two largest flat faces (not the collar circles: real collars have fillets and a flare), only the
+groups with the collar Ø count as holes (not round edge notches), the fin pitch is from the plate to the collar tip (louvers raised on
+the other side are measured apart, `louver_h_mm`), and a one-row fin gets its width as the row pitch. FPI is always marked to confirm.
 The tube Ø is the largest standard tube that fits the collar (to confirm). The values fill the form, the ones to check are marked ⚠;
 nothing is used until you save. **Die size proposed from the press** (you can change it): rows across the strip = press foil width ×
 `fin_foil_use_pct` (EXAMPLE 80 %) − 2 × edge trim, ÷ row pitch, in whole fins; progressions by tube Ø (`fin_prog_small` 4 up to

@@ -41,7 +41,7 @@ def test_read_step(fin_step):
         ("STEP", 5.2, 5.0, 12.7, 16.0, 2, 24)
     assert r["staggered"] and r["holes"] == 48 and r["foil_t_mm"] == 0.095 and r["fpi"] == 21.0
     assert (r["fin_l_mm"], r["fin_w_mm"]) == (384.0, 25.4)
-    assert set(r["check"]) == {"tube_od_mm", "pattern"}           # the tube and the pattern are proposals to confirm
+    assert set(r["check"]) == {"tube_od_mm", "pattern", "fpi"}    # the tube, the pattern and the FPI are proposals to confirm
 
 
 def test_read_step_other_fin():
@@ -149,3 +149,32 @@ def test_api_read_save_design_and_files(fin_step):
     pdf = client.get(f"/api/fin-dies/{rec['id']}/design/po-pack.pdf")
     assert pdf.headers["content-disposition"] == 'attachment; filename="Fin_from_STEP_PO_pack.pdf"'
     assert client.get(f"/api/fin-dies/{rec['id']}/design/nothing").status_code == 404
+
+
+def _real_like_fin(n=12, d=5.2, t=0.095, pitch=16.0, width=12.7, collar=1.305):
+    """A one-row louver fin with the features of your Creo fin OU220ALALF010_16P: collars below the plate, a Ø9 fillet ring around
+    every collar, tilted louvers raised 0.35 mm above it, and a round notch at one end (not a hole)."""
+    import cadquery as cq
+    L = n * pitch
+    pts = [(pitch / 2 + i * pitch, width / 2) for i in range(n)]
+    plate = cq.Workplane("XY").box(L, width, t, centered=False)
+    rings = cq.Workplane("XY").pushPoints(pts).circle(d / 2 + t).circle(d / 2).extrude(-collar)
+    body = plate.union(rings)
+    body = body.faces(">Z").workplane(origin=(0, 0, t)).pushPoints(pts).hole(d)
+    body = body.cut(cq.Workplane("XY").pushPoints(pts).circle(4.5).circle(d / 2).extrude(0.03).translate((0, 0, t - 0.03)))   # fillet ring Ø9
+    for i in range(n - 1):                                    # louvers between the collars, tilted 20°
+        blade = cq.Workplane("XY").box(2.0, width * 0.6, t).rotate((0, 0, 0), (0, 1, 0), 20).translate((pitch * (i + 1), width / 2, t + 0.2))
+        body = body.union(blade)
+    body = body.cut(cq.Workplane("XY").pushPoints([(1.2, 1.2)]).circle(0.75).extrude(1).translate((0, 0, -0.5)))     # an end notch
+    from backend.app.tool_design import step_bytes
+    return step_bytes(body.val())
+
+
+def test_read_real_like_louver_fin():
+    """Regression of your real fin: thickness from the plate faces (not the Ø9 fillet), holes = only the Ø5.2 collars (not the
+    notch), fin pitch from the plate to the collar tip (not the louvers), one row → row pitch = fin width, louver hint."""
+    r = fin_design.read_part(_real_like_fin(), "ou_like.stp")
+    assert r["foil_t_mm"] == pytest.approx(0.095, abs=1e-4) and r["hole_d_mm"] == 5.2 and r["tube_od_mm"] == 5.0
+    assert (r["holes"], r["fin_rows"], r["fin_holes"], r["hole_pitch_mm"], r["row_pitch_mm"]) == (12, 1, 12, 16.0, 12.7)
+    assert r["collar_h_mm"] == pytest.approx(1.305 + 0.095, abs=1e-3) and r["fpi"] == pytest.approx(25.4 / 1.4, abs=0.1)
+    assert r["louver_h_mm"] > 0.2 and r["pattern"] == "louver" and "fpi" in r["check"]

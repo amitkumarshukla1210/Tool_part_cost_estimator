@@ -119,13 +119,24 @@ def _group(circles: list[tuple[float, float, float]]) -> tuple[dict, list[tuple[
 
 
 def read_step(path: str) -> dict:
+    """Fin geometry from a STEP (tested on your Creo model OU220ALALF010_16P: louvers, collar fillets, reflare).
+
+    plate     the thinnest direction is the plate normal; foil thickness = the distance between the two largest flat faces
+              across it (not the collar circles: a real collar has fillets and a flare of other diameters)
+    holes     round faces running across the plate, grouped by centre; collar Ø = the smallest diameter of a group
+    collar    the side of the plate the collars stand on (where the collar Ø faces are); fin pitch = from the far plate face to
+              the collar tip (the next fin rests on the collar); louvers / lances raised on the other side are measured apart
+    pattern   tilted flat faces = louver / slit hint (to confirm)
+    """
     import cadquery as cq
     shape = cq.importers.importStep(path).val()
     bb = shape.BoundingBox()
     dims = {"x": bb.xlen, "y": bb.ylen, "z": bb.zlen}
     normal = min(dims, key=dims.get)                       # the fin plate lies across its thinnest direction
     axes = [a for a in "xyz" if a != normal]
-    cyl = []
+    lo, hi = {"x": (bb.xmin, bb.xmax), "y": (bb.ymin, bb.ymax), "z": (bb.zmin, bb.zmax)}[normal]
+    comp = lambda v: {"x": v.x, "y": v.y, "z": v.z}[normal]
+    cyl, flat = [], Counter()
     tilted = 0
     for f in shape.Faces():
         gt = f.geomType()
@@ -135,30 +146,48 @@ def read_step(path: str) -> dict:
             d = {"x": abs(ax.X()), "y": abs(ax.Y()), "z": abs(ax.Z())}
             if d[normal] > 0.95:                            # holes and collars run across the plate
                 p = {"x": loc.X(), "y": loc.Y(), "z": loc.Z()}
-                cyl.append((p[axes[0]], p[axes[1]], 2 * s.Radius()))
+                fb = f.BoundingBox()
+                mid = {"x": (fb.xmin + fb.xmax) / 2, "y": (fb.ymin + fb.ymax) / 2, "z": (fb.zmin + fb.zmax) / 2}[normal]
+                cyl.append((p[axes[0]], p[axes[1]], 2 * s.Radius(), mid))
         elif gt == "PLANE":
             n = f.normalAt()
-            c = abs({"x": n.x, "y": n.y, "z": n.z}[normal])
-            if 0.2 < c < 0.97:                              # tilted faces: louvers, lances, waves
+            c = abs(comp(n))
+            if c > 0.99:                                    # faces of the plate (and of raised features) across the normal
+                flat[round(comp(f.Center()), 4)] += f.Area()
+            elif 0.2 < c < 0.97:                            # tilted faces: louvers, lances, waves
                 tilted += 1
     if not cyl:
         raise ReadError("No round holes across the fin plate were found in this STEP file: is it a fin? Type the values.")
-    by_centre, exact = _group(cyl)
-    diam = sorted({round(min(ds), 3) for ds in by_centre.values()})
-    hole_d = Counter(round(min(ds), 2) for ds in by_centre.values()).most_common(1)[0][0]
-    outer = [max(ds) for ds in by_centre.values() if max(ds) - min(ds) > 1e-3]
-    wall = (Counter(round((max(ds) - min(ds)) / 2, 3) for ds in by_centre.values() if max(ds) - min(ds) > 1e-3).most_common(1)[0][0]
-            if outer else None)
+    by_all, exact_all = _group([c[:3] for c in cyl])
+    diam = sorted({round(min(ds), 3) for ds in by_all.values()})
+    hole_d = Counter(round(min(ds), 2) for ds in by_all.values()).most_common(1)[0][0]
+    # only the groups that have the collar Ø are holes (a real model also has round edge features, fillets, notches)
+    keep = [i for i, ds in enumerate(by_all.values()) if abs(min(ds) - hole_d) < 0.02]
+    by_centre = {k: v for i, (k, v) in enumerate(by_all.items()) if i in keep}
+    exact = [exact_all[i] for i in keep]
     grid = _from_centres(exact, hole_d)
     long_side, short_side = sorted((dims[axes[0]], dims[axes[1]]), reverse=True)
-    t = wall if wall else dims[normal]
-    collar_h = dims[normal] if wall else None
+    if grid["fin_rows"] == 1 and not grid["row_pitch_mm"]:
+        grid["row_pitch_mm"] = round(short_side, 3)        # one row of holes: the fin width is the row pitch
+    plate = sorted(flat.items(), key=lambda kv: -kv[1])[:2]
+    t = collar_h = louver_h = None
+    if len(plate) == 2:
+        p_lo, p_hi = sorted(pos for pos, _a in plate)
+        t = p_hi - p_lo
+        holes_mid = [c[3] for c in cyl if abs(c[2] - hole_d) < 0.02]
+        side = (sum(holes_mid) / len(holes_mid)) - (p_lo + p_hi) / 2 if holes_mid else 0.0
+        if side < 0:                                        # collars stand below the plate
+            collar_h, louver_h = p_hi - lo, hi - p_hi
+        elif side > 0:
+            collar_h, louver_h = hi - p_lo, p_lo - lo
+    if not t or t <= 0:
+        t = dims[normal]
     out = {"source": "STEP", "hole_d_mm": round(hole_d, 3), "tube_od_mm": None, "foil_t_mm": round(t, 4),
            "fin_l_mm": round(long_side, 2), "fin_w_mm": round(short_side, 2), "holes": len(by_centre), **grid,
-           "collar_h_mm": round(collar_h, 3) if collar_h else None,
+           "collar_h_mm": round(collar_h, 3) if collar_h else None, "louver_h_mm": round(louver_h, 3) if louver_h else None,
            "fpi": round(25.4 / collar_h, 1) if collar_h else None,
            "pattern": "louver" if tilted >= 4 else "plain", "pattern_faces": tilted, "diameters": diam[:6],
-           "check": ["tube_od_mm", "pattern"] + ([] if collar_h else ["fpi"]) + ([] if wall else ["foil_t_mm"])}
+           "check": ["tube_od_mm", "pattern", "fpi"]}
     return out
 
 
