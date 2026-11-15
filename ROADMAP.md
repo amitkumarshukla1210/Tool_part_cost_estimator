@@ -171,6 +171,7 @@ Storage
 | ✅ 60 | **Fin parts in Parts:** process *Fin press (heat exchanger fin pack)*, part = one fin pack from the fin STEP; RM, fin die tool cost, fin pack part cost as stored versions; Fin die box on the part panel (fin inputs, design files, FEA); BOM / dashboard / CAPEX / countries / tool group like every part; Fin dies tab removed, saved fin dies moved to a project | `fin_part.py` |
 | ✅ 61 | **Fin simulation:** collar forming checks (edge strain, draw step, collar height) and press checks (force, SPM, feed, foil width); collar forming FEA (CalculiX, nonlinear axisymmetric, elastic-plastic foil: plastic strain, wall thinning); strip progression pictures + video; report PDF; saved as a simulation run | `fin_sim.py` |
 | ✅ 62 | **Oil & air system of the fin die:** mist oil nozzles (draw, ironing, pierce, edge trim) and air blow nozzles (pierce, edge trim) from Sizing rules; manifolds, piping, solenoid valves, stroke timer, quick couplers, oil tank as BOM lines (replace the lump sum); 3D die, strip layout marks, schematic drawing (PDF, DXF), PO pack spec; air use and mist oil checks in the fin simulation | `fin_oil.py` |
+| ✅ 63 | **Search on long dropdowns:** every dropdown with 12 or more choices, on every page, opens a list with a search box (any word, code or group heading; arrows / Enter / click / Esc); the dropdown keeps the value, so no cost changes | `frontend/select-search.js`, `tests/test_select_search.py` |
 
 Stages are built in this order unless you change it. Each stage starts with questions on its key decisions.
 

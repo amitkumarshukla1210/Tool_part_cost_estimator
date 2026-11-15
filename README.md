@@ -1881,6 +1881,23 @@ still the shipped row (a price you typed there stays). Your IFB die: 36 mist noz
 **Fin simulation checks:** air use = air nozzles × `fin_air_nl_per_pulse` × SPM ≤ `fin_air_supply_nl_min`; mist oil per pack = oil
 nozzles × `fin_oil_ml_per_pulse` × strokes per pack ≤ the oil per pack of the part cost (1 L per 4 AC sets).
 
+## Search on long dropdowns (stage 63)
+
+Every dropdown with **12 or more choices** (material grades: ~300 on the Import page, processes, machines, presses, countries,
+master-data pickers) opens a list with a **search box** on every page. Short lists stay the normal browser list.
+
+| You do | What happens |
+|---|---|
+| Click the dropdown (or Tab to it and press Enter / Space / Alt+↓) | List opens with the cursor in *Search…*, the current choice highlighted, "304 choices" |
+| Type words, e.g. `gf30`, `alum a380`, a code (`M-108`) or a group (`insert`) | Only lines that hold **every** word (name, value / code or group heading; case does not matter) stay; "5 of 304" |
+| ↑ ↓, Page ↑ ↓, Enter or click | Picks the line; the page reacts as before (process suggestion, costs) |
+| Esc or click outside | Closes; the value stays as it was |
+
+Only the screen changed: the dropdown itself keeps the value, so no cost, rate or stored version changes (₹0 effect).
+Multi-select lists (*Also cost in*) are not changed. File: `frontend/select-search.js` (style in `style.css`, `.ss-*`).
+Test: `tests/test_select_search.py` (every page loads it; browser check in Chromium: search by word, code, group, inside a
+scrolling table and a modal dialog).
+
 ## User guide
 
 **Help → User guide (PDF)** (`frontend/docs/DTC_User_Guide.pdf`): every page of the tool (dashboard, cost changes, import, parts and the
