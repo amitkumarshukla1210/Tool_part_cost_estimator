@@ -343,6 +343,74 @@ def run_case(a: Audit, name, file, material, process, volume, ptype) -> dict:
     return out
 
 
+FIN_CASES = [  # stage 57-62: fin packs (name, fin spec of the generated fin STEP, fin foil, packs per year, typed fin inputs)
+    ("fin_louver", {}, "Al fin foil 8011-H24 hydrophilic coated", 100000, {"pattern": "louver", "pack_length_mm": 700}),
+    ("fin_one_row_high", {"fin_rows": 1, "fin_holes": 35, "fpi": 18}, "Al fin foil 8011-H26 plain", 1000000, {"pattern": "louver", "die_rows": 66}),
+    ("fin_7mm_plain", {"tube_od_mm": 7, "hole_d_mm": 7.3, "row_pitch_mm": 18.19, "hole_pitch_mm": 21, "fin_rows": 2, "fin_holes": 16, "fpi": 16},
+     "Al fin foil 1100-H24 plain", 20000, {"press": "auto"}),
+]
+
+
+def run_fin_case(a: Audit, name, spec, material, volume, typed) -> dict:
+    """A fin part end to end, as a user would go: upload the fin STEP, register it with the fin process, RM / tool / part cost, fin
+    inputs, the fin die design files, FEA, fin simulation (with video), country views and the project dashboard."""
+    from backend.app import fin_design, sim_jobs
+    c = a.c
+    proj = c.post("/api/projects", json={"code": name.upper().replace("_", "-")[:18], "name": f"Audit {name}"}).json()
+    m = a.call(name, "post", "/api/import/step", files={"file": (f"{name}.step", fin_design.fin_step(spec))})
+    if not m:
+        return {"case": name, "ok": False}
+    code = f"{name.upper().replace('_', '-')[:14]}-1"
+    r = a.call(name, "post", f"/api/import/{m['token']}/commit",
+               json={"project_id": proj["id"], "items": {m["root"]: {"material": material, "process": "fin_press", "part_code": code}}})
+    if not r:
+        return {"case": name, "ok": False}
+    pid = r["part_ids"][0]
+    P = f"/api/parts/{pid}"
+    a.call(name, "put", P, json={"annual_volume": volume, "programme_life_years": 5})
+    a.call(name, "get", f"{P}/fin")
+    a.call(name, "put", f"{P}/fin", json=typed)
+    a.call(name, "post", f"{P}/rm-cost", json={})
+    a.call(name, "post", f"{P}/tool-cost", json={})
+    a.call(name, "post", f"{P}/piece-cost", json={})
+    for t in ("rm-cost/trace", "tool-cost/trace", "piece-cost/trace", "tool-cost/export.xlsx", "tool-cost/export.pdf"):
+        kind = t.rsplit(".", 1)[-1] if "." in t else None
+        a.call(name, "get", f"{P}/{t}", file_kind=kind)
+    d = a.call(name, "get", P) or {}
+    for k in ("rm_cost_inr", "tool_cost_inr", "piece_cost_inr"):
+        _positive(a, name, k, d.get(k))
+    des = a.call(name, "get", f"{P}/fin-design") or {}
+    from backend.app.main import FIN_FILES
+    for kind, (_fn, _media, end) in FIN_FILES.items():
+        ext = end.rsplit(".", 1)[-1]
+        a.call(name, "get", f"{P}/fin-design/{kind}", file_kind=ext if ext in ("pdf", "xlsx", "dxf", "step", "zip") else None)
+    job = a.call(name, "post", f"{P}/fin-fea")
+    if job:
+        j = sim_jobs.wait(job["id"], 1200)
+        if not j or j["status"] != "done":
+            a._find(name, f"{P}/fin-fea", "FEA job did not finish", str((j or {}).get("error"))[:300])
+    fea = a.call(name, "get", f"{P}/fin-fea") or {}
+    for r_ in fea.get("runs", []):
+        if r_["kind"] == "plate":
+            a.call(name, "get", f"{P}/fin-fea/{r_['id']}.png", file_kind="png")
+    job = a.call(name, "post", f"{P}/fin-sim")
+    if job:
+        j = sim_jobs.wait(job["id"], 900)
+        if not j or j["status"] != "done":
+            a._find(name, f"{P}/fin-sim", "fin simulation did not finish", str((j or {}).get("error"))[:300])
+    sim = a.call(name, "get", f"{P}/fin-sim") or {}
+    for r_ in sim.get("runs", [])[:1]:
+        a.call(name, "get", f"{P}/sim-runs/{r_['id']}/pdf", file_kind="pdf")
+        a.call(name, "get", f"{P}/sim-runs/{r_['id']}/video", file_kind="mp4")
+    a.call(name, "get", f"{P}/vs-country")
+    a.call(name, "get", f"{P}/country-comparison")
+    a.call(name, "get", f"/api/projects/{proj['id']}/dashboard")
+    a.call(name, "get", f"/api/projects/{proj['id']}/dashboard.pdf", file_kind="pdf")
+    return {"case": name, "part_id": pid, "ok": True, "rm_inr": d.get("rm_cost_inr"), "tool_inr": d.get("tool_cost_inr"),
+            "piece_inr": d.get("piece_cost_inr"), "stations": len(des.get("stations", [])), "fea_ok": fea.get("ok"),
+            "sim_ok": sim.get("ok")}
+
+
 def logins(a: Audit) -> None:
     """Roles and tool groups with logins on (stages 22 and 30)."""
     from fastapi.testclient import TestClient
@@ -481,6 +549,18 @@ def main(argv=None) -> int:
         print(f"== {case[0]}", flush=True)
         try:
             results.append(run_case(a, *case))
+        except Exception:                                       # noqa: BLE001
+            a._find(case[0], "(script)", "audit step crashed", traceback.format_exc().strip().splitlines()[-1])
+            results.append({"case": case[0]})
+        for x in a.findings:
+            if x["case"] == case[0]:
+                print(f"   FINDING {x['url']}: {x['what']} {x['detail'][:200]}", flush=True)
+    for case in ([] if args.robust else FIN_CASES):
+        if args.only and args.only not in case[0]:
+            continue
+        print(f"== {case[0]}", flush=True)
+        try:
+            results.append(run_fin_case(a, *case))
         except Exception:                                       # noqa: BLE001
             a._find(case[0], "(script)", "audit step crashed", traceback.format_exc().strip().splitlines()[-1])
             results.append({"case": case[0]})

@@ -59,6 +59,10 @@ def test_fin_inputs_recalculate():
     assert r.status_code == 200 and r.json()["spec"]["pattern"] == "louver" and r.json()["typed"]["spm"] == 260
     d = client.get(f"/api/parts/{pid}").json()
     assert d["tool_cost_inr"] > plain and d["fin_inputs"]["pack_length_mm"] == 650   # louver die costs more; recalculated at once
+    rows66 = client.put(f"/api/parts/{pid}/fin", json={"die_rows": 66}).json()["spec"]           # typed rows: the width follows them
+    assert rows66["die_rows"] == 66 and rows66["foil_width_mm"] == 0                               # 0 = rows × row pitch + 2 × edge trim
+    tool = client.get(f"/api/parts/{pid}/tool-cost/trace").json()
+    assert tool["die"]["foil_width_mm"] == pytest.approx(66 * 12.7 + 2 * 5)
     assert client.put(f"/api/parts/{pid}/fin", json={"pattern": "pin"}).status_code == 400
     assert client.put(f"/api/parts/{pid}/fin", json={"fin_rows": 99}).status_code == 400
 

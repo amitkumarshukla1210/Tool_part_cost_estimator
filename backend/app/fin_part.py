@@ -101,7 +101,10 @@ def spec_for(part_id: int, country: str | None = None) -> dict:
             if not typed.get(k):
                 spec[k] = proposal[k]
         if not typed.get("foil_width_mm"):
-            spec["foil_width_mm"] = proposal["foil_width_mm"]
+            # the proposal's width only with the proposal's rows; rows you typed: width = rows × row pitch + 2 × edge trim (0)
+            spec["foil_width_mm"] = proposal["foil_width_mm"] if not typed.get("die_rows") else 0
+    elif not typed.get("foil_width_mm"):
+        spec["foil_width_mm"] = 0
     s = fin_die.normalise(spec)
     s["as_of"] = spec.get("as_of")
     return {"spec": s, "read": src, "typed": typed, "proposal": proposal, "volume_note": volume_note, "part": d, "rev": rev}
