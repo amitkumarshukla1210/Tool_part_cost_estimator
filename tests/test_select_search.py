@@ -32,3 +32,11 @@ def test_search_in_a_browser():
         pytest.skip("playwright for node not installed")
     r = subprocess.run([node, str(ROOT / "tests" / "js" / "select_search_check.js")], capture_output=True, text=True, timeout=120)
     assert r.returncode == 0 and "OK" in r.stdout, r.stdout + r.stderr
+
+
+def test_other_grades_hint_is_short():
+    """The part panel names at most 3 other grades of the type (fin foil has 131), the rest as a count + 'choose'."""
+    js = (FRONT / "parts.js").read_text(encoding="utf-8")
+    assert "r.grades.filter((g) => g !== r.material).map(esc).join" not in js
+    assert "others.slice(0, 3)" in js and 'id="chooseOtherGrade"' in js
+    assert "DTCSelectSearch.open(sel)" in js

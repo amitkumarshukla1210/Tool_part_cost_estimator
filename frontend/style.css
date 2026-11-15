@@ -160,3 +160,4 @@ tr.tf-hidden { display: none; }
 .ss-item.active { background: var(--brand, #1f5aa6); color: #fff; }
 .ss-item.disabled { color: var(--grey, #999); cursor: default; }
 .ss-empty { padding: 6px 10px; color: var(--grey, #777); font-style: italic; }
+.btn-link { background: none; border: 0; padding: 0; color: var(--brand, #1f5aa6); text-decoration: underline; cursor: pointer; font: inherit; }

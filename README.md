@@ -1894,7 +1894,9 @@ master-data pickers) opens a list with a **search box** on every page. Short lis
 | Esc or click outside | Closes; the value stays as it was |
 
 Only the screen changed: the dropdown itself keeps the value, so no cost, rate or stored version changes (₹0 effect).
-Multi-select lists (*Also cost in*) are not changed. File: `frontend/select-search.js` (style in `style.css`, `.ss-*`).
+Multi-select lists (*Also cost in*) are not changed.
+Part panel: the recommended-grade hint names at most 3 other grades of the type and counts the rest (fin foil: "+ 128 more");
+*choose* opens the searchable Sub material list. File: `frontend/select-search.js` (style in `style.css`, `.ss-*`).
 Test: `tests/test_select_search.py` (every page loads it; browser check in Chromium: search by word, code, group, inside a
 scrolling table and a modal dialog).
 
