@@ -160,6 +160,16 @@ function weightRows() {
 
 // Material choices: estimator materials, then bought-out insert materials.
 // The recommended grade of the material's type (Master data → Materials); the material stays your choice.
+// Other grades of the type: up to 3 named, the rest as a count; "choose" opens the searchable Sub material list.
+function otherGrades(r) {
+  const others = r.grades.filter((g) => g !== r.material);
+  if (!others.length) return "";
+  const named = others.slice(0, 3).map(esc).join(", ");
+  const more = others.length > 3 ? ` + ${others.length - 3} more` : "";
+  return `(${others.length} other grade${others.length > 1 ? "s" : ""} of this type: ${named}${more}
+    <button type="button" class="btn-link" id="chooseOtherGrade">choose</button>)`;
+}
+
 function materialHint(p) {
   const r = p.material_recommendation;
   if (!r) return "";
@@ -167,7 +177,7 @@ function materialHint(p) {
     ? `<p class="note span2">★ ${esc(r.material)} is the recommended ${esc(r.material_type)} grade.</p>`
     : `<p class="note span2">Recommended ${esc(r.material_type)} grade: <b>★ ${esc(r.material)}</b>
         <button type="button" class="btn btn-outline small" id="useMaterialRec" data-material="${esc(r.material)}">Use it</button>
-        (other grades of this type: ${r.grades.filter((g) => g !== r.material).map(esc).join(", ")})</p>`;
+        ${otherGrades(r)}</p>`;
 }
 
 function materialOptions(value) {
@@ -969,6 +979,10 @@ $("panelBody").addEventListener("click", async (e) => {
   if (e.target.id === "useSuggestion") {
     $("partForm").elements.namedItem("process").value = part.suggestion.process;
     $("partForm").requestSubmit();
+  }
+  if (e.target.id === "chooseOtherGrade") {
+    const sel = $("partForm").elements.namedItem("material");
+    if (window.DTCSelectSearch && sel) window.DTCSelectSearch.open(sel); else sel?.focus();
   }
   if (e.target.id === "useMaterialRec") {
     $("partForm").elements.namedItem("material").value = e.target.dataset.material;
