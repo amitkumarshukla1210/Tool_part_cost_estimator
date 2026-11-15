@@ -561,6 +561,16 @@ FIN_VARS = {
 }
 
 
+# stage 62: the oil & air system quantities of the die (fin_oil.py), traced from the Sizing rules fin and the die's stations
+OIL_VARS = {
+    "oil_stations": ("Stations with mist oil", "stations", "draw_steps + iron_st + fin_oil_fixed_stations"),
+    "oil_nozzles": ("Mist oil nozzles", "pcs", "oil_stations * ceil(foil_w / fin_oil_nozzle_pitch_mm)"),
+    "air_stations": ("Stations with air blow", "stations", "fin_air_stations"),
+    "air_nozzles": ("Air blow nozzles", "pcs", "air_stations * ceil(foil_w / fin_air_nozzle_pitch_mm)"),
+    "pipe_m": ("Oil + air piping", "m", "2 * (die_l + 2 * die_w) / 1000"),
+}
+
+
 class _FinDieRun(_Run):
     def __init__(self, inp: ToolInput, s: dict, pattern: dict):
         super().__init__(inp, None)
@@ -612,6 +622,11 @@ class _FinDieRun(_Run):
             t.compute(nid, "Fin die width", "foil_w + 2 * die_side_mm", "mm", names={k: self.var(k) for k in ("foil_w", "die_side_mm")})
         elif name == "die_h":
             t.compute(nid, "Sub-die height", "subdie_h_mm", "mm", names={"subdie_h_mm": self.var("subdie_h_mm")})
+        elif name in OIL_VARS:                               # stage 62: the oil & air system of the die
+            from . import formula as _f
+            label, unit, text = OIL_VARS[name]
+            t.compute(nid, label, text, unit, names={n: self.var(n) for n in _f.names(text)},
+                      description="Oil & air system (stage 62): Sizing rules fin and the die's stations")
         else:
             return super().var(name)
         return nid
