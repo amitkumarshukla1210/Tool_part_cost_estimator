@@ -15,7 +15,8 @@ have a value:
                                        process rates, consumables, rent, utilities, overheads, duties, hours, % settings)
 
 Every row is a new APPROVED version by the system user "Indicative history" (origin "history"), never over an existing
-version of that month; INDICATIVE rows are marked EXAMPLE and say how they were made. Idempotent.
+version of that month (one exception, stage 64: a month that holds only a flat copy gets an indexed version on top once the
+rate has an index, e.g. fin foils → aluminium / copper); INDICATIVE rows are marked EXAMPLE and say how they were made. Idempotent.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from . import country_rate_book as crb, rates
 
 USER = "Indicative history"
 ORIGIN = "history"
+FLAT = "INDICATIVE history: same as the first rate"      # how a rate without an index was dated back
 MONTHS = 24
 INDEXED = ("material", "material_scrap", "tool_material")
 FAMILY_INDEX = {"Plastics - commodity": "ppi_resins", "Plastics - engineering": "ppi_resins", "Rubber": "rubber",
@@ -88,14 +90,26 @@ def backfill(hist: dict, end: str | None = None, months: int = MONTHS) -> dict:
         taken = {(r[0], r[1], r[2], r[3]) for r in con.execute(
             "SELECT category, item, country, month FROM rates WHERE status != 'rejected'")}
     first: dict[tuple, dict] = {}
+    for r in rows:                                    # the first rate itself, not a history row made from it
+        if r["origin"] != ORIGIN:
+            first.setdefault((r["category"], r["item"], r["country"]), r)
     for r in rows:
         first.setdefault((r["category"], r["item"], r["country"]), r)
+    # stage 64: months that hold only a flat history copy get an indexed version on top once the rate has an index
+    # (fin foils now follow aluminium / copper); append-only, a month with any other version is never touched
+    key4 = lambda r: (r["category"], r["item"], r["country"], r["month"])
+    own = {key4(r) for r in rows if r["origin"] != ORIGIN}
+    indexed = {key4(r) for r in rows if r["origin"] == ORIGIN and not (r["source"] or "").startswith(FLAT)}
+    reflat = {key4(r) for r in rows if r["origin"] == ORIGIN and (r["source"] or "").startswith(FLAT)} - own - indexed
     out: dict[str, int] = {}
     new: list[dict] = []
 
     def add(base, m, value, how, example):
-        if (base["category"], base["item"], base["country"], m) in taken or value is None or value < 0:
+        key = (base["category"], base["item"], base["country"], m)
+        over = key in reflat and not how.startswith(FLAT)
+        if (key in taken and not over) or value is None or value < 0:
             return
+        reflat.discard(key)
         new.append({"category": base["category"], "item": base["item"], "country": base["country"],
                     "value": crb_round(value), "unit": base["unit"], "currency": base["currency"], "month": m,
                     "source": how, "source_url": "", "fetched_date": today, "status": "approved", "approved_by": USER,
@@ -158,7 +172,7 @@ def backfill(hist: dict, end: str | None = None, months: int = MONTHS) -> dict:
                     ratio *= fm / fa
                 add(base, m, base["value"] * ratio, f"INDICATIVE history: {name} {im} ÷ {ia} incl. forex = ×{ratio:.4f}", True)
             continue
-        add(base, start, base["value"], "INDICATIVE history: same as the first rate (no free index for it)", True)
+        add(base, start, base["value"], f"{FLAT} (no free index for it)", True)
 
     if new:
         cols = list(new[0])
@@ -176,13 +190,32 @@ def missing(end: str | None = None, months: int = MONTHS) -> int:
                            "WHERE status = 'approved' GROUP BY category, item, country) WHERE first > ?", (start,)).fetchone()[0]
 
 
+def flat_indexable(series: dict | None = None) -> int:
+    """Flat history months of rates that now follow a market index (stage 64: fin foils → aluminium / copper); with the saved
+    market series, only indexes that have data count (a rate whose index has no data stays flat)."""
+    with closing(rates._connect()) as con:
+        flat = con.execute("SELECT DISTINCT category, item, country, month FROM rates WHERE status = 'approved' AND origin = ? "
+                           "AND source LIKE ?", (ORIGIN, FLAT + "%")).fetchall()
+        own = {tuple(r) for r in con.execute("SELECT category, item, country, month FROM rates WHERE status = 'approved' "
+                                             "AND origin != ?", (ORIGIN,))}
+        newer = {tuple(r) for r in con.execute("SELECT category, item, country, month FROM rates WHERE status = 'approved' "
+                                               "AND origin = ? AND source NOT LIKE ?", (ORIGIN, FLAT + "%"))}
+    def ok(cat, item):
+        ix = index_key(cat, item)
+        return bool(ix) and (series is None or bool(series.get(ix, {}).get("values")))
+    return sum(1 for r in flat if tuple(r) not in own and tuple(r) not in newer and ok(r[0], r[1]))
+
+
 def fill_new(out_dir=None) -> dict | None:
     """Stage 57: rates added after the 24-month history was written (new grades, machines and consumables that reach
-    you with an update) get their history from the saved market history file, without a download. None = nothing to do."""
-    if not missing():
+    you with an update) get their history from the saved market history file, without a download; stage 64: flat history
+    of rates that now have an index is indexed. None = nothing to do."""
+    if not missing() and not flat_indexable():
         return None
     hist = crb.load_history(out_dir or crb.default_out())
     if not hist.get("series"):
+        return None
+    if not missing() and not flat_indexable(hist["series"]):
         return None
     return backfill(hist)
 

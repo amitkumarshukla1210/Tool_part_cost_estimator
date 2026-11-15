@@ -103,8 +103,8 @@ SKILLS = [("OCU_SKILL_L1", "Skill level 1 - helper / elementary"),
           ("OCU_SKILL_TOTAL", "All skill levels")]
 # which market index an RM grade follows (first keyword found in the grade name, lower case)
 GRADE_INDEX = [
-    (("stainless", "ss3", "ss4", "sus"), "nickel"), (("alumin", "adc", "lm6", "a380", "a356", "alsi"), "aluminium"),
-    (("copper", "brass", "bronze", "cw6", "phosphor"), "copper"), (("zinc", "zamak", "zama"), "zinc"),
+    (("stainless", "ss3", "ss4", "sus"), "nickel"), (("alumin", "adc", "lm6", "a380", "a356", "alsi", "al fin foil"), "aluminium"),
+    (("copper", "brass", "bronze", "cw6", "phosphor", "cu fin foil"), "copper"), (("zinc", "zamak", "zama"), "zinc"),
     (("tin",), "tin"), (("lead",), "lead"),
     (("cast iron", "fg2", "fg3", "sg iron", "ductile", "pig iron"), "iron_ore"), (("rubber", "epdm", "nbr", "silicone"), "rubber"),
     (("pp", "abs", "pa6", "pa66", "pc", "pom", "pbt", "pe", "hdpe", "ldpe", "pvc", "eps", "pet", "pmma", "tpe", "nylon",
@@ -481,9 +481,9 @@ def family_of(grade: str) -> str:
     g = f" {grade.lower()} "
     rules = [("Stainless steel", ("stainless", " ss ", "ss3", "ss4", "sus")),
              ("Aluminium - casting alloys", ("adc", "lm6", "lm2", "lm4", "lm24", "lm25", "a380", "a356", "a383", "alsi", "aldc")),
-             ("Aluminium - wrought (sheet, extrusion, bar)", ("alumin",)),
+             ("Aluminium - wrought (sheet, extrusion, bar)", ("alumin", "al fin foil")),
              ("Zinc alloys", ("zinc", "zamak")), ("Magnesium alloys", ("magnesium", "az91", "am60")),
-             ("Copper & copper alloys", ("copper", "brass", "bronze", "becu", "gunmetal", "cuzn", "cusn")),
+             ("Copper & copper alloys", ("copper", "brass", "bronze", "becu", "gunmetal", "cuzn", "cusn", "cu fin foil")),
              ("Cast iron", ("cast iron", "ductile", "sg ", "fg2")),
              ("Sheet & strip steel", ("crca", "galvan", " gi", " hr", "sheet", "d513", "dc0", "spcc")),
              ("Carbon & alloy steel (bar, forging)", ("steel", " en", "c45", "42crmo", "bar")),

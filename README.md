@@ -1900,6 +1900,22 @@ Part panel: the recommended-grade hint names at most 3 other grades of the type 
 Test: `tests/test_select_search.py` (every page loads it; browser check in Chromium: search by word, code, group, inside a
 scrolling table and a modal dialog).
 
+## Fin parts in the country comparison and landed cost (stage 64)
+
+Fin packs and fin dies now cost in every country, side by side with India, with landed cost at your factory, like every other part
+(part panel → *Also cost in*, the all-country table and the downloads `<part>_cost_India_vs_….xlsx / .pdf`).
+
+| What was missing | Now |
+|---|---|
+| Import duty heading of the fin | Mould & die database → HS codes: fin pack **7616** (articles of aluminium), fin die **8207** (press tools), EXAMPLE, check with your customs broker. Both use the duty rates that exist (BCD, FTA, IGST) |
+| Fin pack cost of another country | The fin die worked out in that country line by line, the country's own foil, oil, press MHR and labour rates |
+| 24-month history of fin foils | Al fin foils follow the **aluminium** index, Cu fin foils the **copper** index (× forex), like the other grades; the monthly update moves them too |
+| Fin foil history already written flat on your PC | At the next start (or Admin → Monthly rates) every month that holds only the flat copy gets an indexed version on top (system user *Indicative history*, EXAMPLE). Append-only: the flat row stays, a rate you typed is never touched |
+
+Example (default fin, EXAMPLE rates, sea freight): fin pack landed in India — India ₹538, Vietnam ₹597, China ₹593, Thailand ₹624,
+Korea ₹664, Germany ₹840, USA ₹819; fin die landed — India ₹55.7 lakh, Vietnam ₹61.7 lakh, China ₹75.2 lakh, Germany ₹1.94 crore.
+India is the cheapest for both here, because the foil and the die are EXAMPLE values: replace them first.
+
 ## User guide
 
 **Help → User guide (PDF)** (`frontend/docs/DTC_User_Guide.pdf`): every page of the tool (dashboard, cost changes, import, parts and the

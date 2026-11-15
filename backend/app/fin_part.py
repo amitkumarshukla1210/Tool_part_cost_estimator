@@ -44,6 +44,27 @@ def seed() -> int:
     return 1
 
 
+# Stage 64: HS codes of the fin pack and the fin die for landed cost / country comparison (duty rates of both exist already)
+HS = [("part", "7616", "Articles of aluminium (fin packs of heat exchangers)"),
+      ("tool", "8207", "Interchangeable tools (fin press dies)")]
+
+
+def seed_hs() -> int:
+    """Add the HS code rows of part type fin (Mould & die database → HS codes, EXAMPLE); existing rows are never changed."""
+    from . import mould_db
+    d = mould_db.tables()
+    have = {(r["scope"], r["part_type"]) for r in d["hs_codes"]}
+    made = 0
+    for scope, code, desc in HS:
+        if (scope, PART_TYPE) not in have:
+            d["hs_codes"].append({"scope": scope, "part_type": PART_TYPE, "hs_code": code, "description": desc, "is_example": True,
+                                  "notes": "EXAMPLE - check the tariff heading with your customs broker"})
+            made += 1
+    if made:
+        mould_db.write(d)
+    return made
+
+
 def is_fin(d: dict) -> bool:
     proc = register_setup.processes().get(d.get("process") or "")
     return bool(proc) and proc["part_type"] == PART_TYPE
@@ -195,6 +216,10 @@ def piece(part_id: int, country: str | None = None) -> dict:
             "inputs": [], "core_out": None,
             "tool_summary": {"value": die["value"], "value_inr": die["value_inr"], "capex_inr": die.get("capex_inr"), "currency": die["currency"],
                              "weight_kg": die["nodes"]["tool_weight"]["value"] if "tool_weight" in die["nodes"] else 0.0}}
+    # stage 64: what the landed cost / country comparison read from every part cost (piece_cost.run gives the same)
+    out["is_example"] = bool(out.get("example")) or any(x.get("is_example") for x in out["rates_used"])
+    if country:                                  # country run: the fin die worked out in that country, line by line
+        out["_tool_trace"] = die
     out["key"] = {"revision_id": rev_id, "rm": rm_v, "tool": tool_v, "inputs": f["typed"], "spec": _hash(f["spec"]),
                   "rates": sorted(x["id"] for x in out["rates_used"]), "formulas": _formulas(),
                   "overrides": (d.get("trace_overrides") or {}).get("piece") or {}}
