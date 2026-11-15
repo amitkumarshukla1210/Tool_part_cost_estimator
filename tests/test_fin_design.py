@@ -112,14 +112,14 @@ def test_design_parts_and_drawings():
 def test_outputs():
     des = fin_die_draw.build({}, 7, "IFB louver")
     pdf = PdfReader(io.BytesIO(fin_die_draw.drawings_pdf(des)))
-    assert len(pdf.pages) == 2 + len(des["parts"])
+    assert len(pdf.pages) == 3 + len(des["parts"])                   # strip, fin, oil & air schematic (stage 62), every part
     text = pdf.pages[0].extract_text()
     assert "FD-7-00" in text and "Strip / station layout" in text
     strip = ezdxf.read(io.StringIO(fin_die_draw.strip_dxf(des).decode()))
     assert len(strip.modelspace().query("CIRCLE")) == 264 * 7      # holes drawn at 3 draw + pierce + iron + reflare + pilot stations
     with zipfile.ZipFile(io.BytesIO(fin_die_draw.dxf_zip(des))) as z:
         names = z.namelist()
-    assert len(names) == 2 + len(des["parts"]) and any(n.startswith("FD-7-00_strip") for n in names)
+    assert len(names) == 3 + len(des["parts"]) and any(n.startswith("FD-7-00_strip") for n in names)
     wb = load_workbook(io.BytesIO(fin_die_draw.bom_xlsx(des)))
     assert wb.sheetnames == ["Die BOM", "Drawings", "Stations"] and wb["Die BOM"].max_row == len(des["die"]["lines"]) + 1
     po = PdfReader(io.BytesIO(fin_die_draw.po_pack_pdf(des)))

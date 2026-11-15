@@ -59,7 +59,7 @@ def test_collar_forming_fea():
 def test_run_saved_on_the_part():
     pid, _ = fin_part_id("FIN-7")
     live = client.get(f"/api/parts/{pid}/fin-sim").json()
-    assert live["runs"] == [] and live["ok"] and len(live["checks"]) == 7
+    assert live["runs"] == [] and live["ok"] and len(live["checks"]) == 9                  # 7 + oil & air (stage 62)
     job = client.post(f"/api/parts/{pid}/fin-sim").json()
     done = sim_jobs.wait(job["id"], 600)
     assert done["status"] == "done", done

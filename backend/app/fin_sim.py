@@ -105,6 +105,14 @@ def checks(des: dict, R: dict | None = None) -> list[dict]:
             add("Feed per stroke vs press feed length", feed, f"≤ {line['feed_length_mm']:g}", "mm", feed <= line["feed_length_mm"], "progressions × hole pitch")
         fw = des["dims"]["foil_w"]
         add("Foil width vs press material width", fw, f"≤ {line.get('max_foil_width_mm', 0):g}", "mm", fw <= line.get("max_foil_width_mm", 0), "foil width")
+        # stage 62: the oil & air system of the die (air use at this SPM, mist oil within the oil of the part cost)
+        from . import fin_oil
+        try:
+            pc = fin_die.part_cost(s, des["die"])
+            n = pc["nodes"]
+            out += fin_oil.checks(des, spm, n.get("calc:strokes_per_pack", {}).get("value"), n.get("calc:oil_l", {}).get("value"))
+        except (ValueError, KeyError):
+            out += fin_oil.checks(des, spm)
     return out
 
 

@@ -1858,6 +1858,29 @@ Your IFB fin (Ø5.2 collar from a Ø3.12 pierce, 0.095 mm, FPI 21): edge strain 
 strain 0.89 (≤ 1.2), collar thinning 47 % (≤ 50 %) - all OK. Foil data and limits are EXAMPLE (Design rules fin): replace them with your
 foil supplier's data and your trials. API: `GET|POST /api/parts/{id}/fin-sim`, files `/api/parts/{id}/sim-runs/{run}/pdf|video`.
 
+## Oil and air system of the fin die (stage 62)
+
+How the fin oil reaches the punches: the fin die now has a designed **mist oil and air blow system**, as your fin die spec asks
+(4-4 draw-stage oil, 4-5 pierce oil and air blow, 4-7 edge trim, 4-12 a-c forced oiling, quick couplers). Most of the oil film is put
+on the foil by the press line's roll oiler; the die adds mist oil on the punches and blows the slugs out.
+
+| Item | Quantity (traced, Sizing rules fin, EXAMPLE) | In |
+|---|---|---|
+| Oiled stations | draw steps + ironing + `fin_oil_fixed_stations` (pierce, edge trim) | cost, design |
+| Mist oil nozzles | oiled stations × ceil(foil width ÷ `fin_oil_nozzle_pitch_mm`) | BOM, 3D die, strip layout (O marks), schematic |
+| Air blow nozzles | `fin_air_stations` (pierce, edge trim) × ceil(foil width ÷ `fin_air_nozzle_pitch_mm`) | BOM, 3D die, strip layout (A marks), schematic |
+| Manifold blocks | one per oiled / air-blow station | BOM, 3D (oil and air manifolds along the die) |
+| Piping & fittings | 2 × (die length + 2 × die width) ÷ 1000 m | BOM |
+| Solenoid valves (oil, air), stroke timer, quick couplers, oil tank & mist regulator | 2, 1, 4 halves, 1 | BOM, schematic |
+| Fitting | `oil_air_fit_h_base` + `oil_air_fit_h_per_nozzle` × nozzles (Fitting & assembly) | BOM |
+
+These BOM elements replace the stage 57 lump sum *Auto oiling & air-blow system* (₹85,000), which is set to quantity 0 only while it is
+still the shipped row (a price you typed there stays). Your IFB die: 36 mist nozzles on 6 stations, 18 air nozzles on 2 stations,
+7 m piping: ₹2.34 lakh with fitting (EXAMPLE prices); the fin die ₹57.97 → ₹59.89 lakh, the fin pack ₹539.75 → ₹539.96.
+**Drawing FD-…-OA, oil & air system schematic** (PDF page and DXF) in the drawing set, the PO pack (spec item 11) and the release ZIP.
+**Fin simulation checks:** air use = air nozzles × `fin_air_nl_per_pulse` × SPM ≤ `fin_air_supply_nl_min`; mist oil per pack = oil
+nozzles × `fin_oil_ml_per_pulse` × strokes per pack ≤ the oil per pack of the part cost (1 L per 4 AC sets).
+
 ## User guide
 
 **Help → User guide (PDF)** (`frontend/docs/DTC_User_Guide.pdf`): every page of the tool (dashboard, cost changes, import, parts and the

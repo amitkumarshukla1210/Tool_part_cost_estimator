@@ -93,6 +93,11 @@ VARIABLE_HELP = {
     "slit_st": "Fin dies: slit stations of the pattern",
     "wave_st": "Fin dies: wave stations of the pattern",
     "rippled": "Fin dies: 1 when the pattern needs a rippled cut-off",
+    "oil_stations": "Fin dies: stations with mist oil (stage 62)",
+    "oil_nozzles": "Fin dies: mist oil nozzles",
+    "air_stations": "Fin dies: stations with air blow for the slugs",
+    "air_nozzles": "Fin dies: air blow nozzles",
+    "pipe_m": "Fin dies: oil + air piping (m)",
 }
 # The rules may also use the names in Mould & die database → Process time parameters of the part type
 # (removal rates, set-up hours, shares), e.g. setup_h + part_box_cm3 / 2 / cnc_rough_cm3_per_h.
@@ -187,7 +192,7 @@ SAMPLE = {name: 1.0 for name in VARIABLE_HELP} | {
     "blank_perimeter": 360, "hole_count": 2, "hole_perimeter": 60, "bend_len": 60, "die_l": 200, "die_w": 140,
     "die_h": 25, "work_l": 120, "work_w": 60, "cut_len": 420, "punches": 3, "die_force_t": 40, "pitch": 125, "strip_w": 70,
     "die_rows": 66, "progressions": 4, "holes_per_stroke": 264, "row_pitch": 12.7, "hole_pitch": 16, "hole_d": 5.2, "foil_t": 0.095,
-    "foil_w": 848, "feed": 64, "draw_steps": 3,
+    "foil_w": 848, "feed": 64, "draw_steps": 3, "oil_stations": 6, "oil_nozzles": 36, "air_stations": 2, "air_nozzles": 18, "pipe_m": 6.4,
 }
 
 

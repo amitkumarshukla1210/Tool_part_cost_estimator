@@ -135,6 +135,17 @@ def build(spec: dict, fid: int | None = None, name: str = "Fin die") -> dict:
          ["Rippled edge per the wave" if int(die["pattern"]["rippled_cutoff"]) else "Straight blade, cuts at any length"])
     part("Pilot", "Pilots", "round", (s["hole_d_mm"] - 0.02, 40), int(2 * s["die_rows"]), ["Bought-out (Misumi / Punch)"], std="Misumi / Punch")
     part("Guide post Ø40 and bush (set)", "Springs, guide posts, bushes, screws (set)", "round", (40, 250), 4, ["Ball-bearing guide set, Japan make"], std="Japan make")
+    from . import fin_oil                                   # stage 62: oil & air system of the die
+    oc = fin_oil.counts(die)
+    if oc:
+        part("Mist oil nozzle", "Mist oil nozzle", "round", (6, 25), int(oc["oil_nozzles"]),
+             [f"{int(oc['oil_stations'])} oiled stations (draw, ironing, pierce, edge trim), pulsed per stroke; see the oil & air schematic"], std="Lubrication supplier")
+        part("Air blow nozzle", "Air blow nozzle", "round", (4, 20), int(oc["air_nozzles"]),
+             [f"{int(oc['air_stations'])} air-blow stations (pierce, edge trim): blow the slugs out; see the oil & air schematic"], std="Pneumatics supplier")
+        part("Oil manifold block", "Oil manifold block (per oiled station)", "blade", (dd_st := max(die["die"]["feed_mm"], float(rules["station_min_mm"]["value"])), 30, 25),
+             int(oc["oil_stations"]), ["Drilled oil gallery, one port per nozzle, quick coupler at the die edge"], std="Die maker")
+        part("Air manifold block", "Air manifold block (per air-blow station)", "blade", (dd_st, 30, 25), int(oc["air_stations"]),
+             ["Drilled air gallery, one port per nozzle"], std="Die maker")
     return {"spec": s, "die": die, "stations": sts, "parts": parts, "name": name, "id": fid,
             "dims": {"die_l": die_l, "die_w": die_w, "station_len": st_len, "foil_w": foil_w, "trim": trim, "plate_h": ph,
                      "subdie_h": sub_h, "holder_h": hold_h, "stripper_h": strip_h, "punch_len": punch_l,
@@ -188,6 +199,19 @@ def solids(des: dict) -> list[dict]:
                    (bx0 + dd["base_l"] - 50, by0 + dd["base_w"] - 50)):
         add("Guide post", cq.Workplane("XY").circle(20).extrude(top + dd["plate_h"]).translate((cx, cy, 0)).val(), "std",
             "Guide post Ø40 and bush (set)", "std")
+    from . import fin_oil
+    try:
+        lay = fin_oil.layout(des)
+    except Exception:  # noqa: BLE001 - a die without the stage 62 rules has no oil system to draw
+        lay = None
+    if lay and lay["nozzles"]:
+        for kind, color in (("oil", "std"), ("air", "screw")):
+            pts = [(n["x"], n["y"]) for n in lay["nozzles"] if n["kind"] == kind]
+            if pts:
+                noz = cq.Workplane("XY").workplane(offset=strip_z + 4).pushPoints(pts).circle(3 if kind == "oil" else 2).extrude(18)
+                add(f"{'Mist oil' if kind == 'oil' else 'Air blow'} nozzles", noz.val(), color, "Mist oil nozzle" if kind == "oil" else "Air blow nozzle", "std")
+        add("Oil manifold (along the die)", box(dd["die_l"] - 2 * 60, 30, 25, 60, -40, strip_z + 10), "std", "Oil manifold block", "std")
+        add("Air manifold (along the die)", box(dd["die_l"] - 2 * 60, 30, 25, 60, dd["die_w"] + 10, strip_z + 10), "screw", "Air manifold block", "std")
     add("Fin strip (foil)", box(dd["die_l"], dd["foil_w"], max(g and s["foil_t_mm"], 0.3), 0, (dd["die_w"] - dd["foil_w"]) / 2, strip_z), "ref", kind="ref")
     return out
 
@@ -411,6 +435,27 @@ def _strip_page(c, des, sheet="1 / 1"):
             c.setLineWidth(1.4)
             c.line(*p1, *p2)
     c.setFont("Helvetica", 8)
+    from . import fin_oil
+    try:
+        lay = fin_oil.layout(des)
+    except Exception:  # noqa: BLE001
+        lay = None
+    if lay:
+        done = set()
+        for n in lay["nozzles"]:
+            if (n["station"], n["kind"]) in done:
+                continue
+            done.add((n["station"], n["kind"]))
+            st = next(x for x in sts if x["no"] == n["station"])
+            xa, ya = P(st["x0"] + dd["station_len"] / 2, W + 8 if n["kind"] == "oil" else -8)
+            c.setFillColorRGB(*((0.85, 0.6, 0.1) if n["kind"] == "oil" else (0.2, 0.45, 0.85)))
+            c.circle(xa, ya, 4, stroke=0, fill=1)
+            c.setFillColorRGB(0, 0, 0)
+            c.setFont("Helvetica-Bold", 6)
+            c.drawCentredString(xa, ya - 2, "O" if n["kind"] == "oil" else "A")
+        c.setFont("Helvetica", 7)
+        c.drawString(sh.area[0], sh.area[1] + 4, "O = mist oil station, A = air blow (slugs) station - see the oil & air schematic")
+        c.setFont("Helvetica", 8)
     sh.dim_h(P, 0, L, 0, f"Die length {L:g}")
     sh.dim_v(P, 0, fy0, fy0 + dd["foil_w"], f"Foil {dd['foil_w']:g}")
     c.showPage()
@@ -436,6 +481,61 @@ def _fin_page(c, des, sheet="1 / 1"):
     c.showPage()
 
 
+def _oil_page(c, des, sheet="1 / 1"):
+    """Stage 62: oil & air schematic - die outline, stations, manifolds, nozzles, valves, timer, couplers, tank; with the counts."""
+    from . import fin_oil
+    lay = fin_oil.layout(des)
+    cnt, dd, sts = lay["counts"], des["dims"], des["stations"]
+    sh = _Sheet(c, des, f"{des['prefix']}-OA · Oil & air system schematic", f"{des['prefix']}-OA", None, sheet,
+                [f"{int(cnt.get('oil_nozzles', 0))} mist oil nozzles on {int(cnt.get('oil_stations', 0))} stations; "
+                 f"{int(cnt.get('air_nozzles', 0))} air blow nozzles on {int(cnt.get('air_stations', 0))} stations; piping ≈ {cnt.get('pipe_m', 0):.1f} m",
+                 "Oil and air pulsed per stroke by solenoid valves from the stroke timer; quick couplers to the press supply (spec 4-12 a)"])
+    c = sh.c
+    L, W = dd["die_l"], dd["die_w"]
+    P, k = sh.fit(L + 260, W + 140)
+    ox = 220
+    T = lambda x, y: P(x + ox, y + 70)
+    a, b = T(0, 0)
+    c.setLineWidth(0.8)
+    c.rect(a, b, L * k, W * k)
+    for st in sts:
+        xa, ya = T(st["x0"], 0)
+        c.setDash(2, 2)
+        c.line(xa, ya, xa, ya + W * k)
+        c.setDash()
+        c.setFont("Helvetica", 6)
+        c.drawString(xa + 2, ya + W * k + 3, str(st["no"]))
+    for kind, col in (("oil", (0.85, 0.6, 0.1)), ("air", (0.2, 0.45, 0.85))):
+        my = lay["manifold_y"][kind]
+        c.setStrokeColorRGB(*col)
+        c.setLineWidth(2)
+        x0, y0 = T(-120, my)
+        x1, _ = T(L - 40, my)
+        c.line(x0, y0, x1, y0)
+        c.setLineWidth(0.5)
+        for n in [n for n in lay["nozzles"] if n["kind"] == kind]:
+            nx, ny = T(n["x"], n["y"])
+            c.line(nx, y0, nx, ny)
+            c.circle(nx, ny, 1.6, stroke=1, fill=0)
+        vx, vy = T(-150, my)
+        c.rect(vx - 10, vy - 6, 20, 12)
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica", 6)
+        c.drawCentredString(vx, vy - 2, "SV")
+        c.drawString(vx - 60, vy + 8, f"{'Oil' if kind == 'oil' else 'Air'} solenoid valve")
+        qx, qy = T(-205, my)
+        c.circle(qx, qy, 5, stroke=1, fill=0)
+        c.drawString(qx - 25, qy - 14, "quick coupler")
+        c.setStrokeColorRGB(0, 0, 0)
+    tx, ty = T(-200, W / 2)
+    c.rect(tx - 20, ty - 18, 40, 36)
+    c.setFont("Helvetica", 6.5)
+    c.drawCentredString(tx, ty + 2, "Oil tank +")
+    c.drawCentredString(tx, ty - 6, "mist regulator")
+    c.drawCentredString(tx, ty - 30, "Stroke timer → SV")
+    c.showPage()
+
+
 def drawings_pdf(des: dict, which: str = "all") -> bytes:
     """which = all (strip, fin, every die part), strip, fin or parts."""
     from reportlab.pdfgen import canvas
@@ -443,6 +543,7 @@ def drawings_pdf(des: dict, which: str = "all") -> bytes:
     c = canvas.Canvas(buf, pagesize=(A3[0] * 2.8346, A3[1] * 2.8346))
     c.setTitle(f"Design to Cost — fin die {des['name']} drawings")
     pages = (["strip"] if which in ("all", "strip") else []) + (["fin"] if which in ("all", "fin") else []) \
+        + (["oil"] if which in ("all", "oil") and _has_oil(des) else []) \
         + ([p for p in des["parts"]] if which in ("all", "parts") else [])
     n = len(pages)
     for i, pg in enumerate(pages, start=1):
@@ -451,10 +552,17 @@ def drawings_pdf(des: dict, which: str = "all") -> bytes:
             _strip_page(c, des, sheet)
         elif pg == "fin":
             _fin_page(c, des, sheet)
+        elif pg == "oil":
+            _oil_page(c, des, sheet)
         else:
             _part_page(c, des, pg, sheet)
     c.save()
     return buf.getvalue()
+
+
+def _has_oil(des: dict) -> bool:
+    from . import fin_oil
+    return bool(fin_oil.counts(des["die"]))
 
 
 # ---------------------------------------------------------------- DXF ----------
@@ -520,11 +628,38 @@ def strip_dxf(des: dict) -> bytes:
     return _dxf_out(doc)
 
 
+def oil_dxf(des: dict) -> bytes:
+    """Stage 62: the oil & air schematic as DXF (die outline, stations, manifolds, nozzles)."""
+    from . import drawing_style, fin_oil
+    lay = fin_oil.layout(des)
+    dd = des["dims"]
+    doc = _dxf_doc()
+    for name, col in (("OIL", 30), ("AIR", 5)):
+        doc.layers.add(name, color=col)
+    msp = doc.modelspace()
+    L, W = dd["die_l"], dd["die_w"]
+    msp.add_lwpolyline([(0, 0), (L, 0), (L, W), (0, W)], close=True, dxfattribs={"layer": "OUTLINE"})
+    for st in des["stations"]:
+        msp.add_line((st["x0"], 0), (st["x0"], W), dxfattribs={"layer": "CENTER"})
+    for kind in ("oil", "air"):
+        layer, my = kind.upper(), lay["manifold_y"][kind]
+        msp.add_line((-120, my), (L - 40, my), dxfattribs={"layer": layer, "lineweight": 50})
+        for n in [n for n in lay["nozzles"] if n["kind"] == kind]:
+            msp.add_line((n["x"], my), (n["x"], n["y"]), dxfattribs={"layer": layer})
+            msp.add_circle((n["x"], n["y"]), 3, dxfattribs={"layer": layer})
+        msp.add_text(f"{kind.upper()} solenoid valve + quick coupler", dxfattribs={"layer": "TEXT", "height": 5}).set_placement((-260, my + 6))
+    drawing_style.dxf_frame(doc, msp, L + 300, W + 160, "Oil & air system schematic", _title_rows(des, None), part_type=fin_die.PART_TYPE,
+                            drawing_no=f"{des['prefix']}-OA", rev="A", margin=60)
+    return _dxf_out(doc)
+
+
 def dxf_zip(des: dict) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(f"{des['prefix']}-00_strip_layout.dxf", strip_dxf(des))
         z.writestr(f"{des['prefix']}-F_fin.dxf", fin_design.fin_dxf(des["spec"]))
+        if _has_oil(des):
+            z.writestr(f"{des['prefix']}-OA_oil_air_schematic.dxf", oil_dxf(des))
         for p in des["parts"]:
             z.writestr(f"{p['drawing']}_{_safe(p['name'])}.dxf", part_dxf(des, p))
     return buf.getvalue()
@@ -564,6 +699,8 @@ def bom_xlsx(des: dict) -> bytes:
     ws2.append(["Drawing", "Part", "Qty", "Material", "Hardness", "Size (mm)", "Notes"])
     ws2.append([f"{des['prefix']}-00", "Strip / station layout", 1, "", "", "", ""])
     ws2.append([f"{des['prefix']}-F", "Fin (part)", "", des["spec"]["material"], "", "", ""])
+    if _has_oil(des):
+        ws2.append([f"{des['prefix']}-OA", "Oil & air system schematic", 1, "", "", "", "stage 62"])
     for p in des["parts"]:
         ws2.append([p["drawing"], p["name"], p["qty"], p["material"], p["hardness"], " × ".join(f"{x:g}" for x in p["dims"]), "; ".join(p["notes"])])
     ws3 = wb.create_sheet("Stations")
@@ -622,6 +759,13 @@ def po_pack_pdf(des: dict, fea: dict | None = None) -> bytes:
                  ["8. Documents", "Operating manual; detail drawings of the consumable parts (punches, buttons, slit blades, edge trim, cut-off); this drawing set"],
                  ["9. Accessories", "; ".join(f"{l['element']} × {l['quantity']:g}" for l in d["lines"] if l["element"].startswith("Spare"))],
                  ["10. Standard parts", "Springs, guide posts, bushes, screws: Japan make (or equal, to be agreed)"]]
+    from . import fin_oil
+    oc = fin_oil.counts(d)
+    if oc:
+        spec_rows.append(["11. Oil & air system", f"Mist oil on {int(oc['oil_stations'])} stations ({int(oc['oil_nozzles'])} nozzles: draw, ironing, pierce, "
+                                                   f"edge trim) and air blow of the slugs on {int(oc['air_stations'])} stations ({int(oc['air_nozzles'])} nozzles), "
+                                                   "pulsed per stroke by solenoid valves from a stroke timer; oil tank with mist regulator; quick couplers "
+                                                   "(oil, air) to the press supply; drawing " + f"{des['prefix']}-OA"])
     story += [Paragraph("Technical specification", h2), _table([[P(a), P(b)] for a, b in spec_rows], theme, [38 * mm, W - 38 * mm]),
               PageBreak(), Paragraph("Bill of materials", h2),
               _table([["Pos", "Element", "Qty", "Grade", "Hardness", "Drawing"]] +
@@ -629,6 +773,7 @@ def po_pack_pdf(des: dict, fea: dict | None = None) -> bytes:
                      theme, [10 * mm, 62 * mm, 14 * mm, 40 * mm, 26 * mm, W - 152 * mm]),
               Paragraph("Drawings in this pack", h2),
               _table([["Drawing", "Title"], [f"{des['prefix']}-00", P("Strip / station layout")], [f"{des['prefix']}-F", P("Fin (part)")]] +
+                     ([[f"{des['prefix']}-OA", P("Oil & air system schematic")]] if _has_oil(des) else []) +
                      [[p["drawing"], P(p["name"])] for p in des["parts"]], theme, [30 * mm, W - 30 * mm]),
               *_fea_story(fea, theme, h2, P, W, mm),
               Spacer(1, 6 * mm),
