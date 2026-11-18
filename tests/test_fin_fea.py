@@ -57,7 +57,7 @@ def test_targets_slice_and_support():
     t = {x["key"]: x for x in fin_fea.targets(des, 4, "full")}
     p = t["Pierce sub-die plate"]
     assert p["dims"] == (80.0, pytest.approx(4 * 12.7), 45.0) and len(p["holes"]) == 4 * 4 and p["share"] == pytest.approx(50.8 / 848)
-    assert t["Lower die plate"]["strip"] is False and t["Lower die plate"]["dims"] == (1500, 1100, 90)
+    assert t["Lower die plate"]["strip"] is False and t["Lower die plate"]["dims"] == (2400, 1600, 55)   # stage 65: lower shoe of the made-to-size set
     assert fin_fea.targets(des, 3, "strips")[0]["dims"][1] == pytest.approx(4 * 12.7)   # staggered: whole periods (3 → 4 rows)
     assert fin_fea.targets(des, 4, "strips")[-1]["strip"] is True
     _rules(fea_lower_support="beams")
@@ -86,13 +86,13 @@ def test_failing_plate_gets_a_thickness(coarse):
     rec = fin_die.save({"name": "thin", "spec": {}})
     fin_fea.run(rec["id"])
     r = next(x for x in fin_fea.latest(rec["id"])["runs"] if x["kind"] == "plate")["result"]
-    assert r["support"] == "two edge strips" and r["thickness_mm"] == 90
+    assert r["support"] == "two edge strips" and r["thickness_mm"] == 55
     if r["ok"]:                                                   # the coarse mesh may already pass at 0.3 mm
         assert r["suggest"] is None
     else:
         assert r["suggest"]["text"]
         if r["suggest"]["thickness_mm"]:
-            assert r["suggest"]["thickness_mm"] > 90 and r["suggest"]["thickness_mm"] % 5 == 0
+            assert r["suggest"]["thickness_mm"] > 55 and r["suggest"]["thickness_mm"] % 5 == 0
 
 
 @needs_fea

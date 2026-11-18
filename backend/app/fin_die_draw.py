@@ -47,6 +47,11 @@ def _hardness() -> dict:
     return {r["code"]: r.get("hardness") or "" for r in mould_db.tables()["tool_materials"]}
 
 
+def des_weight(die: dict) -> float:
+    n = die["nodes"].get("tool_weight")
+    return round(n["value"], 1) if n else 0.0
+
+
 def build(spec: dict, fid: int | None = None, name: str = "Fin die") -> dict:
     """The fin die design of a spec: geometry, stations, die parts (with drawing numbers), BOM and the cost behind it."""
     s = fin_die.normalise(spec)
@@ -91,12 +96,29 @@ def build(spec: dict, fid: int | None = None, name: str = "Fin die") -> dict:
                 pts.append((x_off + (p + 0.25) * s["hole_pitch_mm"] + st_off, y, d))
         return pts
 
-    corners = lambda d: [(x, y, d) for x in (50, b["length_mm"] - 50) for y in (50, b["width_mm"] - 50)]
+    sized = bool(b.get("made_to_size"))                      # stage 65: die set made to size (shoes, risers, backing plates)
+    post_d = R("fin_post_d_mm") if sized else 40.0
+    edge = max(50.0, post_d)
+    corners = lambda d: [(x, y, d) for x in (edge, b["length_mm"] - edge) for y in (edge, b["width_mm"] - edge)]
+    up_h = float(b.get("upper_shoe_mm") or ph)
+    riser_h = float(b.get("riser_h_mm") or 0)
+    bk_lo, bk_up = (R("fin_backing_lower_mm"), R("fin_backing_upper_mm")) if sized else (0.0, 0.0)
     part("Lower die plate (die set)", f"Fin die set {b['size_code']}", "plate", (b["length_mm"], b["width_mm"], ph), 1,
-         ["Guide post bores Ø40 H7 at the 4 corners, 50 mm from the edges", "Grind both faces parallel " + str(tol("plate_flatness", "0.005"))],
-         corners(40))
-    part("Upper die plate (die set)", f"Fin die set {b['size_code']}", "plate", (b["length_mm"], b["width_mm"], ph), 1,
-         ["Guide bush bores Ø52 H7 at the 4 corners, 50 mm from the edges"], corners(52))
+         [f"Lower die shoe; guide post bores Ø{post_d:g} H7 at the 4 corners, {edge:g} mm from the edges",
+          "Grind both faces parallel " + str(tol("plate_flatness", "0.005"))], corners(post_d))
+    part("Upper die plate (die set)", f"Fin die set {b['size_code']}", "plate", (b["length_mm"], b["width_mm"], up_h), 1,
+         [f"Upper die shoe; guide bush bores Ø{post_d + 12:g} H7 at the 4 corners, {edge:g} mm from the edges"], corners(post_d + 12))
+    if sized:
+        nr = int(R("fin_riser_count"))
+        part("Riser (parallel) block", f"Fin die set {b['size_code']}", "plate", (b["length_mm"], R("fin_riser_w_mm"), riser_h), nr,
+             [f"Under the lower shoe along the feed; height fills the die height in closed condition {b['stack_height_mm']:g} mm",
+              "Scrap and stacker clearance between the blocks"])
+        part("Die backing plate (lower)", "Die backing plate (lower)", "plate", (die_l, die_w, bk_lo), 1,
+             ["Under the sub-die plates; hardened and ground, takes the punch load into the lower shoe"])
+        part("Punch backing plate (upper)", "Punch backing plate (upper)", "plate", (die_l, die_w, bk_up), 1,
+             ["Over the punch holders; hardened and ground, stops the punch heads sinking into the upper shoe"])
+        part("Stopper block", "Stopper block", "plate", (100, 100, b["stack_height_mm"] - riser_h - ph - up_h), 4,
+             ["Sets the die height in closed condition; one at each corner of the die area"])
     punch_kinds = {"draw": ("Draw punch", "Draw sub-die plate", s["hole_d_mm"] * 0.8), "pierce": ("Pierce & burring punch", "Pierce die button", fin_die._param("fin_pierce_factor")["value"] * s["hole_d_mm"]),
                    "iron": ("Ironing punch", "Pierce die button", s["hole_d_mm"]), "reflare": ("Reflare punch", "Draw sub-die plate", s["hole_d_mm"])}
     for st in sts:
@@ -134,7 +156,12 @@ def build(spec: dict, fid: int | None = None, name: str = "Fin die") -> dict:
     part("Cut-off punch & die", "Cut-off punch & die", "blade", (foil_w + 20, 40, 30), 2,
          ["Rippled edge per the wave" if int(die["pattern"]["rippled_cutoff"]) else "Straight blade, cuts at any length"])
     part("Pilot", "Pilots", "round", (s["hole_d_mm"] - 0.02, 40), int(2 * s["die_rows"]), ["Bought-out (Misumi / Punch)"], std="Misumi / Punch")
-    part("Guide post Ø40 and bush (set)", "Springs, guide posts, bushes, screws (set)", "round", (40, 250), 4, ["Ball-bearing guide set, Japan make"], std="Japan make")
+    part(f"Guide post Ø{post_d:g} and bush (set)", "Springs, guide posts, bushes, screws (set)", "round",
+         (post_d, (b["stack_height_mm"] - riser_h) if sized else 250), 4, ["Ball-bearing guide set, Japan make"], std="Japan make")
+    if sized:
+        part("Stripper spring / gas spring", "Stripper springs / gas springs", "round", (32, 100), int(len(sts) * R("fin_springs_per_station")),
+             [f"{R('fin_springs_per_station'):g} per station between punch holder and stripper"], std="Spring supplier")
+        part("Lifting eye bolt", "Lifting eye bolts", "round", (36, 60), 4, ["M36, one at each corner of each shoe"], std="Standard part")
     from . import fin_oil                                   # stage 62: oil & air system of the die
     oc = fin_oil.counts(die)
     if oc:
@@ -149,7 +176,10 @@ def build(spec: dict, fid: int | None = None, name: str = "Fin die") -> dict:
     return {"spec": s, "die": die, "stations": sts, "parts": parts, "name": name, "id": fid,
             "dims": {"die_l": die_l, "die_w": die_w, "station_len": st_len, "foil_w": foil_w, "trim": trim, "plate_h": ph,
                      "subdie_h": sub_h, "holder_h": hold_h, "stripper_h": strip_h, "punch_len": punch_l,
-                     "base_l": b["length_mm"], "base_w": b["width_mm"], "shut_h": b["stack_height_mm"]},
+                     "base_l": b["length_mm"], "base_w": b["width_mm"], "shut_h": b["stack_height_mm"],
+                     "upper_h": up_h, "riser_h": riser_h, "backing_lower": bk_lo, "backing_upper": bk_up, "post_d": post_d,
+                     "spring_gap": R("fin_spring_gap_mm") if sized else 2.0, "sized": sized,
+                     "weight_kg": des_weight(die), "target_kg": R("fin_target_kg") if sized else None},
             "grid": grid, "prefix": prefix}
 
 
@@ -169,10 +199,21 @@ def solids(des: dict) -> list[dict]:
     box = lambda L, W, H, x, y, z: cq.Workplane("XY").box(L, W, H, centered=False).translate((x, y, z)).val()
     bx0, by0 = (dd["die_l"] - dd["base_l"]) / 2, (dd["die_w"] - dd["base_w"]) / 2
     z = 0.0
+    rh, sized = dd.get("riser_h") or 0, dd.get("sized")
+    if sized and rh > 0:                                    # stage 65: risers, shoes and backing plates made to size
+        rw = next((p["dims"][1] for p in des["parts"] if p["name"] == "Riser (parallel) block"), 45)
+        n = next((p["qty"] for p in des["parts"] if p["name"] == "Riser (parallel) block"), 2)
+        for i in range(int(n)):
+            y = by0 + (dd["base_w"] - rw) * (i / (n - 1) if n > 1 else 0.5)
+            add(f"Riser block {i + 1}", box(dd["base_l"], rw, rh, bx0, y, z), "shoe", "Riser (parallel) block")
+        z += rh
     add("Lower die plate (die set)", box(dd["base_l"], dd["base_w"], dd["plate_h"], bx0, by0, z), "shoe")
     z += dd["plate_h"]
+    if sized:
+        add("Die backing plate (lower)", box(dd["die_l"], dd["die_w"], dd["backing_lower"], 0, 0, z), "plate")
+        z += dd["backing_lower"]
     strip_z = z + dd["subdie_h"]
-    top = strip_z + 2 + dd["stripper_h"] + dd["punch_len"] * 0.6 + dd["holder_h"]
+    top = strip_z + (dd["stripper_h"] + dd["spring_gap"] + dd["holder_h"] if sized else 2 + dd["stripper_h"] + dd["punch_len"] * 0.6 + dd["holder_h"])
     for st in des["stations"]:
         add(f"Sub-die plate · station {st['no']} {st['name']}", box(dd["station_len"] - 1, dd["die_w"], dd["subdie_h"], st["x0"], 0, z), "plate",
             next(p["name"] for p in des["parts"] if p["no"] == st["subdie"]))
@@ -194,11 +235,20 @@ def solids(des: dict) -> list[dict]:
         if st["kind"] == "cutoff":
             add("Cut-off punch", box(10, dd["foil_w"] + 20, 40, st["x0"] + dd["station_len"] / 2 - 5, (dd["die_w"] - dd["foil_w"]) / 2 - 10, strip_z + 1),
                 "hard", "Cut-off punch & die")
-    add("Upper die plate (die set)", box(dd["base_l"], dd["base_w"], dd["plate_h"], bx0, by0, top), "shoe")
-    for cx, cy in ((bx0 + 50, by0 + 50), (bx0 + dd["base_l"] - 50, by0 + 50), (bx0 + 50, by0 + dd["base_w"] - 50),
-                   (bx0 + dd["base_l"] - 50, by0 + dd["base_w"] - 50)):
-        add("Guide post", cq.Workplane("XY").circle(20).extrude(top + dd["plate_h"]).translate((cx, cy, 0)).val(), "std",
-            "Guide post Ø40 and bush (set)", "std")
+    shoe_z = top
+    if sized:
+        add("Punch backing plate (upper)", box(dd["die_l"], dd["die_w"], dd["backing_upper"], 0, 0, top), "plate")
+        shoe_z = top + dd["backing_upper"]
+        for sx, sy in ((-110, -110), (dd["die_l"] + 10, -110), (-110, dd["die_w"] + 10), (dd["die_l"] + 10, dd["die_w"] + 10)):
+            add("Stopper block", box(100, 100, shoe_z - z, sx, sy, z), "plate")
+    up_h = dd.get("upper_h") or dd["plate_h"]
+    add("Upper die plate (die set)", box(dd["base_l"], dd["base_w"], up_h, bx0, by0, shoe_z), "shoe")
+    pd, e = dd.get("post_d") or 40, max(50, dd.get("post_d") or 40)
+    post_name = next((p["name"] for p in des["parts"] if p["name"].startswith("Guide post")), "Guide post Ø40 and bush (set)")
+    for cx, cy in ((bx0 + e, by0 + e), (bx0 + dd["base_l"] - e, by0 + e), (bx0 + e, by0 + dd["base_w"] - e),
+                   (bx0 + dd["base_l"] - e, by0 + dd["base_w"] - e)):
+        add("Guide post", cq.Workplane("XY").circle(pd / 2).extrude(shoe_z + up_h - rh).translate((cx, cy, rh)).val(), "std",
+            post_name, "std")
     from . import fin_oil
     try:
         lay = fin_oil.layout(des)
@@ -750,7 +800,7 @@ def po_pack_pdf(des: dict, fea: dict | None = None) -> bytes:
                  ["3. Material", f"{s['material']}, thickness {s['foil_t_mm']:g} mm, width {dd['foil_w']:g} mm"],
                  ["4. Die structure", "Progressive draw type: " + " → ".join(x["name"] for x in des["stations"])],
                  ["   Die size", f"{dd['die_l']:g} × {dd['die_w']:g} mm, die set {d['base']['size_code']} ({dd['base_l']:g} × {dd['base_w']:g} mm), "
-                                f"shut height ≈ {dd['shut_h']:g} mm; feed {d['die']['feed_mm']:g} mm; {int(d['die']['holes_per_stroke'])} holes per stroke"],
+                                f"die height in closed condition {dd["shut_h"]:g} mm, weight ≈ {dd.get("weight_kg") or 0:,.0f} kg; feed {d['die']['feed_mm']:g} mm; {int(d['die']['holes_per_stroke'])} holes per stroke"],
                  ["   Cutting parts", "; ".join(sorted({f"{p['name']}: {p['material']} {p['hardness']}".strip() for p in des["parts"]
                                                         if p["material"] and p["shape"] != "plate" and not p["std"]}))],
                  ["5. Trial material", f"{prm('trials'):g} try-outs × {prm('trial_shots_each'):,.0f} strokes, foil supplied by the buyer"],

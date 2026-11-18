@@ -24,7 +24,8 @@ from . import costing_setup, fin_design, fin_die, mould_db, register_setup
 PART_TYPE = fin_die.PART_TYPE
 PROCESS = ("fin_press", "Fin press (heat exchanger fin pack)")
 TYPED = ("pattern", "tube_od_mm", "hole_d_mm", "row_pitch_mm", "hole_pitch_mm", "fin_rows", "fin_holes", "foil_t_mm", "fpi",
-         "staggered", "die_rows", "progressions", "foil_width_mm", "pack_length_mm", "press", "spm", "foil_kg_per_ac_set", "tools_count")
+         "staggered", "die_rows", "progressions", "foil_width_mm", "pack_length_mm", "press", "spm", "foil_kg_per_ac_set", "tools_count",
+         "die_set_l_mm", "die_set_w_mm", "shut_h_mm")              # stage 65: the die set made to size
 _READ: dict = {}
 
 

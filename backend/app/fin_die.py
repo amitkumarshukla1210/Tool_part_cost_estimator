@@ -123,6 +123,26 @@ SIZING = [
     ("base_make_factor", 2.2, "× steel", "Fin die set priced by weight when it has no catalogue price: plate steel × this factor"),
 ]
 
+# Stage 65: the fin die set made to size (like your 2400 × 1600 × 650 mm, ~4700 kg die): length / width round the die area,
+# shut height, the plate stack and the riser blocks. EXAMPLE values set so your IFB φ5 × 66R × 4P die gives 2400 × 1600 × 650.
+SIZING_SET = [
+    ("fin_set_end_mm", 550, "mm", "Die set length added at each end of the die area (hitch feed unit, cut-off unit, stacker side)"),
+    ("fin_set_side_mm", 300, "mm", "Die set width added each side of the die area (guide posts, stoppers, oil / air manifolds)"),
+    ("fin_set_round_mm", 100, "mm", "Die set length and width rounded up to this step"),
+    ("fin_shut_h_mm", 650, "mm", "Shut height of the fin die (die closed, bottom of the risers to the top of the upper shoe)"),
+    ("fin_lower_shoe_mm", 55, "mm", "Lower die shoe (die set) thickness"),
+    ("fin_upper_shoe_mm", 45, "mm", "Upper die shoe (die set) thickness"),
+    ("fin_backing_lower_mm", 30, "mm", "Die backing plate under the sub-die plates"),
+    ("fin_backing_upper_mm", 25, "mm", "Punch backing plate over the punch holders"),
+    ("fin_spring_gap_mm", 10, "mm", "Stripper spring gap left between stripper and punch holder at shut height"),
+    ("fin_riser_count", 2, "blocks", "Riser (parallel) blocks under the lower shoe, along the feed: scrap and stacker clearance"),
+    ("fin_riser_w_mm", 45, "mm", "Riser block width (its height fills the shut height)"),
+    ("fin_post_d_mm", 80, "mm", "Guide post Ø (ball-bearing guide sets)"),
+    ("fin_springs_per_station", 4, "springs", "Stripper springs / gas springs per station"),
+    ("fin_target_kg", 4700, "kg", "Weight of your reference die (IFB 66R × 4P, 2400 × 1600 × 650): the design says how far it is"),
+]
+SET_RULES = [k for k, *_ in SIZING_SET]
+
 # Process time parameters (part type fin)
 TIMES = [
     ("cnc_setup_h", 4, "h", "CNC set-up per fin die"), ("cnc_plate_cm2_per_h", 300, "cm²/h", "CNC: plate area machined per hour"),
@@ -195,6 +215,13 @@ BOM = [
      f"stations * die_w * {ST} * (stripper_h_mm + holder_h_mm) * 7.85 / 1e6", ""),
     ("Fitting & assembly", "process", "1", "0", "", "0", "Fitting & assembly", f"assy_h_base + assy_h_per_punch * {PUNCHES}", "0", ""),
     ("Die design", "process", "1", "0", "", "0", "Design", "design_h_base + design_h_per_station * stations", "0", ""),
+]
+BOM_SET = [   # stage 65 (EXAMPLE): the parts of the sized die set beyond the shoes (shoes and risers = the die set line)
+    ("Die backing plate (lower)", "made", "1", "0", P20, "die_l * die_w * fin_backing_lower_mm * density / 1e6", "", "0", "0", ""),
+    ("Punch backing plate (upper)", "made", "1", "0", P20, "die_l * die_w * fin_backing_upper_mm * density / 1e6", "", "0", "0", ""),
+    ("Stopper block", "made", "4", "0", P20, "100 * 100 * (fin_backing_lower_mm + subdie_h_mm + stripper_h_mm + fin_spring_gap_mm + holder_h_mm + fin_backing_upper_mm) * density / 1e6", "", "0", "0", ""),
+    ("Stripper springs / gas springs", "bought_out", "stations * fin_springs_per_station", "1500", "", "0", "", "0", "0", "Spring supplier"),
+    ("Lifting eye bolts", "bought_out", "4", "2500", "", "0", "", "0", "0", "Standard part"),
 ]
 
 # Fin foil materials (Materials, part type fin): alloy, tempers, density; plain and hydrophilic coated
@@ -409,6 +436,11 @@ def seed() -> dict:
             if (PART_TYPE, k) not in have:
                 db[table].append({"part_type": PART_TYPE, "parameter": k, "value": v, "unit": unit,
                                   "description": f"{desc} (stage 57)", "is_example": True})
+    have = {(r["part_type"], r["parameter"]) for r in db["sizing_rules"]}
+    for k, v, unit, desc in SIZING_SET:                     # stage 65: the sized die set
+        if (PART_TYPE, k) not in have:
+            db["sizing_rules"].append({"part_type": PART_TYPE, "parameter": k, "value": v, "unit": unit,
+                                       "description": f"{desc} (stage 65)", "is_example": True})
     have = {(r["part_type"], r["size_code"]) for r in db["mould_bases"]}
     for code, L, W, ph in DIE_SETS:
         if (PART_TYPE, code) not in have:
@@ -427,7 +459,7 @@ def seed() -> dict:
                                                             "notes": f"EXAMPLE grade (stage 57, fin die spec): {application}; price = {ref} until you enter yours"})
             tools[code] = db["tool_materials"][-1]
     have = {(r["part_type"], r["element"]) for r in db["bom_elements"]}
-    for el, cat, qty, unit_cost, mat, wt, proc, hrs, amt, make in BOM:
+    for el, cat, qty, unit_cost, mat, wt, proc, hrs, amt, make in BOM + BOM_SET:
         if (PART_TYPE, el) not in have:
             db["bom_elements"].append({"part_type": PART_TYPE, "element": el, "category": cat, "quantity_rule": qty,
                                        "unit_cost_rule": unit_cost, "material_code": mat, "weight_rule": wt, "process_code": proc,
@@ -473,6 +505,9 @@ SPEC = {
     "tools_count": ("Fin dies over the programme", "dies", 1, 1, 50),
     "spm": ("Press speed SPM (0 = plain-fin speed × pattern factor)", "strokes/min", 0, 0, 1000),
     "foil_kg_per_ac_set": ("Foil of one AC set, indoor + outdoor coils (for the oil)", "kg", 5.0, 0.1, 500),
+    "die_set_l_mm": ("Die set length (0 = proposed by the Sizing rules)", "mm", 0, 0, 6000),
+    "die_set_w_mm": ("Die set width (0 = proposed by the Sizing rules)", "mm", 0, 0, 4000),
+    "shut_h_mm": ("Die height in closed condition (0 = Sizing rules fin_shut_h_mm)", "mm", 0, 0, 1500),
 }
 DEFAULT_MATERIAL = "Al fin foil 8011-H24 hydrophilic coated"
 
@@ -622,6 +657,43 @@ class _FinDieRun(_Run):
             t.compute(nid, "Fin die width", "foil_w + 2 * die_side_mm", "mm", names={k: self.var(k) for k in ("foil_w", "die_side_mm")})
         elif name == "die_h":
             t.compute(nid, "Sub-die height", "subdie_h_mm", "mm", names={"subdie_h_mm": self.var("subdie_h_mm")})
+        elif name in ("set_l", "set_w", "shut_h") and s.get({"set_l": "die_set_l_mm", "set_w": "die_set_w_mm", "shut_h": "shut_h_mm"}[name]):
+            key = {"set_l": "die_set_l_mm", "set_w": "die_set_w_mm", "shut_h": "shut_h_mm"}[name]
+            t.add_input(nid, {"set_l": "Die set length", "set_w": "Die set width", "shut_h": "Die height in closed condition"}[name] + " (typed)",
+                        float(s[key]), "mm", {"type": "user", "note": "Fin inputs of the part (typed wins over the Sizing rules)"})
+        elif name == "set_l":                                # stage 65: the die set made to size
+            t.compute(nid, "Die set length", "ceil((die_l + 2 * fin_set_end_mm) / fin_set_round_mm) * fin_set_round_mm", "mm",
+                      names={k: self.var(k) for k in ("die_l", "fin_set_end_mm", "fin_set_round_mm")},
+                      description="Die area + the hitch feed / cut-off / stacker ends (Sizing rules fin), rounded up")
+        elif name == "set_w":
+            t.compute(nid, "Die set width", "ceil((die_w + 2 * fin_set_side_mm) / fin_set_round_mm) * fin_set_round_mm", "mm",
+                      names={k: self.var(k) for k in ("die_w", "fin_set_side_mm", "fin_set_round_mm")},
+                      description="Die area + guide posts, stoppers and manifolds each side (Sizing rules fin), rounded up")
+        elif name == "shut_h":
+            t.compute(nid, "Die height in closed condition", "fin_shut_h_mm", "mm", names={"fin_shut_h_mm": self.var("fin_shut_h_mm")})
+        elif name == "riser_h":
+            parts = ("fin_lower_shoe_mm", "fin_upper_shoe_mm", "fin_backing_lower_mm", "fin_backing_upper_mm", "subdie_h_mm",
+                     "stripper_h_mm", "fin_spring_gap_mm", "holder_h_mm")
+            t.compute(nid, "Riser block height", "shut_h - (" + " + ".join(parts) + ")", "mm",
+                      names={k: self.var(k) for k in ("shut_h",) + parts},
+                      description="The shut height less the plate stack: lower shoe, backing plates, sub-die, stripper, spring gap, "
+                                  "punch holder, upper shoe")
+        elif name == "set_density":
+            mat = next((m for m in self.db["tool_materials"] if m["code"] == P20), None)
+            self.master(nid, f"Density of {P20} (die shoes and risers)", float((mat or {}).get("density_g_cm3") or 7.85), "g/cm³",
+                        "Mould & die database → Tool materials", P20, bool((mat or {}).get("is_example")),
+                        ref=_ref("mould_db", "tool_materials", {"code": P20}, "density_g_cm3"))
+        elif name in ("base_l", "base_w", "base_stack_h", "base_weight_kg") and self.sized.get("made_to_size"):
+            if name == "base_weight_kg":
+                t.compute(nid, "Die set weight (upper + lower shoe and riser blocks)",
+                          "(set_l * set_w * (fin_lower_shoe_mm + fin_upper_shoe_mm) + fin_riser_count * set_l * fin_riser_w_mm * riser_h)"
+                          " * set_density / 1e6", "kg",
+                          names={k: self.var(k) for k in ("set_l", "set_w", "fin_lower_shoe_mm", "fin_upper_shoe_mm", "fin_riser_count",
+                                                          "fin_riser_w_mm", "riser_h", "set_density")})
+            else:
+                src = {"base_l": "set_l", "base_w": "set_w", "base_stack_h": "shut_h"}[name]
+                t.compute(nid, {"base_l": "Die set length", "base_w": "Die set width", "base_stack_h": "Die height in closed condition"}[name],
+                          "x", "mm", names={"x": self.var(src)})
         elif name in OIL_VARS:                               # stage 62: the oil & air system of the die
             from . import formula as _f
             label, unit, text = OIL_VARS[name]
@@ -638,6 +710,8 @@ class _FinDieRun(_Run):
             raise ValueError(f"Mould & die database → Sizing rules has no fin row for {', '.join(need)} (run the stage 57 seed).")
         self.sized = {"rules": rules}            # var() reads the sizing rules from here while the die is sized
         die_l, die_w = self.trace.value(self.var("die_l")), self.trace.value(self.var("die_w"))
+        if all(k in rules for k in SET_RULES):  # stage 65: the die set made to size round the die (typed size wins)
+            return self._made_to_size(rules, die_l, die_w)
         sets = sorted((b for b in self.db["mould_bases"] if b["part_type"] == PART_TYPE),
                       key=lambda b: (b["length_mm"] * b["width_mm"], b["cost"]))
         if not sets:
@@ -650,6 +724,27 @@ class _FinDieRun(_Run):
         big = sets[-1]
         raise ValueError(f"No fin die set in Mould bases takes a fin die of {die_l:.0f} × {die_w:.0f} mm (largest usable "
                          f"{big['max_insert_length_mm']:g} × {big['max_insert_width_mm']:g} mm). Add a bigger fin die set.")
+
+    def _made_to_size(self, rules: dict, die_l: float, die_w: float) -> dict:
+        self.sized["made_to_size"] = True
+        v = lambda n: self.trace.value(self.var(n))
+        L, W, H, rh = v("set_l"), v("set_w"), v("shut_h"), v("riser_h")
+        if L < die_l or W < die_w:
+            raise ValueError(f"The die set {L:g} × {W:g} mm is smaller than the die area {die_l:.0f} × {die_w:.0f} mm: "
+                             "type a bigger die set (fin inputs) or leave it blank.")
+        if rh < 0:
+            raise ValueError(f"Shut height {H:g} mm is too low for the plate stack ({H - rh:g} mm without risers): "
+                             f"type at least {H - rh:g} mm.")
+        ex = any(rules[k]["is_example"] for k in SET_RULES)
+        base = {"part_type": PART_TYPE, "series": "Fin die set (made to size)", "size_code": f"{L:.0f}×{W:.0f}×{H:.0f}",
+                "length_mm": L, "width_mm": W, "max_insert_length_mm": L, "max_insert_width_mm": W,
+                "clamp_plates_mm": float(rules["fin_lower_shoe_mm"]["value"]), "upper_shoe_mm": float(rules["fin_upper_shoe_mm"]["value"]),
+                "stack_height_mm": H, "riser_h_mm": rh, "weight_kg": round(v("base_weight_kg"), 1), "cost": 0, "material": P20,
+                "make": "Made to order", "is_example": ex, "made_to_size": True,
+                "notes": "Upper + lower shoe and riser blocks (P20), priced by weight × base_make_factor"}
+        return {"base": base, "base_turned": False, "layout": {"rows": 1, "cols": 1, "empty": 0}, "rules": rules,
+                "die": {"die_l": die_l, "die_w": die_w}, "warnings": [], "made_to_size": True,
+                "sizing_rules_are_examples": any(r["is_example"] for r in rules.values())}
 
     def base_label(self) -> str:
         b = self.sized["base"]
@@ -696,7 +791,14 @@ class _FinDieRun(_Run):
                 why.append(f"{m['tonnage_t']:g} t < {force:.1f} t")
             if ln["max_foil_width_mm"] < self.foil_w:
                 why.append(f"foil width {ln['max_foil_width_mm']:g} < {self.foil_w:g} mm")
-            if m.get("length_mm") and m.get("width_mm") and (m["length_mm"] < b["length_mm"] or m["width_mm"] < b["width_mm"]):
+            if b.get("made_to_size"):          # stage 65: the die area must sit on the bed; the die set may overhang it
+                dl, dw = self.sized["die"]["die_l"], self.sized["die"]["die_w"]
+                if m.get("length_mm") and m.get("width_mm") and (m["length_mm"] < dl or m["width_mm"] < dw):
+                    why.append(f"bed {m['length_mm']:g} × {m['width_mm']:g} mm < die area {dl:.0f} × {dw:.0f} mm")
+                elif m.get("length_mm") and m.get("width_mm") and (m["length_mm"] < b["length_mm"] or m["width_mm"] < b["width_mm"]):
+                    ln = dict(ln) | {"_overhang": f"die set {b['length_mm']:g} × {b['width_mm']:g} mm overhangs the bed "
+                                                  f"{m['length_mm']:g} × {m['width_mm']:g} mm: check the bolster support"}
+            elif m.get("length_mm") and m.get("width_mm") and (m["length_mm"] < b["length_mm"] or m["width_mm"] < b["width_mm"]):
                 why.append(f"bed {m['length_mm']:g} × {m['width_mm']:g} mm < die set {b['length_mm']:g} × {b['width_mm']:g} mm")
             cands.append((m, ln, why))
         out = {"force_node": force_node, "force_t": force, "process": process, "machine": None, "line": None, "rejected": []}
@@ -723,7 +825,7 @@ class _FinDieRun(_Run):
             if fits:
                 chosen = fits[0]
                 how = (f"smallest '{process}' machine whose tonnage ≥ the die force, whose foil width (Fin presses) ≥ the strip "
-                       "and whose bed takes the fin die set")
+                       "and whose bed takes the fin die set (made-to-size set: the die area)")
         if not chosen:
             mhr_node = self.miss("trial:machine", "Fin press", f"No fin press takes this die ({force:.1f} t, foil {self.foil_w:g} mm, die set "
                                  f"{b['length_mm']:g} × {b['width_mm']:g} mm): " + ("; ".join(out["rejected"]) or "no fin press in Machines")
@@ -731,13 +833,15 @@ class _FinDieRun(_Run):
         else:
             m, ln, _ = chosen
             out["machine"], out["line"] = m, ln
+            if ln.get("_overhang"):
+                self.sized["warnings"].append(f"Press {m['machine_id']}: {ln['_overhang']}.")
             t.add_derived("trial:machine", f"Fin press: {m['machine_id']} · {m['name']}", m["tonnage_t"], "t", how,
                           {"die_force": force_node}, description=f"{m['tonnage_t']:g} t ≥ {force:.1f} t; foil width up to "
                           f"{ln['max_foil_width_mm']:g} mm ≥ {self.foil_w:g} mm; bed {m.get('length_mm') or 0:g} × {m.get('width_mm') or 0:g} mm; "
                           f"SPM {ln['spm_min']:g}-{ln['spm_max']:g}; die height {ln['die_height_min_mm']:g}-{ln['die_height_max_mm']:g} mm")
             h = b["stack_height_mm"]
             if not ln["die_height_min_mm"] <= h <= ln["die_height_max_mm"]:
-                self.sized["warnings"].append(f"Die shut height ≈ {h:g} mm (die set) is outside the {m['machine_id']} die height "
+                self.sized["warnings"].append(f"Die height in closed condition {h:g} mm is outside the {m['machine_id']} die height "
                                               f"{ln['die_height_min_mm']:g}-{ln['die_height_max_mm']:g} mm: check the die design.")
             mhr_node = self.mhr(m["machine_id"])
         trial = next((p for p in self.db["tool_processes"] if p["cost_group"] == "trial"), None)
