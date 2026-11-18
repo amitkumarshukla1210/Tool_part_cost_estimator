@@ -1,6 +1,6 @@
 # End-to-end audit report
 
-Run on the current code, 2026-11-18 03:07, 1273 calls in 21.7 min.
+Run on the current code, 2026-11-18 04:57, 1273 calls in 22.1 min.
 
 | Case | Part type | Tools | RM INR | Tool CAPEX INR | Part cost INR | Findings |
 |---|---|---|---|---|---|---|
@@ -29,7 +29,7 @@ None.
 
 ## Slowest calls
 
-- 19 s fin_louver `/api/parts/20/fin-design/all.zip`
-- 19 s fin_one_row_high `/api/parts/21/fin-design/all.zip`
-- 18 s global `/api/examples/export.xlsx`
-- 13 s fin_7mm_plain `/api/parts/22/fin-design/all.zip`
+- 20 s fin_louver `/api/parts/20/fin-design/all.zip`
+- 20 s fin_one_row_high `/api/parts/21/fin-design/all.zip`
+- 15 s global `/api/examples/export.xlsx`
+- 14 s fin_7mm_plain `/api/parts/22/fin-design/all.zip`

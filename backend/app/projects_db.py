@@ -518,6 +518,41 @@ sim_runs = Table(
     Index("ix_sim_runs_part", "part_id"),
 )
 
+# Output packs (stage 66): every output of a part in one ZIP, made in the background, one row per revision (Rev.00, Rev.01 …)
+output_packs = Table(
+    "output_packs", meta,
+    Column("id", Integer, primary_key=True),
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), nullable=False),
+    Column("rev_no", Integer, nullable=False),
+    Column("status", String(20), default="queued"),     # queued, running, done, failed, stopped
+    Column("progress", Float, default=0.0),
+    Column("step", String(300), default=""),
+    Column("items", JSON),                              # [{group, kind, path, label, status, file_id | files, reason …}]
+    Column("zip_file_id", ForeignKey("files.id")),
+    Column("zip_name", String(300), default=""),
+    Column("zip_size", Integer, default=0),
+    Column("state", JSON),
+    Column("state_hash", String(64), default=""),
+    Column("auto_hash", String(64), default=""),
+    Column("end_hash", String(64), default=""),
+    Column("changed", String(500), default=""),
+    Column("design_stage", String(60), default=""),
+    Column("part_type", String(30), default=""),
+    Column("auto", Boolean, default=False),
+    Column("error", String(500), default=""),
+    Column("user_id", Integer),
+    Column("created_by", String(100), default=""),
+    Column("created_at", DateTime, default=now),
+    Column("started_at", DateTime),
+    Column("finished_at", DateTime),
+    Index("ix_output_packs_part", "part_id"),
+)
+output_pack_auto = Table(
+    "output_pack_auto", meta,
+    Column("part_id", ForeignKey("parts.id", ondelete="CASCADE"), primary_key=True),
+    Column("enabled", Boolean, default=True),
+)
+
 # Admin: the lowest role allowed for each action (rows missing = the default in auth.PERMISSIONS).
 role_permissions = Table(
     "role_permissions", meta,

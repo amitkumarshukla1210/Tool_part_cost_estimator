@@ -37,9 +37,9 @@ from . import projects_db as db
 PART_PATH = re.compile(r"^/api/parts/(\d+)/(.+)$")
 FILE_SUFFIX = re.compile(r"\.(pdf|xlsx|zip|dxf|step|stp|stl|png|html|mp4|gif|csv)$")
 FILE_PATHS = ("simulation/video",)                      # files without a file suffix in the path
-NOT_SAVED = (re.compile(r"^fea/\d+\.png$"), re.compile(r"^sim-runs/"), re.compile(r"^saved-files"),
+NOT_SAVED = (re.compile(r"^fea/\d+\.png$"), re.compile(r"^sim-runs/"), re.compile(r"^saved-files"), re.compile(r"^output-packs"),
              re.compile(r"^files/"))                    # already saved runs and uploads, and the saved files themselves
-OWN_TABLES_SKIPPED = {"saved_files"}
+OWN_TABLES_SKIPPED = {"saved_files", "output_packs", "output_pack_auto"}   # the files made, not their inputs
 CACHE_BUSTERS = ("t", "_")                              # query parameters a page adds only to get a fresh picture
 GROUP_LABELS = {"part": "part data", "project": "project", "inserts": "insert parts", "master": "master data / rates",
                 "brand": "drawing settings (logo, company)", "software": "software version", "revisions": "part revision (3D)",
