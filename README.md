@@ -1949,6 +1949,40 @@ whole die **4,702 kg** (your tool ~4,700 kg, `fin_target_kg`). Fin die cost by c
 warns that the die set overhangs the bed and that the die height in closed condition (650 mm) is outside the press range.
 *Smallest that fits* checks the die area on the bed (the die set may overhang) and warns.
 
+## Output packs: every output of a part in one ZIP, in the background, with revisions (stage 66)
+
+One click makes **every output of a part** and saves it in the database: part panel → *Output packs* → **Make output pack**,
+or the new page **Output packs** (menu, after Parts) → *Make output pack*. The app makes it in the background: close the part
+window or the page, open it again later and the progress is there (e.g. 20 % → 30 % … 100 %). **Stop** ends it after the output
+being made. A pack cut short by closing the app runs again when the app starts.
+
+| Column (= folder in the ZIP) | Plastic / die casting / foundry / EPS / blow | Press parts (sheet metal) | Fin press die |
+|---|---|---|---|
+| Tool design pack | release pack ZIP, drawing set PDF, picture | die design pack PDF, release ZIP, drawing set | release pack ZIP, PO pack PDF |
+| 2D drawings (PDF, DXF) | tool drawing, part drawing | tool drawing, part drawing | all die part drawings PDF / DXF, fin drawing |
+| 3D (STEP, STL, viewer) | tool STEP, STL, 3D viewer | die STEP, STL, viewer | fin die STEP, STL, viewer, fin STEP |
+| Strip layout | – | strip DXF, developed blank DXF | strip layout PDF, DXF |
+| Simulation | flow simulation + analysis video (run first), report PDF, video, first-trial process parameters PDF / Excel, saved runs | forming simulation PDF, video | fin simulation (collar forming FEA, strip video), saved runs |
+| FEA | FEA of the tool parts (run first), results Excel | FEA of the die parts, results Excel | fin die FEA at the full press capacity, results Excel |
+| Tool cost – all countries | tool cost Excel / PDF, all-country comparison (part and tool landed) Excel / PDF | same | same |
+| Tool breakdown & raw material | RM cost Excel / PDF | RM cost | fin die BOM Excel, RM cost |
+| Part cost – all countries | part cost Excel / PDF, cost by country line by line Excel / PDF | same | same |
+| PO pack & production | PO pack ZIP, production data, drawing data | same | – |
+
+Columns *Revision* (Rev.00, Rev.01 …, date, who, what changed), *Stage* (the part's design stage when it was made), *Progress*
+(bar, % and the output being made; *Yes · 100 %* when ready) and **⬇ ZIP** (`<part>_Rev.00_output_pack.zip`: one folder per
+column, `00 Index.txt` lists every output and why one is missing). Each file can also be downloaded on its own. An output that
+does not apply to the part shows *n/a* (hover for the reason); one that fails never stops the pack.
+
+**Revisions:** after your first click, *Auto* is on for the part: every saved change (new STEP revision, material, cavities,
+press, inputs, rates or master data) makes the next revision by itself once the part has not changed for 2 minutes. The pack's
+own simulation and FEA runs do not count as a change. Switch *Auto* off per part; *Make a new revision now* always works. Every
+revision stays in the table and in the database (backups include them). One pack runs at a time; the others wait in line.
+With logins on, a pack runs as the user who started it (their permissions and tool groups); the page lists only your tool groups.
+
+Example: plastic cover, Rev.00 = 31-32 outputs in ~4.5 min (FEA ~3.3 min of it), ZIP ~5.5 MB. Files: `output_pack.py`,
+`frontend/output-pack.js`, `output-packs.html` / `.js`; tables `output_packs`, `output_pack_auto`.
+
 ## User guide
 
 **Help → User guide (PDF)** (`frontend/docs/DTC_User_Guide.pdf`): every page of the tool (dashboard, cost changes, import, parts and the
