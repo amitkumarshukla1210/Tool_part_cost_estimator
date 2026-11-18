@@ -2297,7 +2297,7 @@ async function finLoad(p) {
   const field = (k) => { const [label, unit, , lo, hi] = (f.spec_fields || {})[k] || [k, ""];
     return `<label>${esc(label)} (${esc(unit)}) <input type="number" step="any" min="${lo}" max="${hi}" name="${k}" value="${typed[k] ?? ""}" placeholder="${s[k] ?? ""}" /></label>`; };
   const keys = ["tube_od_mm", "hole_d_mm", "row_pitch_mm", "hole_pitch_mm", "fin_rows", "fin_holes", "foil_t_mm", "fpi", "die_rows", "progressions", "foil_width_mm",
-    "pack_length_mm", "spm", "foil_kg_per_ac_set", "tools_count"];
+    "pack_length_mm", "spm", "foil_kg_per_ac_set", "tools_count", "die_set_l_mm", "die_set_w_mm", "shut_h_mm"];
   box.innerHTML = `<h4>Fin die (heat-exchanger fin pack) · one part = one fin pack</h4>
     ${f.ok ? "" : `<p class="warn">${esc(f.problem)}</p>`}
     ${f.read ? `<p class="note"><b>Read from ${esc(read.source || "the part file")}</b>: ${Object.entries(FIN_READ).filter(([k]) => k in read).map(([k, l]) =>
@@ -2312,7 +2312,8 @@ async function finLoad(p) {
         <label class="note">Fin drawing without a STEP (DXF / PDF): <input type="file" id="finDrawing" accept=".dxf,.pdf" /></label>
         <span class="status" id="finStatus"></span></div></form>
     ${d.error ? `<p class="note">${esc(d.error)}</p>` : `<h4>Fin die design · ${esc(d.prefix)}</h4>
-      <p class="note">Die ${fmt(d.dims.die_l, 0)} × ${fmt(d.dims.die_w, 0)} mm on die set ${fmt(d.dims.base_l, 0)} × ${fmt(d.dims.base_w, 0)} mm, ${d.stations.length} stations
+      <p class="note">Die ${fmt(d.dims.die_l, 0)} × ${fmt(d.dims.die_w, 0)} mm on die set <b>${fmt(d.dims.base_l, 0)} × ${fmt(d.dims.base_w, 0)} × ${fmt(d.dims.shut_h, 0)} mm</b>
+        (die height in closed condition), weight <b>${fmt(d.dims.weight_kg, 0)} kg</b>${d.dims.target_kg ? ` (your reference die ${fmt(d.dims.target_kg, 0)} kg)` : ""}, ${d.stations.length} stations
         (${d.stations.map((x) => esc(x.name)).join(" → ")}), press ${esc(d.press || "-")}.</p>
       <p class="downloads">${FIN_FILES.map(([k, l]) => `<a class="btn btn-outline small" href="/api/parts/${p.id}/fin-design/${k}" ${k === "viewer.html" ? 'target="_blank"' : ""}>${esc(l)}</a>`).join(" ")}</p>
       <details><summary class="link">Die parts and drawings (${d.parts.length})</summary><div class="table-wrap"><table class="cost-table"><thead><tr><th>Drawing</th><th>Part</th><th class="num">Qty</th><th>Material</th><th>Hardness</th><th>Size (mm)</th></tr></thead><tbody>

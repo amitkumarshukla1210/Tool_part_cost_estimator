@@ -1916,6 +1916,39 @@ Example (default fin, EXAMPLE rates, sea freight): fin pack landed in India — 
 Korea ₹664, Germany ₹840, USA ₹819; fin die landed — India ₹55.7 lakh, Vietnam ₹61.7 lakh, China ₹75.2 lakh, Germany ₹1.94 crore.
 India is the cheapest for both here, because the foil and the die are EXAMPLE values: replace them first.
 
+## Fin die set made to size: 2400 × 1600 × 650 mm, ~4700 kg (stage 65)
+
+The fin die is now designed and costed at the size of your real tool. Before, it was a catalogue die set of two flat plates
+(IFB 66R × 4P: 1500 × 1100 mm, 300 mm high, 2,795 kg, ₹59.9 lakh).
+
+| Die size | Where it comes from |
+|---|---|
+| Length | typed on the part (fin inputs *Die set length*), else die area + 2 × `fin_set_end_mm` (550: hitch feed, cut-off, stacker), rounded up to `fin_set_round_mm` (100) |
+| Width | typed, else die area + 2 × `fin_set_side_mm` (300: guide posts, stoppers, manifolds), rounded up |
+| Die height in closed condition | typed (*Die shut height*), else `fin_shut_h_mm` (650) |
+| Riser block height | die height − (lower shoe 55 + backing 30 + sub-die 45 + stripper 25 + spring gap 10 + punch holder 35 + backing 25 + upper shoe 45) = 380 mm |
+
+All values are Mould & die database → Sizing rules fin (EXAMPLE), traced on screen. A typed size wins; a size smaller than
+the die area, or a height lower than the plate stack, is refused with the minimum to type.
+
+**Die parts** (drawings, 3D, STEP / STL, BOM, PO pack): lower and upper die shoe (2400 × 1600 × 55 / 45), 2 riser blocks
+(2400 × 45 × 380), die backing plate (lower) and punch backing plate (upper) over the die area, 4 stopper blocks (100 × 100 × 170),
+4 guide posts Ø80 with bushes, stripper springs / gas springs (4 per station = 48), 4 lifting eye bolts, plus the station parts as before.
+
+**Weight and cost** (IFB φ5 × 66R × 4P, EXAMPLE rates): die set (shoes + risers) 3,659 kg priced by weight × `base_make_factor`;
+whole die **4,702 kg** (your tool ~4,700 kg, `fin_target_kg`). Fin die cost by country:
+
+| Made in | Fin die cost | Weight |
+|---|---|---|
+| India | ₹76.8 lakh (was ₹59.9 lakh: +₹16.9 lakh) | 4,702 kg |
+| Vietnam | ₹78.6 lakh | 4,702 kg |
+| China | ₹89.9 lakh | 4,702 kg |
+| Germany | ₹2.22 crore | 4,702 kg |
+
+**Press check:** your YKC-48SH-125 (bed 2000 × 1360 mm, die height 280–330 mm, your spec sheet) is kept as it is; the design
+warns that the die set overhangs the bed and that the die height in closed condition (650 mm) is outside the press range.
+*Smallest that fits* checks the die area on the bed (the die set may overhang) and warns.
+
 ## User guide
 
 **Help → User guide (PDF)** (`frontend/docs/DTC_User_Guide.pdf`): every page of the tool (dashboard, cost changes, import, parts and the

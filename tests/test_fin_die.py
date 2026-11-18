@@ -117,7 +117,7 @@ def test_press_choice_and_warnings():
 def test_spm_is_an_input():
     base = fin_die.run({})
     fast = fin_die.run({"spm": 280})
-    assert fast["part"]["nodes"]["calc:spm"]["value"] == 280 and not fast["die"]["warnings"]
+    assert fast["part"]["nodes"]["calc:spm"]["value"] == 280 and not any("SPM" in w for w in fast["die"]["warnings"])
     assert fast["summary"]["pack_cost_inr"] < base["summary"]["pack_cost_inr"]          # faster press: less press time
     assert any("outside the YKC-48SH-125 range 150-300" in w for w in fin_die.run({"spm": 350})["die"]["warnings"])
     with pytest.raises(fin_die.FinDieError, match="not a fin press"):
