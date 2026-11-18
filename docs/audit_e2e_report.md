@@ -1,13 +1,13 @@
 # End-to-end audit report
 
-Run on the current code, 2026-11-10 00:08, 1150 calls in 15.3 min.
+Run on the current code, 2026-11-18 03:07, 1273 calls in 21.7 min.
 
 | Case | Part type | Tools | RM INR | Tool CAPEX INR | Part cost INR | Findings |
 |---|---|---|---|---|---|---|
 | plastic_low | plastic | 1 | 11.81 | 166,766.31 | 17.56 | none |
 | plastic_high | plastic | 1 | 6.28 | 2,767,258.09 | 9.30 | none |
 | plastic_large | plastic | 1 | 1,532.27 | 14,752,089.46 | 2,218.35 | none |
-| insert_moulding | plastic | 1 | 13.44 | 145,459.37 | 37.83 | none |
+| insert_moulding | plastic | 1 | 13.44 | 145,459.37 | 26.78 | none |
 | diecast_low | die_casting | 1 | 48.08 | 581,744.62 | 78.75 | none |
 | diecast_high | die_casting | 1 | 48.80 | 25,610,194.39 | 69.18 | none |
 | foundry | foundry | 1 | 19.54 | 186,030.31 | 210.34 | none |
@@ -19,6 +19,9 @@ Run on the current code, 2026-11-10 00:08, 1150 calls in 15.3 min.
 | blow | blow | 1 | 4.05 | 2,345,193.53 | 7.40 | none |
 | machined_shaft | machined | - | 86.29 | 12,000.00 | 182.99 | none |
 | machined_block | machined | - | 132.37 | 40,000.00 | 219.83 | none |
+| fin_louver | - | - | 430.57 | 7,679,003.76 | 543.55 | none |
+| fin_one_row_high | - | - | 269.49 | 7,679,003.76 | 333.80 | none |
+| fin_7mm_plain | - | - | 410.61 | 6,481,355.67 | 567.82 | none |
 
 ## Findings (0)
 
@@ -26,4 +29,7 @@ None.
 
 ## Slowest calls
 
-- 10 s robustness `/api/parts/20/drawing-data`
+- 19 s fin_louver `/api/parts/20/fin-design/all.zip`
+- 19 s fin_one_row_high `/api/parts/21/fin-design/all.zip`
+- 18 s global `/api/examples/export.xlsx`
+- 13 s fin_7mm_plain `/api/parts/22/fin-design/all.zip`
