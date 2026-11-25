@@ -121,6 +121,7 @@ async function openPart(id) {
   renderPart();
   $("panel").hidden = false;
   if (p.isFin) finLoad(p);
+  packLoad(p);                // stage 66: output packs (progress of a running pack)
   p.piecePromise = wantPiece ? get(`/api/parts/${id}/piece-cost`).then((r) => {
     p.piecePending = false;
     p.piece = r;
@@ -596,6 +597,8 @@ function renderPart() {
     ${insertsBlock(p)}
     ${mouldedIntoBlock(p)}
 
+    <div class="card" id="packBox"><h3 class="block-title" style="margin-top:0">Output packs · all outputs in one ZIP</h3><div id="packOut"><p class="note">Loading…</p></div></div>
+
     <details class="card" id="sfBox"><summary><b>Saved files</b> · every file made for this part, kept with its revisions
       (opens at once, also after a restart; made again only when its data changed)</summary><div id="sfOut"></div></details>
 
@@ -698,6 +701,39 @@ document.addEventListener("click", (e) => {
   const c = part.vs.countries.find((x) => x.country === b.dataset.vscountry);
   const trace = c && c.traces ? c.traces[b.dataset.vstrace] : null;
   if (trace && trace.nodes[b.dataset.node]) window.TracePanel.open(trace, b.dataset.node);
+});
+
+// Output packs (stage 66): asked for after the panel is shown; while a pack runs the block asks again every 3 s
+let packTimer = null;
+async function packLoad(p = part) {
+  clearTimeout(packTimer);
+  const out = $("packOut");
+  if (!out || !p) return;
+  try {
+    const o = await api(`/api/parts/${p.id}/output-packs`);
+    if (part !== p || !$("packOut")) return;
+    $("packOut").innerHTML = window.OutputPacks.panelHtml(o);
+    if (window.OutputPacks.busy(o.packs) || o.auto_in_s != null) packTimer = setTimeout(() => packLoad(p), 3000);
+  } catch (err) { out.innerHTML = `<p class="status error">${esc(err.message)}</p>`; }
+}
+document.addEventListener("click", async (e) => {
+  const t = e.target;
+  if (t.id === "pkStart" && part) {
+    t.disabled = true;
+    try { await api(`/api/parts/${part.id}/output-packs`, { method: "POST", body: JSON.stringify({ force: true }) }); }
+    catch (err) { status($("pkStatus"), err.message, "error"); }
+    packLoad();
+  } else if (t.classList.contains("pk-stop")) {
+    t.disabled = true;
+    await api(`/api/parts/${t.dataset.part}/output-packs/${t.dataset.pack}/stop`, { method: "POST" }).catch(() => null);
+    if (part && String(part.id) === t.dataset.part) packLoad();
+  }
+});
+document.addEventListener("change", async (e) => {
+  if (e.target.id === "pkAuto" && part) {
+    await api(`/api/parts/${part.id}/output-packs/auto`, { method: "PUT", body: JSON.stringify({ enabled: e.target.checked }) }).catch(() => null);
+    packLoad();
+  }
 });
 
 // Saved files (stage 47): asked for when the block is opened, so the panel never waits for it

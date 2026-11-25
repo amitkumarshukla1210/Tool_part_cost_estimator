@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design to Cost — Part Cost Estimator · Output packs</title>
+  <link rel="icon" type="image/png" href="/theme/logo.png" />
+  <link rel="stylesheet" href="/theme/dtc-theme.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/rates.css" />
+  <link rel="stylesheet" href="/static/register.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="brand" href="/">
+        <img src="/theme/logo.png" alt="Design to Cost logo" />
+        <span class="brand-text"><span class="name">Design to Cost</span><span class="tagline">Part Cost Estimator</span></span>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/dashboard">Dashboard</a></li>
+          <li><a href="/parts">Parts</a></li>
+          <li><a href="/output-packs" class="active" aria-current="page">Output packs</a></li>
+          <li><a href="/import">Import</a></li>
+          <li><a href="/bom-extract">Harness &amp; PCB</a></li>
+          <li><a href="/">Estimate</a></li>
+          <li><a href="/rates">Rates</a></li>
+          <li><a href="/master-data">Master data</a></li>
+          <li><a href="/help">Help</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="bg-grey page-head">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Outputs</p>
+          <h2>Output packs</h2>
+          <p>Every output of every part (tool design pack, 2D, 3D, strip layout, simulation, FEA, tool / RM / part cost of all countries,
+            BOM, PO pack) in one ZIP per revision. The app makes them in the background: you may close this page, the progress stays.</p>
+        </div>
+        <form class="card toolbar" id="filters">
+          <label>Project <select name="project_id"><option value="">All projects</option></select></label>
+          <label>Tool type <select name="part_type"><option value="">All</option><option value="plastic">Plastic mould</option>
+            <option value="die_casting">Die casting</option><option value="foundry">Foundry</option><option value="sheet_metal">Press parts (sheet metal)</option>
+            <option value="fin">Fin press die</option><option value="eps">EPS</option><option value="blow">Blow moulding</option><option value="machined">Machined</option></select></label>
+          <label class="grow">Search part <input type="search" name="q" placeholder="code or name" /></label>
+          <label class="note"><input type="checkbox" name="all" /> Show every revision</label>
+          <span class="status" id="status"></span>
+        </form>
+      </div>
+    </section>
+    <section>
+      <div class="container" id="out"><p class="note">Loading…</p></div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container"><p class="footnote">© Design to Cost</p></div>
+  </footer>
+  <script src="/static/common.js"></script>
+  <script src="/static/output-pack.js"></script>
+  <script src="/static/output-packs.js"></script>
+  <script src="/static/auth.js"></script>
+  <script src="/static/select-search.js"></script>
+</body>
+</html>

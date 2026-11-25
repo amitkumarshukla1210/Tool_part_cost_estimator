@@ -7,6 +7,12 @@
     loadAssistant();
     const ul = document.querySelector("header nav ul");
     if (!ul) return;
+    if (!ul.querySelector('a[href="/output-packs"]')) {      // stage 66: the Output packs page, after Parts
+      const li = document.createElement("li");
+      li.innerHTML = `<a href="/output-packs">Output packs</a>`;
+      const parts = ul.querySelector('a[href="/parts"]');
+      if (parts) parts.parentElement.after(li); else ul.appendChild(li);
+    }
     if (!ul.querySelector('a[href="/admin"]')) {
       const admin = document.createElement("li");
       admin.innerHTML = `<a href="/admin" ${location.pathname === "/admin" ? 'class="active" aria-current="page"' : ""}>Admin</a>`;

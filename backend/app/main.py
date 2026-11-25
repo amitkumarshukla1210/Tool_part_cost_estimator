@@ -2077,6 +2077,62 @@ def parts_page():
     return FileResponse(FRONTEND_DIR / "parts.html")
 
 
+@app.get("/output-packs")
+def output_packs_page():
+    return FileResponse(FRONTEND_DIR / "output-packs.html")
+
+
+# ---------------------------------------------------------------- output packs (stage 66) ----------
+
+def _pack(fn):
+    from . import output_pack
+    try:
+        return fn(output_pack)
+    except (output_pack.PackError, register.RegisterError) as exc:
+        raise HTTPException(404, str(exc)) from None
+
+
+@app.get("/api/output-packs")
+def output_packs_list(project_id: Optional[int] = None, part_type: str = ""):
+    """Output packs page: every part of your tool groups with its newest pack and all revisions."""
+    return _pack(lambda m: m.listing(project_id, part_type))
+
+
+@app.get("/api/parts/{part_id}/output-packs")
+def part_output_packs(part_id: int):
+    return _pack(lambda m: m.overview(part_id))
+
+
+@app.post("/api/parts/{part_id}/output-packs")
+def part_output_pack_start(part_id: int, data: Optional[dict] = None):
+    """Make the next revision of the output pack in the background (one ZIP of every output; progress on GET)."""
+    return _pack(lambda m: m.start(part_id, auth.current() or {"username": register.user()}, force=bool((data or {}).get("force"))))
+
+
+@app.post("/api/parts/{part_id}/output-packs/{pack_id}/stop")
+def part_output_pack_stop(part_id: int, pack_id: int):
+    return _pack(lambda m: m.stop(part_id, pack_id))
+
+
+@app.put("/api/parts/{part_id}/output-packs/auto")
+def part_output_pack_auto(part_id: int, data: dict):
+    return _pack(lambda m: m.set_auto(part_id, bool(data.get("enabled"))))
+
+
+@app.get("/api/parts/{part_id}/output-packs/{pack_id}/pack.zip")
+def part_output_pack_zip(part_id: int, pack_id: int):
+    data, name = _pack(lambda m: m.zip_file(part_id, pack_id))
+    return Response(data, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.get("/api/parts/{part_id}/output-packs/{pack_id}/items/{n}")
+def part_output_pack_item(part_id: int, pack_id: int, n: int, k: int = 0):
+    import mimetypes
+    data, name = _pack(lambda m: m.item_file(part_id, pack_id, n, k))
+    media = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    return Response(data, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
 @app.get("/import")
 def import_page():
     return FileResponse(FRONTEND_DIR / "import.html")
@@ -2164,6 +2220,12 @@ def _server_startup():
     if os.environ.get("DTC_AUTO_RATES", "").strip() == "1":     # Windows kit: monthly rate update once per new month
         from . import auto_rates
         auto_rates.start_in_background()
+    if os.environ.get("DTC_OUTPUT_PACKS", "1").strip() != "0":  # stage 66: packs cut short by a restart run again
+        try:
+            from . import output_pack
+            output_pack.resume()
+        except Exception:  # noqa: BLE001 - never stops the app
+            pass
 
 
 class LoginIn(BaseModel):
