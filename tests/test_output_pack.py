@@ -154,3 +154,33 @@ def test_with_logins_the_pack_runs_as_its_user_and_follows_tool_groups(server, n
     login(server, "sid")
     assert server.get(f"/api/parts/{pid}/output-packs").status_code == 403        # not sid's tool group
     assert all(x["id"] != pid for x in server.get("/api/output-packs").json()["parts"])
+
+
+def test_quick_zip_first_and_unchanged_design_reuses_simulation_and_fea(monkeypatch):
+    """Stage 66b: the ZIP of the files is ready before simulation / FEA run; a change that leaves the tool as it was (volume)
+    reuses their results; a change of the tool (material) runs them again."""
+    calls, seen = [], []
+
+    def fake_job(client, base, it, progress, stopped):
+        pid, pack = int(base.split("/")[3]), output_pack.packs(int(base.split("/")[3]))[0]
+        seen.append((pack["zip_stage"], bool(pack["zip_file_id"])))           # the first ZIP exists while jobs run
+        calls.append(it["path"])
+        it |= {"status": "done", "run_id": None}
+    monkeypatch.setattr(output_pack, "_do_job", fake_job)
+    cat = {k: [x for x in v if x["kind"] != "fea" and x["kind"] != "runs"] for k, v in output_pack.CATALOGUE.items()}
+    monkeypatch.setattr(output_pack, "CATALOGUE", cat)
+    pid = _part("RU")
+    r0 = _make(pid)
+    assert r0["status"] == "done" and r0["zip_stage"] == "full" and len(calls) == 3
+    assert seen and all(s == ("quick", True) for s in seen)
+    client.put(f"/api/parts/{pid}", json={"annual_volume": 150000})
+    r1 = _make(pid)
+    jobs = [x for x in r1["items"] if x["kind"] == "job"]
+    assert len(calls) == 3 and all(x["reused"] == "Rev.00" for x in jobs) and "Rev.00 used" in r1["step"]
+    client.put(f"/api/parts/{pid}", json={"material": "PP (polypropylene)"})
+    r2 = _make(pid)
+    assert len(calls) == 6 and not any(x.get("reused") for x in r2["items"] if x["kind"] == "job")
+    z = zipfile.ZipFile(io.BytesIO(client.get(f"/api/parts/{pid}/output-packs/{r2['id']}/pack.zip").content))
+    infos = {i.filename.rsplit("/", 1)[-1]: i.compress_type for i in z.infolist()}
+    assert any(n.endswith(".zip") and t == zipfile.ZIP_STORED for n, t in infos.items())          # not compressed twice
+    assert any(n.endswith(".pdf") and t == zipfile.ZIP_DEFLATED for n, t in infos.items())

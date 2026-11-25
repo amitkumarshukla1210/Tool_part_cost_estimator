@@ -20,7 +20,7 @@ window.OutputPacks = (function () {
         html = files.map((f, k) => `<a class="pk-link" title="${esc((f.label || it.label) + " · " + f.filename + " · " + kb(f.size || 0))}"
           href="/api/parts/${pid}/output-packs/${p.id}/items/${it.n}${files.length > 1 ? `?k=${k}` : ""}">${esc(kindOf(f.filename))}</a>`).join("");
       } else if (it.kind === "job") {
-        html = { done: '<span class="pk-ok">✓</span>', running: '<span class="note">…</span>', waiting: "" }[it.status]
+        html = it.reused ? `<span class="pk-ok" title="${esc(it.note || "")}">✓ ${esc(it.reused)}</span>` : { done: '<span class="pk-ok">✓</span>', running: '<span class="note">…</span>', waiting: "" }[it.status]
           ?? `<span class="pk-na" title="${esc(it.reason || it.status)}">${it.status === "failed" ? "failed" : "n/a"}</span>`;
       } else if (it.status === "running") html = '<span class="note">…</span>';
       else if (it.status !== "waiting") html = `<span class="pk-na" title="${esc(it.label + ": " + (it.reason || it.status))}">${it.status === "failed" ? "failed" : "n/a"}</span>`;
@@ -47,7 +47,8 @@ window.OutputPacks = (function () {
         <td>${esc(p.design_stage || "")}</td>
         <td class="pk-prog">${progress(p)}${p.status === "running" || p.status === "queued" ? ` <button type="button" class="btn btn-outline small pk-stop" data-part="${pid}" data-pack="${p.id}">Stop</button>` : ""}</td>
         ${cols.map((c) => `<td>${cell(pid, p, (p.groups || {})[c.key])}</td>`).join("")}
-        <td>${p.zip_file_id ? `<a class="btn btn-primary small" href="/api/parts/${pid}/output-packs/${p.id}/pack.zip" title="${esc(p.zip_name)}">⬇ ZIP</a><div class="note">${kb(p.zip_size || 0)}</div>` : ""}</td>
+        <td>${p.zip_file_id ? `<a class="btn ${p.zip_stage === "quick" ? "btn-outline" : "btn-primary"} small" href="/api/parts/${pid}/output-packs/${p.id}/pack.zip" title="${esc(p.zip_name)}">⬇ ZIP</a>
+          <div class="note">${kb(p.zip_size || 0)}${p.zip_stage === "quick" ? "<br/>files only: simulation and FEA still running" : ""}</div>` : ""}</td>
       </tr>`).join("");
   }
 
