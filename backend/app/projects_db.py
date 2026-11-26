@@ -531,6 +531,7 @@ output_packs = Table(
     Column("zip_file_id", ForeignKey("files.id")),
     Column("zip_name", String(300), default=""),
     Column("zip_size", Integer, default=0),
+    Column("zip_stage", String(10), default=""),        # quick = the files only (simulation / FEA still running), full
     Column("state", JSON),
     Column("state_hash", String(64), default=""),
     Column("auto_hash", String(64), default=""),

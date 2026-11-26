@@ -406,42 +406,74 @@ def _run(pack_id: int) -> None:
     def stopped() -> bool:
         return pack_id in _STOP
 
+    key_box: dict = {}
+
+    def design_key():
+        if "k" not in key_box:
+            key_box["k"] = job_key(part_id, p["part_type"] or "")
+        return key_box["k"]
+
+    def do(it):
+        nonlocal done_w
+        w = float(it.get("weight") or 1)
+        if it.get("status") == "done":              # a pack started again after a restart: what is made stays
+            done_w += w
+            return
+        it["status"] = "running"
+        progress(step=it["label"])
+        t0 = time.time()
+        try:
+            if it["kind"] == "job":
+                prev = _reusable(part_id, pack_id, it, design_key())
+                if prev:                            # stage 66b: the tool design has not changed since that run
+                    it |= {"status": "done", "reused": prev["rev"], "design_key": design_key(),
+                           "note": f"tool design unchanged since {prev['rev']}: its result is used", "run_id": prev.get("run_id")}
+                else:
+                    _do_job(client, base, it, lambda f: progress(w * f, it["label"]), stopped)
+                    if it.get("status") == "done":
+                        it["design_key"] = design_key()
+            elif it["kind"] == "get":
+                r = client.get(base + it["path"])
+                if r.status_code == 200 and r.content:
+                    name = _filename(r, it["path"])
+                    it |= {"status": "done", "file_id": _store(r.content, name), "filename": name, "size": len(r.content)}
+                else:
+                    it |= {"status": "n/a", "reason": _detail_text(r)}
+            elif it["kind"] == "runs":
+                _do_runs(client, base, it, p["started_at"] or p["created_at"])
+            elif it["kind"] == "fea":
+                r = client.get(base + it["path"])
+                if r.status_code == 200:
+                    content = _fea_excel(r.json(), f"{it['label']} · part {part_id}")
+                    it |= {"status": "done", "file_id": _store(content, "FEA_results.xlsx"), "filename": "FEA_results.xlsx",
+                           "size": len(content)}
+                else:
+                    it |= {"status": "n/a", "reason": _detail_text(r)}
+        except Exception as exc:  # noqa: BLE001 - one output failing never stops the pack
+            it |= {"status": "failed", "reason": str(exc)[:300]}
+        it["seconds"] = round(time.time() - t0, 1)
+        done_w += w
+        progress()
+
     try:
-        for it in items:
+        # 1) the files (drawings, 3D, costs, PO pack …): quick, then a first ZIP to download at once
+        files = [x for x in items if x["kind"] == "get"]
+        later = [x for x in items if x["kind"] != "get"]     # simulation / FEA jobs, then their results
+        for it in files:
             if stopped():
                 break
-            if it.get("status") == "done":          # a pack started again after a restart: what is made stays
-                done_w += float(it.get("weight") or 1)
-                continue
-            w = float(it.get("weight") or 1)
-            it["status"] = "running"
-            progress(step=it["label"])
-            t0 = time.time()
-            try:
-                if it["kind"] == "job":
-                    _do_job(client, base, it, lambda f: progress(w * f, it["label"]), stopped)
-                elif it["kind"] == "get":
-                    r = client.get(base + it["path"])
-                    if r.status_code == 200 and r.content:
-                        name = _filename(r, it["path"])
-                        it |= {"status": "done", "file_id": _store(r.content, name), "filename": name, "size": len(r.content)}
-                    else:
-                        it |= {"status": "n/a", "reason": _detail_text(r)}
-                elif it["kind"] == "runs":
-                    _do_runs(client, base, it, p["started_at"] or p["created_at"])
-                elif it["kind"] == "fea":
-                    r = client.get(base + it["path"])
-                    if r.status_code == 200:
-                        content = _fea_excel(r.json(), f"{it['label']} · part {part_id}")
-                        it |= {"status": "done", "file_id": _store(content, "FEA_results.xlsx"), "filename": "FEA_results.xlsx",
-                               "size": len(content)}
-                    else:
-                        it |= {"status": "n/a", "reason": _detail_text(r)}
-            except Exception as exc:  # noqa: BLE001 - one output failing never stops the pack
-                it |= {"status": "failed", "reason": str(exc)[:300]}
-            it["seconds"] = round(time.time() - t0, 1)
-            done_w += w
-            progress()
+            do(it)
+        jobs_left = [x for x in later if x["kind"] == "job" and x.get("status") != "done"]
+        if not stopped() and jobs_left and not p["zip_file_id"]:
+            progress(step="Making the first ZIP (files)")
+            zid, zname, zsize = _zip(part_id, pack_id, items, quick=True)
+            _update(pack_id, zip_file_id=zid, zip_name=zname, zip_size=zsize, zip_stage="quick",
+                    step="ZIP of the files ready; simulation and FEA running")
+        # 2) simulation and FEA (reused when the tool design has not changed), then their results
+        for it in sorted(later, key=lambda x: x["kind"] != "job"):
+            if stopped():
+                break
+            do(it)
         if stopped():
             _STOP.discard(pack_id)
             _update(pack_id, status="stopped", step="Stopped by you", items=items, finished_at=datetime.utcnow())
@@ -449,12 +481,78 @@ def _run(pack_id: int) -> None:
         progress(step="Making the ZIP")
         zid, zname, zsize = _zip(part_id, pack_id, items)
         _st, full, auto_h = _states(part_id)
-        n_ok = sum(1 for x in items if x.get("status") == "done" or x.get("files"))
-        _update(pack_id, status="done", progress=100.0, step=f"Ready: {n_ok} outputs in {round(time.time() - t_start)} s",
+        n_ok = sum(1 for x in items if (x.get("status") == "done" and x["kind"] != "job") or x.get("files"))
+        reused = sorted({x["reused"] for x in items if x.get("reused")})
+        _update(pack_id, status="done", progress=100.0, zip_stage="full",
+                step=f"Ready: {n_ok} outputs in {round(time.time() - t_start)} s"
+                     + (f" (simulation / FEA of {', '.join(reused)} used: design unchanged)" if reused else ""),
                 items=items, zip_file_id=zid, zip_name=zname, zip_size=zsize, finished_at=datetime.utcnow(),
                 end_hash=full, auto_hash=auto_h)
     finally:
         _end_session(cookies)
+
+
+def _rounded(x, nd=2):
+    if isinstance(x, float):
+        return round(x, nd)
+    if isinstance(x, (list, tuple)):
+        return [_rounded(v, nd) for v in x]
+    if isinstance(x, dict):
+        return {str(k): _rounded(v, nd) for k, v in x.items()}
+    return x
+
+
+def job_key(part_id: int, pt: str) -> str | None:
+    """What the simulation and FEA of the part depend on: the designed tool itself (parts, sizes, places, materials, gates,
+    cooling, die set), the part's 3D revision, material, process and machine, the flow / FEA rules of master data and the
+    software. A change of volume, rates or costs that leaves the tool as it was keeps the key: the results are reused."""
+    import hashlib
+    from . import fin_part, mould_db, register, saved_files
+    try:
+        d = register.part_detail(part_id, with_rm=False)
+        part = {k: d.get(k) for k in ("material", "process", "current_revision_id", "fin_inputs")}
+        part |= {k: v for k, v in d.items() if "machine" in k or k in ("cavity_check", "mould_typed")}
+        db_ = mould_db.tables()
+        mat = d.get("material")
+        rules = {"design_rules": [r for r in db_.get("design_rules", []) if r.get("part_type") == pt],
+                 "flow_rules": [r for r in db_.get("flow_rules", []) if r.get("part_type") == pt],
+                 "flow_materials": [r for r in db_.get("flow_materials", []) if r.get("material") == mat],
+                 "process_windows": [r for r in db_.get("process_windows", []) if r.get("material") == mat]}
+        if pt == "fin":
+            design = {"spec": fin_part.spec_for(part_id)["spec"],
+                      "sizing": [r for r in db_.get("sizing_rules", []) if r.get("part_type") == pt]}
+        else:
+            _d, rev, designs = register.tool_designs(part_id)
+            design = {"rev": rev.get("rev")}
+            for k, des in designs:
+                comps = []
+                for c in des.get("components", []):
+                    try:
+                        bb = c.shape.BoundingBox()
+                        size = [bb.xlen, bb.ylen, bb.zlen]
+                    except Exception:  # noqa: BLE001
+                        size = []
+                    comps.append([c.name, getattr(c, "kind", ""), getattr(c, "material", ""), _rounded(list(getattr(c, "locs", []) or [])),
+                                  _rounded(size)])
+                design[k] = {"comps": comps, **{f: _rounded(des.get(f)) for f in
+                                               ("die_set", "shut_height", "gates", "cooling", "internals", "motion", "systems", "name")}}
+        blob = json.dumps(_rounded([part, rules, design, saved_files.software_stamp()]), default=str, sort_keys=True)
+        return hashlib.sha1(blob.encode()).hexdigest()
+    except Exception:  # noqa: BLE001 - no key = no reuse, the job simply runs
+        return None
+
+
+def _reusable(part_id: int, pack_id: int, it: dict, key: str | None) -> dict | None:
+    """An earlier finished pack of the part whose same job ran (not reused from even earlier) on the same design key."""
+    if not key:
+        return None
+    for p in packs(part_id):
+        if p["id"] == pack_id or p["status"] != "done":
+            continue
+        for x in p["items"]:
+            if x.get("kind") == "job" and x.get("path") == it.get("path") and x.get("status") == "done" and x.get("design_key") == key:
+                return {"rev": x.get("reused") or p["rev"], "run_id": x.get("run_id")}
+    return None
 
 
 def _do_job(client, base, it, progress, stopped) -> None:
@@ -525,13 +623,17 @@ def _safe(text: str) -> str:
     return re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", text).replace("–", "-").strip(" .") or "file"
 
 
-def _zip(part_id: int, pack_id: int, items: list[dict]) -> tuple[int, str, int]:
+STORED = (".zip", ".mp4", ".gif", ".png", ".jpg", ".jpeg", ".xlsx", ".docx")   # already compressed: stored as they are
+
+
+def _zip(part_id: int, pack_id: int, items: list[dict], quick: bool = False) -> tuple[int, str, int]:
     d = _detail(part_id)
     p = get_pack(part_id, pack_id)
     root = _safe(f"{d['part_code']}_{p['rev']}_output_pack")
     bio = io.BytesIO()
     lines = [f"Output pack {p['rev']} of {d['part_code']} · {d['name']}", f"Made {datetime.now():%Y-%m-%d %H:%M} by {p['created_by']}",
-             f"Design stage: {p['design_stage']}; changed: {p['changed']}", ""]
+             f"Design stage: {p['design_stage']}; changed: {p['changed']}",
+             *(["FIRST ZIP: the files only; simulation and FEA are still running (the full ZIP replaces this one)."] if quick else []), ""]
     used: set = set()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as z:
         for gi, (g, glab) in enumerate(GROUPS, 1):
@@ -543,7 +645,8 @@ def _zip(part_id: int, pack_id: int, items: list[dict]) -> tuple[int, str, int]:
             for it in members:
                 files = it.get("files") or ([it] if it.get("file_id") else [])
                 if not files:
-                    lines.append(f"   - {it['label']}: {it.get('status')} {('(' + it.get('reason', '') + ')') if it.get('reason') else ''}".rstrip())
+                    why = it.get("note") if it.get("reused") else it.get("reason", "")
+                    lines.append(f"   - {it['label']}: {it.get('status')} {('(' + why + ')') if why else ''}".rstrip())
                 for f in files:
                     name = _safe(f["filename"])
                     arc = f"{folder}/{name}"
@@ -553,7 +656,8 @@ def _zip(part_id: int, pack_id: int, items: list[dict]) -> tuple[int, str, int]:
                         stem, dot, ext = name.rpartition(".")
                         arc = f"{folder}/{stem or name}_{k}{dot}{ext if stem else ''}"
                     used.add(arc)
-                    z.writestr(arc, _bytes(f["file_id"]))
+                    z.writestr(arc, _bytes(f["file_id"]),
+                               compress_type=zipfile.ZIP_STORED if name.lower().endswith(STORED) else zipfile.ZIP_DEFLATED)
                     lines.append(f"   ✓ {f.get('label') or it['label']}: {arc.split('/', 1)[1]}")
         z.writestr(f"{root}/00 Index.txt", "\n".join(lines) + "\n")
     content = bio.getvalue()

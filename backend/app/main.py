@@ -1734,12 +1734,25 @@ def parts_sheet_layout_file(part_id: int, kind: str):
     return Response(content, media_type=media, headers={"Content-Disposition": f'attachment; filename="{kind.split(".")[0]}_part_{part_id}.{kind.split(".")[1]}"'})
 
 
+_COMPARISON_KEPT: dict = {}     # stage 66b: the Excel and the PDF right after each other calculate all countries once
+
+
 def _comparison(part_id: int, countries: Optional[str], mode: str, use_fta: bool) -> dict:
-    from . import landed
+    import copy
+    import time as _time
+    from . import landed, saved_files
     if mode not in ("sea", "air"):
         raise HTTPException(400, "mode must be sea or air.")
     try:
-        return landed.compare(part_id, [c for c in (countries or "").split(",") if c.strip()] or None, mode, use_fta)
+        key = (part_id, countries or "", mode, bool(use_fta), saved_files.state_hash(saved_files.part_state(part_id)))
+        hit = _COMPARISON_KEPT.get(key)
+        if hit and _time.time() - hit[0] < 120:          # same data of the part, asked again within 2 min
+            return copy.deepcopy(hit[1])
+        res = landed.compare(part_id, [c for c in (countries or "").split(",") if c.strip()] or None, mode, use_fta)
+        for k in [k for k, v in _COMPARISON_KEPT.items() if _time.time() - v[0] >= 120] + list(_COMPARISON_KEPT)[:-15]:
+            _COMPARISON_KEPT.pop(k, None)
+        _COMPARISON_KEPT[key] = (_time.time(), copy.deepcopy(res))
+        return res
     except (ValueError, register.RegisterError) as exc:
         raise HTTPException(400, str(exc)) from None
 

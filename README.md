@@ -1980,6 +1980,19 @@ own simulation and FEA runs do not count as a change. Switch *Auto* off per part
 revision stays in the table and in the database (backups include them). One pack runs at a time; the others wait in line.
 With logins on, a pack runs as the user who started it (their permissions and tool groups); the page lists only your tool groups.
 
+**Faster packs (stage 66b):**
+
+| | Before | Now |
+|---|---|---|
+| New part (Rev.00), ZIP to download | after everything, ~5.5 min | **first ZIP after ~55 s** (all drawings, 3D, costs, PO pack); simulation and FEA run after it and the full ZIP of the same revision replaces it (~5.5 min) |
+| Next revision after a change that leaves the tool as it was (volume, rates, costs, notes) | ~5.5 min (simulation and FEA again) | **~47 s, complete**: simulation and FEA of the earlier revision are used (table shows "✓ Rev.00") |
+| Change of the tool (3D revision, material, cavities, machine, design inputs, flow / FEA rules, software) | – | simulation and FEA run again |
+
+How "the tool as it was" is decided: a key of the designed tool itself (every tool part with its size, place and material, gates,
+cooling, die set, shut height; for a fin die its spec and sizing rules), the part's 3D revision, material, process and machine,
+the flow / FEA rules of master data and the software version. Videos, ZIPs, pictures and Excel files go into the ZIP without
+being compressed again; the all-countries comparison is calculated once for its Excel and PDF.
+
 Example: plastic cover, Rev.00 = 31-32 outputs in ~4.5 min (FEA ~3.3 min of it), ZIP ~5.5 MB. Files: `output_pack.py`,
 `frontend/output-pack.js`, `output-packs.html` / `.js`; tables `output_packs`, `output_pack_auto`.
 
