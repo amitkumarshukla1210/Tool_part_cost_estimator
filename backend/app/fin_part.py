@@ -90,14 +90,15 @@ def read_revision(d: dict) -> tuple[dict | None, dict | None]:
     return _READ[key], rev
 
 
-def spec_for(part_id: int, country: str | None = None) -> dict:
-    """The confirmed fin spec of a part: read from the STEP, proposed die size, your typed Fin inputs, part data."""
+def spec_for(part_id: int, country: str | None = None, typed: dict | None = None) -> dict:
+    """The confirmed fin spec of a part: read from the STEP, proposed die size, your typed Fin inputs, part data
+    (typed: Fin inputs about to be saved, to check them first)."""
     from . import register
     d = register.part_detail(part_id, with_rm=False)
     if not is_fin(d):
         raise FinPartError("This part is not a fin part (process with part type fin).")
     read, rev = read_revision(d)
-    typed = dict(d.get("fin_inputs") or {})
+    typed = dict(d.get("fin_inputs") or {}) if typed is None else dict(typed)
     file_read = typed.pop("read", None)                       # a DXF / PDF fin drawing read on the part (no STEP)
     src = read if read and "error" not in read else file_read
     if not src and not typed.get("hole_d_mm"):
@@ -141,16 +142,21 @@ def _formulas() -> str:
     return _hash([r for k in ("cost_formulas", "formula_inputs") for r in setup[k] if r["scope"] in costing_setup.FIN_SCOPES])
 
 
+def edits(d: dict) -> dict:
+    """The part's own tool BOM changes (price, grade, make, die set) and 'for this part only' corrections of the tool cost."""
+    return {"bom": (d.get("tool_inputs") or {}).get("bom") or {}, "overrides": (d.get("trace_overrides") or {}).get("tool") or {}}
+
+
 def tool(part_id: int, country: str | None = None) -> dict:
     """The fin die of the part, shaped as a tool cost version."""
     from . import register
     f = spec_for(part_id, country)
     s, d, rev = f["spec"], f["part"], f["rev"]
-    r = fin_die.die_cost(s)
+    r = fin_die.die_cost(s, **edits(d))
     r["key"] = {"revision_id": rev["id"] if rev else None, "part_type": PART_TYPE, "material": d["material"], "country": r["country"],
                 "as_of": r["as_of"], "inputs": f["typed"], "spec": _hash(s), "tools_count": s["tools_count"],
                 "rates": sorted(x["id"] for x in r["rates_used"]), "master": register._tool_master_hash(PART_TYPE),
-                "overrides": (d.get("trace_overrides") or {}).get("tool") or {}}
+                "overrides": (d.get("trace_overrides") or {}).get("tool") or {}, "bom": edits(d)["bom"]}
     r["revision"] = {"id": rev["id"] if rev else None, "rev": rev["rev"] if rev else ""}
     r["process"] = d["process"]
     r["fin_spec"] = s
@@ -168,7 +174,7 @@ def rm(part_id: int, country: str | None = None) -> dict:
     from . import rate_engine
     f = spec_for(part_id, country)
     s, d, rev = f["spec"], f["part"], f["rev"]
-    die = fin_die.die_cost(s)
+    die = fin_die.die_cost(s, **edits(d))
     out, t = _part(f, die)
     fx = rate_engine.fx_to_inr(t, out["currency"], out["as_of"])
     t.compute("rm:inr", "Foil RM per fin pack in INR", "value * fx", "INR", money=True, names={"value": "calc:rm_cost", "fx": fx})
@@ -193,7 +199,7 @@ def piece(part_id: int, country: str | None = None) -> dict:
     d, rev = f["part"], f["rev"]
     rev_id = rev["id"] if rev else None
     if country:
-        die = fin_die.die_cost(f["spec"])
+        die = fin_die.die_cost(f["spec"], **edits(d))
         tool_v, rm_v = "live", "live"
     else:
         tv = next((v for v in register.tool_versions(part_id) if v["revision_id"] == rev_id), None)
@@ -274,7 +280,7 @@ def design(part_id: int) -> dict:
     from . import fin_die_draw
     f = spec_for(part_id)
     d = f["part"]
-    des = fin_die_draw.build(f["spec"], d["id"], f"{d['part_code']} {d['name']}".strip())
+    des = fin_die_draw.build(f["spec"], d["id"], f"{d['part_code']} {d['name']}".strip(), **edits(d))
     des["prefix"] = f"FD-{d['part_code']}"
     for i, p in enumerate(des["parts"], start=1):
         p["drawing"] = f"{des['prefix']}-{i:02d}"
@@ -307,6 +313,15 @@ def save_inputs(part_id: int, data: dict) -> dict:
     if "read" not in data and (d.get("fin_inputs") or {}).get("read"):
         clean["read"] = d["fin_inputs"]["read"]
     fin_die.normalise({**fin_die.default_spec(), **{k: v for k, v in clean.items() if k != "read"}})   # validates the values
+    if any(clean.get(k) for k in ("die_set_l_mm", "die_set_w_mm", "shut_h_mm")):   # stage 65: a die set that cannot hold the die
+        try:
+            spec = spec_for(part_id, None, typed=clean)["spec"]
+            fin_die.die_cost(spec)
+        except fin_die.FinDieError as exc:
+            if any(w in str(exc) for w in ("die set", "Shut height", "type at least")):
+                raise FinPartError(str(exc)) from None
+        except Exception:  # noqa: BLE001 - other problems (no STEP read yet …) show on the panel as before
+            pass
     register.update_part(part_id, {"fin_inputs": clean})
     return summary(part_id)
 
