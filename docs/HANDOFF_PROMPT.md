@@ -9,7 +9,7 @@ Project: **Design to Cost — Part Cost Estimator**, repository `amitkumarshukla
 I am Amit, Head of Operations / costing at an OEM (supply chain, production, strategic sourcing, projects; RM, part and tool cost,
 BOM cost and CAPEX, EBITDA, digital transformation). Answer simply, **INR first**.
 
-**State (25 Nov 2026):** stages 1–66 are built (66 = output packs: every output of a part in one ZIP, background, revisions, PR 92; 65 = fin die set made to size 2400 × 1600 × 650 mm, ~4700 kg, PR 91; 63 = search on long dropdowns, 64 = fin parts in the country comparison and landed cost, both PR 90; PR 89 = foil width follows typed die rows + fin cases in the audit) (57-62 = heat-exchanger fin dies: cost PR 83, design PR 84, FEA PR 85, fin parts in Parts PR 86, fin simulation PR 87, oil & air system), plus the audit fixes PR 78 (FEA iterative solver, `fea_max_elements`), PR 80 (FEA `fea_mesh_per_circle`, core insert pins) and PR 81 (plastic cooling rod or plate, coring saving) (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
+**State (26 Nov 2026):** stages 1–66b are built (66 = output packs, PR 92; 66b = faster packs: first ZIP ~1 min, reuse unchanged simulation / FEA, PR 93; 65 = fin die set made to size 2400 × 1600 × 650 mm, ~4700 kg, PR 91; 63 = search on long dropdowns, 64 = fin parts in the country comparison and landed cost, both PR 90; PR 89 = foil width follows typed die rows + fin cases in the audit) (57-62 = heat-exchanger fin dies: cost PR 83, design PR 84, FEA PR 85, fin parts in Parts PR 86, fin simulation PR 87, oil & air system), plus the audit fixes PR 78 (FEA iterative solver, `fea_max_elements`), PR 80 (FEA `fea_mesh_per_circle`, core insert pins) and PR 81 (plastic cooling rod or plate, coring saving) (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
 cycle, PR 53; 43 = toolmaker review, 44 = design skills, both PR 55; 45 = tool internals, production data, FEA, 3D outputs, PR 57; fixes PR 59, 61, 62;
 46 = cavities, gate, overflow, ejection, cooling of the mould, PR 64; 47 = saved files with revisions, 48 = India vs China per cost line,
 49 = scrap reuse and scrap rate % of RM, all PR 66; 50 = several countries per part, traces for admin, tool life per part,
@@ -183,6 +183,10 @@ What the later stages added (details in README):
   DTC_PACK_WATCH_S 30 s, next revision after DTC_PACK_DELAY_S 120 s unchanged; `auto_hash` excludes JOB_TABLES (sim_runs,
   tool_fea_runs, fin_fea_*) so a pack never triggers the next. saved_files skips output_pack tables and `output-packs` paths.
   Plastic pack ~32 outputs / 4.6 min (FEA 3.3 min). Full suite 575 passed; audit 0 findings.
+- 66b (PR 93): `_run` phases: GET files → first ZIP (`zip_stage` quick) → jobs (reused via `job_key` = designed tool parts /
+  sizes / places / materials, gates, cooling, die set; fin spec + sizing rules; 3D rev, material, process, machine, flow / FEA rules,
+  software; `_reusable` from an earlier done pack) → runs / FEA results → full ZIP. STORED for .zip/.mp4/.png/.xlsx. main._comparison
+  keeps the all-countries result 2 min per part state. Rev.00 first ZIP 55 s; volume-change revision 47 s complete. Suite 576 passed.
 - To open a STEP: his CAD, eDrawings Viewer (SOLIDWORKS free downloads; not "3DEXPERIENCE Exchange", that is a SOLIDWORKS add-in),
   CAD Assistant, FreeCAD, or the app's own 3D viewer. Windows 3D Viewer opens the STL, not STEP.
 - Amit's PC: kit at `D:\Project\DTC Tool and mould`, app on port 8100, CalculiX 2.22 `ccx_static.exe` in
