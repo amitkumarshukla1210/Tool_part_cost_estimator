@@ -77,3 +77,43 @@ def test_typed_die_set_on_the_fin_part():
     assert (d["dims"]["base_l"], d["dims"]["base_w"], d["dims"]["shut_h"]) == (2600, 1700, 700)
     tool = client.get(f"/api/parts/{pid}/tool-cost/trace").json()
     assert tool["nodes"]["tool_weight"]["value"] == pytest.approx(d["dims"]["weight_kg"], abs=0.5)   # stored tool cost follows
+
+
+def test_part_edits_of_a_fin_die_are_used():
+    """Bugs found in testing: a fin part ignored its own tool BOM changes and 'for this part only' corrections, and a catalogue
+    die set chosen for it kept the made-to-size weight."""
+    from fastapi.testclient import TestClient
+    from backend.app.main import app
+    from tests.test_fin_part import fin_part_id
+    client = TestClient(app)
+    pid, _ = fin_part_id("FIN-E")
+    tr = client.get(f"/api/parts/{pid}/tool-cost/trace").json()
+    feed = next(l for l in tr["lines"] if l["element"] == "Hitch-finger feed unit")
+    assert client.put(f"/api/parts/{pid}/tool-bom", json={"key": feed["key"], "line": {"price_each": feed["total"] + 100000}}).status_code == 200
+    tr2 = client.get(f"/api/parts/{pid}/tool-cost/trace").json()
+    assert tr2["value_inr"] > tr["value_inr"] + 50000                                   # your price is in the fin die cost
+    assert client.put(f"/api/parts/{pid}/trace-override", json={"scope": "tool", "node": "v:station_min_mm", "value": 160,
+                                                                 "note": "test"}).status_code == 200
+    assert client.get(f"/api/parts/{pid}/tool-cost/trace").json()["nodes"]["v:station_min_mm"]["value"] == 160
+    base = next(l for l in tr2["lines"] if l.get("is_base"))
+    assert client.put(f"/api/parts/{pid}/tool-bom", json={"key": base["key"], "line": {"base": "2515"}}).status_code == 200
+    tr3 = client.get(f"/api/parts/{pid}/tool-cost/trace").json()
+    cat = next(b for b in mould_db.tables()["mould_bases"] if b["part_type"] == "fin" and b["size_code"] == "2515")
+    line = next(l for l in tr3["lines"] if l.get("is_base"))
+    assert line["element"] == "Fin die set 2515" and tr3["nodes"]["v:base_weight_kg"]["value"] == pytest.approx(cat["weight_kg"])
+    d = client.get(f"/api/parts/{pid}/fin-design").json()                               # the design follows your choice
+    assert (d["dims"]["base_l"], d["dims"]["base_w"]) == (cat["length_mm"], cat["width_mm"]) and not d["dims"]["sized"]
+    r = client.put(f"/api/parts/{pid}/fin", json={"shut_h_mm": 100})                    # refused when saved, not later
+    assert r.status_code == 400 and "type at least 270 mm" in r.text
+
+
+def test_made_to_size_die_set_price_for_the_future_says_how():
+    from fastapi.testclient import TestClient
+    from backend.app.main import app
+    from tests.test_fin_part import fin_part_id
+    client = TestClient(app)
+    pid, _ = fin_part_id("FIN-F")
+    tr = client.get(f"/api/parts/{pid}/tool-cost/trace").json()
+    bl = next(l for l in tr["lines"] if l.get("is_base"))
+    r = client.post("/api/trace/save-default", json={"ref": tr["nodes"][bl["nodes"]["bo"]]["ref"], "value": 123456, "note": "t"})
+    assert r.status_code == 400 and "made to size" in r.text and "base_make_factor" in r.text

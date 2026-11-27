@@ -1108,7 +1108,8 @@ def _fin_part_design(part_id: int):
     import json as _json
     from . import fin_part
     f = _finp(fin_part.spec_for, part_id)
-    key = (part_id, f["part"]["part_code"], f["part"]["name"], _json.dumps(f["spec"], sort_keys=True, default=str))
+    key = (part_id, f["part"]["part_code"], f["part"]["name"], _json.dumps(f["spec"], sort_keys=True, default=str),
+           _json.dumps(fin_part.edits(f["part"]), sort_keys=True, default=str))     # the part's own tool BOM changes
     if key not in _FIN_PART_DESIGNS:
         if len(_FIN_PART_DESIGNS) > 8:
             _FIN_PART_DESIGNS.pop(next(iter(_FIN_PART_DESIGNS)))

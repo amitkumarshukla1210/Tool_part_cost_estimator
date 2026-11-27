@@ -52,10 +52,11 @@ def des_weight(die: dict) -> float:
     return round(n["value"], 1) if n else 0.0
 
 
-def build(spec: dict, fid: int | None = None, name: str = "Fin die") -> dict:
-    """The fin die design of a spec: geometry, stations, die parts (with drawing numbers), BOM and the cost behind it."""
+def build(spec: dict, fid: int | None = None, name: str = "Fin die", bom: dict | None = None, overrides: dict | None = None) -> dict:
+    """The fin die design of a spec: geometry, stations, die parts (with drawing numbers), BOM and the cost behind it
+    (bom / overrides: the part's own tool BOM changes, e.g. the die set chosen for it)."""
     s = fin_die.normalise(spec)
-    die = fin_die.die_cost(s)
+    die = fin_die.die_cost(s, bom, overrides)
     rules = mould_db.sizing_rules(fin_die.PART_TYPE)
     R = lambda k: float(rules[k]["value"])
     g = die["die"]

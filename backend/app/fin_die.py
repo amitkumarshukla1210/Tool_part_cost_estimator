@@ -683,15 +683,18 @@ class _FinDieRun(_Run):
             self.master(nid, f"Density of {P20} (die shoes and risers)", float((mat or {}).get("density_g_cm3") or 7.85), "g/cm³",
                         "Mould & die database → Tool materials", P20, bool((mat or {}).get("is_example")),
                         ref=_ref("mould_db", "tool_materials", {"code": P20}, "density_g_cm3"))
-        elif name in ("base_l", "base_w", "base_stack_h", "base_weight_kg") and self.sized.get("made_to_size"):
+        elif name == "set_weight_kg":
+            t.compute(nid, "Die set weight (upper + lower shoe and riser blocks)",
+                      "(set_l * set_w * (fin_lower_shoe_mm + fin_upper_shoe_mm) + fin_riser_count * set_l * fin_riser_w_mm * riser_h)"
+                      " * set_density / 1e6", "kg",
+                      names={k: self.var(k) for k in ("set_l", "set_w", "fin_lower_shoe_mm", "fin_upper_shoe_mm", "fin_riser_count",
+                                                      "fin_riser_w_mm", "riser_h", "set_density")})
+        elif name in ("base_l", "base_w", "base_stack_h", "base_weight_kg") and (self.sized.get("base") or {}).get("made_to_size"):
+            # the made-to-size set (a catalogue die set chosen for the part instead is read from Mould bases)
+            src = {"base_l": "set_l", "base_w": "set_w", "base_stack_h": "shut_h", "base_weight_kg": "set_weight_kg"}[name]
             if name == "base_weight_kg":
-                t.compute(nid, "Die set weight (upper + lower shoe and riser blocks)",
-                          "(set_l * set_w * (fin_lower_shoe_mm + fin_upper_shoe_mm) + fin_riser_count * set_l * fin_riser_w_mm * riser_h)"
-                          " * set_density / 1e6", "kg",
-                          names={k: self.var(k) for k in ("set_l", "set_w", "fin_lower_shoe_mm", "fin_upper_shoe_mm", "fin_riser_count",
-                                                          "fin_riser_w_mm", "riser_h", "set_density")})
+                t.compute(nid, "Die set weight", "x", "kg", names={"x": self.var(src)})
             else:
-                src = {"base_l": "set_l", "base_w": "set_w", "base_stack_h": "shut_h"}[name]
                 t.compute(nid, {"base_l": "Die set length", "base_w": "Die set width", "base_stack_h": "Die height in closed condition"}[name],
                           "x", "mm", names={"x": self.var(src)})
         elif name in OIL_VARS:                               # stage 62: the oil & air system of the die
@@ -739,7 +742,7 @@ class _FinDieRun(_Run):
         base = {"part_type": PART_TYPE, "series": "Fin die set (made to size)", "size_code": f"{L:.0f}×{W:.0f}×{H:.0f}",
                 "length_mm": L, "width_mm": W, "max_insert_length_mm": L, "max_insert_width_mm": W,
                 "clamp_plates_mm": float(rules["fin_lower_shoe_mm"]["value"]), "upper_shoe_mm": float(rules["fin_upper_shoe_mm"]["value"]),
-                "stack_height_mm": H, "riser_h_mm": rh, "weight_kg": round(v("base_weight_kg"), 1), "cost": 0, "material": P20,
+                "stack_height_mm": H, "riser_h_mm": rh, "weight_kg": round(v("set_weight_kg"), 1), "cost": 0, "material": P20,
                 "make": "Made to order", "is_example": ex, "made_to_size": True,
                 "notes": "Upper + lower shoe and riser blocks (P20), priced by weight × base_make_factor"}
         return {"base": base, "base_turned": False, "layout": {"rows": 1, "cols": 1, "empty": 0}, "rules": rules,
@@ -866,7 +869,8 @@ class _FinDieRun(_Run):
         return out
 
 
-def die_cost(s: dict) -> dict:
+def die_cost(s: dict, bom: dict | None = None, overrides: dict | None = None) -> dict:
+    """The fin die cost of a spec; bom / overrides = the part's own tool BOM changes and 'for this part only' corrections."""
     pattern = pattern_row(s["pattern"])
     mat = _density(s["material"])
     foil_w, _ = foil_width(s)
@@ -874,7 +878,7 @@ def die_cost(s: dict) -> dict:
     stroke_g = foil_w * feed * s["foil_t_mm"] * float(mat["density_g_cm3"]) / 1000
     inp = ToolInput(part_type=PART_TYPE, cavities=1, part_length_mm=feed, part_width_mm=foil_w, part_height_mm=s["foil_t_mm"],
                     part_weight_g=stroke_g, material=s["material"], country=s["country"] or None, as_of=s.get("as_of") or None,
-                    tools_count=s["tools_count"], warranty=s["warranty"], annual_volume=0, programme_years=s["programme_years"])
+                    tools_count=s["tools_count"], warranty=s["warranty"], annual_volume=0, programme_years=s["programme_years"], bom=bom or {}, overrides=overrides or {})
     try:
         return _FinDieRun(inp, s, pattern).run()
     except ToolCostError as exc:

@@ -130,6 +130,10 @@ def save_default(ref: dict | None = None, rate: dict | None = None, value=None, 
         raise RegisterError(f"Master data has no table '{ref['table']}'.")
     row = next((r for r in rows if all(str(r.get(k)) == str(v) for k, v in ref["match"].items())), None)
     if row is None:
+        if ref["table"] == "mould_bases" and "made to size" in str(ref["match"].get("series", "")):
+            raise RegisterError("This fin die set is made to size (stage 65): its price = weight × steel rate × base_make_factor. "
+                                "Change the Sizing rules fin (shoes, risers, base_make_factor) for every die, or correct the price "
+                                "for this part only.")
         raise RegisterError(f"The master-data row {ref['match']} no longer exists in {ref['table']}.")
     col = ref["column"]
     old = row.get(col)

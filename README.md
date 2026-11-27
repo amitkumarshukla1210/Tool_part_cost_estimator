@@ -1945,6 +1945,12 @@ whole die **4,702 kg** (your tool ~4,700 kg, `fin_target_kg`). Fin die cost by c
 | China | ₹89.9 lakh | 4,702 kg |
 | Germany | ₹2.22 crore | 4,702 kg |
 
+**Your own changes on a fin part are used (fix after testing, 26 Nov 2026):** the price, steel grade or make you change on a
+fin die BOM line, a value you correct *for this part only* in the trace, and a catalogue die set you choose with *Use for this
+part* are now in the fin die cost, the fin pack cost (every country) and the fin die design (before they were saved but not used).
+A die set you choose from Mould bases replaces the made-to-size set, with its own weight. A die height in closed condition
+lower than the plate stack is refused when you save it ("type at least 270 mm").
+
 **Press check:** your YKC-48SH-125 (bed 2000 × 1360 mm, die height 280–330 mm, your spec sheet) is kept as it is; the design
 warns that the die set overhangs the bed and that the die height in closed condition (650 mm) is outside the press range.
 *Smallest that fits* checks the die area on the bed (the die set may overhang) and warns.
