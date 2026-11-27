@@ -11,19 +11,23 @@ from tests.test_versus import _costed
 
 client = TestClient(app)
 NAME = "Design to Cost"
+FOOTER = "Copyright © 2026 Design to Cost, all rights reserved"
 
 
 def _pdf_branded(data: bytes) -> bool:
     import pdfplumber
     with pdfplumber.open(io.BytesIO(data)) as doc:
         page = doc.pages[0]
-        return NAME in (page.extract_text() or "") and bool(page.images)          # name and a picture (the logo)
+        footers = all(FOOTER in (p.extract_text() or "") for p in doc.pages)    # stage 67: the copyright on every page
+        return NAME in (page.extract_text() or "") and bool(page.images) and footers   # name and a picture (the logo)
 
 
 def _xlsx_branded(data: bytes) -> bool:
     from openpyxl import load_workbook
-    ws = load_workbook(io.BytesIO(data)).worksheets[0]
-    return ws.oddHeader.center.text == NAME or bool(getattr(ws, "_images", []))
+    wb = load_workbook(io.BytesIO(data))
+    ws = wb.worksheets[0]
+    footers = all(w.oddFooter.center.text == FOOTER for w in wb.worksheets)     # stage 67: every sheet
+    return (ws.oddHeader.center.text == NAME or bool(getattr(ws, "_images", []))) and footers
 
 
 def _check(url: str, data: bytes):

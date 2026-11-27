@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from openpyxl import load_workbook
+from tests.xl import load_workbook          # stage 67: without the brand rows
 
 from backend.app import mould_db, rates, tool_cost
 from backend.app.main import app

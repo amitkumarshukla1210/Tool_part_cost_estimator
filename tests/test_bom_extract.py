@@ -146,7 +146,8 @@ def test_api_review_edit_status_and_export():
     assert e["status"] == "reviewed" and e["reviewed_by"]
     e = client.put(f"/api/bom-extracts/{e['id']}/lines/{low['id']}", json={"qty": 4}).json()
     assert e["status"] == "draft"                                                # an edit after review reopens it
-    wb = load_workbook(io.BytesIO(client.get(f"/api/bom-extracts/{e['id']}/export.xlsx").content))
+    from tests.xl import load_workbook as load_plain      # stage 67: without the brand rows
+    wb = load_plain(io.BytesIO(client.get(f"/api/bom-extracts/{e['id']}/export.xlsx").content))
     assert wb.sheetnames == ["BOM", "Summary"] and wb["BOM"].max_row == len(e["lines"]) + 1
     assert any(x["id"] == e["id"] for x in client.get("/api/bom-extracts").json())
     assert client.delete(f"/api/bom-extracts/{e['id']}/lines/{low['id']}").status_code == 200

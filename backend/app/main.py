@@ -2649,10 +2649,10 @@ async def brand_downloads(request: Request, call_next):
     response = await call_next(request)
     kind = branding.MEDIA.get((response.headers.get("content-type") or "").split(";")[0].strip())
     path = request.url.path
-    if not kind or not path.startswith("/api/") or any(path.endswith(x) for x in branding.SKIP) or response.status_code != 200:
+    if not kind or not path.startswith("/api/") or response.status_code != 200:
         return response
     body = b"".join([chunk async for chunk in response.body_iterator])
-    body = branding.stamp(body, "x." + kind)
+    body = branding.stamp(body, "x." + kind, upload=any(path.endswith(x) for x in branding.UPLOAD))   # stage 67
     headers = {k: v for k, v in response.headers.items() if k.lower() != "content-length"}
     return Response(body, status_code=200, headers=headers, media_type=response.headers.get("content-type"))
 

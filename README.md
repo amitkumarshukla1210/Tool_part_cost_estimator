@@ -2002,6 +2002,19 @@ being compressed again; the all-countries comparison is calculated once for its 
 Example: plastic cover, Rev.00 = 31-32 outputs in ~4.5 min (FEA ~3.3 min of it), ZIP ~5.5 MB. Files: `output_pack.py`,
 `frontend/output-pack.js`, `output-packs.html` / `.js`; tables `output_packs`, `output_pack_auto`.
 
+## Header and copyright footer on every PDF and Excel (stage 67)
+
+| File | Header | Footer |
+|---|---|---|
+| PDF (every page) | logo + company name top left (a page that already shows the name, e.g. a drawing title block, keeps its own) | "Copyright © 2026 Design to Cost, all rights reserved", bottom centre |
+| Excel (every sheet) | **two new rows at the top**: logo + company name in row 1, the sheet's own title / table from row 3 (before: a floating picture to the right of the table on the first sheet only); also in the printed page header | the copyright line under the data, and in the printed page footer |
+| Excel you fill in and upload again (master data, mould & die database, costing setup, rates, register setup, import template, price master, drawing data) | printed page header only: **cells stay where they are**, so the upload keeps working | printed page footer only |
+| ZIP packs (PO pack, release pack, output packs) | the same for every PDF and Excel inside | |
+
+When the rows move, everything that points at the cells moves with them: formulas (also those on other sheets), merged cells,
+frozen panes, filters, validations, conditional formats and pictures. A workbook with charts keeps its cells (its picture and
+footer are still added). Nothing is recalculated: ₹0 effect. File: `branding.py` (`FOOTER`, `UPLOAD`).
+
 ## User guide
 
 **Help → User guide (PDF)** (`frontend/docs/DTC_User_Guide.pdf`): every page of the tool (dashboard, cost changes, import, parts and the

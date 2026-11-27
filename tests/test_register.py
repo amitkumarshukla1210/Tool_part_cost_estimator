@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from openpyxl import load_workbook
+from tests.xl import load_workbook          # stage 67: without the brand rows
 from sqlalchemy import insert
 
 from backend.app import projects_db as db
