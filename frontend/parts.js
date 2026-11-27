@@ -122,6 +122,7 @@ async function openPart(id) {
   $("panel").hidden = false;
   if (p.isFin) finLoad(p);
   packLoad(p);                // stage 66: output packs (progress of a running pack)
+  famLoad(p);                 // stage 68: the part's family tool and its switch
   p.piecePromise = wantPiece ? get(`/api/parts/${id}/piece-cost`).then((r) => {
     p.piecePending = false;
     p.piece = r;
@@ -591,6 +592,7 @@ function renderPart() {
     ${loopBlock(p)}
     ${rmBlock(p)}
     ${toolBlock(p)}
+    <div id="famOut"></div>
     <div id="pieceBox">${pieceBlock(p)}</div>
     ${sheetBlock(p)}
     ${compareBlock(p)}
@@ -734,6 +736,29 @@ document.addEventListener("change", async (e) => {
     await api(`/api/parts/${part.id}/output-packs/auto`, { method: "PUT", body: JSON.stringify({ enabled: e.target.checked }) }).catch(() => null);
     packLoad();
   }
+});
+
+// Family tool (stage 68): the family the part is in, its share and the switch family tool / own tool
+async function famLoad(p = part) {
+  const out = $("famOut");
+  if (!out || !p || p.is_assembly) return;
+  const f = await api(`/api/parts/${p.id}/family`).catch(() => ({}));
+  if (part !== p || !$("famOut")) return;
+  if (!f.family_id) {
+    out.innerHTML = `<p class="note">Family tool: none · <a class="link" href="/family-tools">make one mould / die for 2–4 parts</a></p>`;
+    return;
+  }
+  const s = f.share;
+  out.innerHTML = `<div class="card"><b>Family tool <a class="link" href="/family-tools?id=${f.family_id}">${esc(f.code)}</a></b> · ${esc(f.mode_label)}
+    ${s ? ` · share ${fmt(s.pct, 2)} % = tool INR ${fmt(s.cost_inr, 0)} · CAPEX INR ${fmt(s.capex_inr, 0)} (version ${f.version})` : " · not calculated yet"}
+    <div><label class="choice"><input type="radio" name="famUse" value="1" ${f.use_family ? "checked" : ""}/> part cost &amp; CAPEX use the family tool</label>
+    <label class="choice"><input type="radio" name="famUse" value="0" ${f.use_family ? "" : "checked"}/> use the part's own tool (above)</label></div></div>`;
+  out.dataset.family = f.family_id;
+}
+document.addEventListener("change", async (e) => {
+  if (e.target.name !== "famUse" || !part) return;
+  await api(`/api/families/${$("famOut").dataset.family}/parts/${part.id}/use`, { method: "PUT", body: JSON.stringify({ use_family: e.target.value === "1" }) }).catch(() => null);
+  famLoad();
 });
 
 // Saved files (stage 47): asked for when the block is opened, so the panel never waits for it

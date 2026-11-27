@@ -508,12 +508,88 @@ def robustness(a: Audit) -> None:
         a.call("robustness", "get", f"/api/projects/999999{u}", expect="any")
     a.call("robustness", "get", f"/api/projects/{proj['id']}/cost-changes", expect="any", params={"since": "not-a-date"})
     a.call("robustness", "get", "/api/files/999999", expect="any")
+    for u in ("", "/status", "/trace", "/export.pdf", "/layout.pdf", "/export.xlsx", "/pack.zip"):      # stage 68
+        a.call("robustness", "get", f"/api/families/999999{u}", expect="any")
+    a.call("robustness", "post", "/api/families", expect="any", json={"code": "", "members": []})
+    a.call("robustness", "post", "/api/families", expect="any", json={"code": "F", "members": [{"part_id": 999999}, {"part_id": 999998}]})
+
+
+FAMILY_CASES = [  # stage 68: family tools (name, mode, members: (file, material, process, cavities))
+    ("family_plastic", "same_shot", [("plastic_cover.step", "ABS", "injection_moulding", 2), ("large_plastic_tub.step", "PP (polypropylene)", "injection_moulding", 1)]),
+    ("family_eps", "same_shot", [("plastic_cover.step", "EPS bead grade S (20 kg/m3)", "eps_moulding", 1)] * 3),
+    ("family_diecast", "same_shot", [("plastic_cover.step", "Aluminium ADC12 / A383", "die_casting", 2)] * 2),
+    ("family_sheet_stroke", "same_shot", [("sheet_metal_bracket.step", "Mild steel CRCA / HR", "sheet_metal_multistage", None),
+                                          ("example_bracket_revA.step", "Galvanised steel GI", "sheet_metal_multistage", None)]),
+    ("family_sheet_swap", "swap_inserts", [("sheet_metal_bracket.step", "Mild steel CRCA / HR", "sheet_metal_progressive", None),
+                                           ("example_bracket_revA.step", "Mild steel CRCA / HR", "sheet_metal_progressive", None)]),
+]
+
+
+def run_family_case(a: Audit, name, mode, members) -> dict:
+    """A family tool end to end: the parts, their own tool cost, the family (live, stored), each part's share in its part cost,
+    the switch to the own tool and back, and every family output."""
+    c = a.c
+    proj = c.post("/api/projects", json={"code": name.upper().replace("_", "-")[:18], "name": f"Audit {name}"}).json()
+    ids = []
+    for k, (file, material, process, cav) in enumerate(members, start=1):
+        with open(SAMPLES / file, "rb") as fh:
+            m = a.call(name, "post", "/api/import/step", files={"file": (file, fh)})
+        r = a.call(name, "post", f"/api/import/{m['token']}/commit", json={"project_id": proj["id"], "items": {m["root"]: {
+            "material": material, "process": process, "part_code": f"{name.upper()}-{k}"}}})
+        pid = r["part_ids"][0]
+        ids.append(pid)
+        for u in ("rm-cost", "tool-cost"):
+            a.call(name, "post", f"/api/parts/{pid}/{u}", json={})
+    body = {"code": f"FAM-{name.upper()}"[:40], "name": name, "mode": mode,
+            "members": [{"part_id": pid, "cavities": mem[3]} for pid, mem in zip(ids, members)]}
+    fam = a.call(name, "post", "/api/families", json=body)
+    if not fam:
+        return {"case": name}
+    fid = fam["id"]
+    st = a.call(name, "get", f"/api/families/{fid}/status")
+    if st and st["problem"]:
+        a._find(name, "family status", "family tool not priced", st["problem"][:300])
+    a.call(name, "post", f"/api/families/{fid}/calculate", json={})
+    tr = a.call(name, "get", f"/api/families/{fid}/trace") or {}
+    _positive(a, name, "family tool cost", tr.get("value_inr"))
+    shares = tr.get("shares") or []
+    if shares and abs(sum(s["pct"] for s in shares) - 100) > 1e-6:
+        a._find(name, "family shares", "share % do not add up to 100", repr([s["pct"] for s in shares]))
+    if tr.get("capex_inr") and abs(sum(s["capex_inr"] or 0 for s in shares) - tr["capex_inr"]) > 0.01:
+        a._find(name, "family shares", "CAPEX shares do not add up to the family CAPEX", "")
+    dangling = [n for x in (tr.get("nodes") or {}).values() for n in (i["node"] for i in x.get("inputs", [])) if n not in tr["nodes"]]
+    if dangling:
+        a._find(name, "family trace", "a step uses a value that is not in the trace", ", ".join(dangling[:5]))
+    piece = {}
+    for pid in ids:
+        part = a.call(name, "get", f"/api/parts/{pid}") or {}
+        sh = next((s for s in shares if s["part_id"] == pid), None)
+        if sh and sh["capex_inr"] is not None and abs((part.get("tool_capex_inr") or 0) - sh["capex_inr"]) > 0.01:
+            a._find(name, f"/api/parts/{pid}", "register CAPEX is not the family share", "")
+        a.call(name, "post", f"/api/parts/{pid}/piece-cost", json={})
+        pc = a.call(name, "get", f"/api/parts/{pid}/piece-cost") or {}
+        live = pc.get("live") or {}
+        if (live.get("family") or {}).get("code") != body["code"]:
+            a._find(name, f"/api/parts/{pid}/piece-cost", "part cost does not use the family tool", pc.get("problem", "")[:200])
+        piece[pid] = live.get("value")
+        _positive(a, name, f"part cost {pid}", live.get("value"))
+    a.call(name, "put", f"/api/families/{fid}/parts/{ids[0]}/use", json={"use_family": False})
+    own = (a.call(name, "get", f"/api/parts/{ids[0]}/piece-cost") or {}).get("live") or {}
+    if own.get("family"):
+        a._find(name, "family switch", "own tool chosen but the part cost still uses the family", "")
+    a.call(name, "put", f"/api/families/{fid}/parts/{ids[0]}/use", json={"use_family": True})
+    for url, kind in (("export.pdf", "pdf"), ("layout.pdf", "pdf"), ("export.xlsx", "xlsx"), ("pack.zip", "zip")):
+        a.call(name, "get", f"/api/families/{fid}/{url}", file_kind=kind)
+    a.call(name, "get", "/api/families")
+    a.call(name, "post", "/api/families", expect="na", json=body | {"code": body["code"] + "-X"})     # parts already in a family
+    return {"case": name, "tools": len(tr.get("dies") or []) or 1, "tool_inr": tr.get("capex_inr"),
+            "piece_inr": piece.get(ids[0]), "rm_inr": None}
 
 
 def report(a: Audit, results: list[dict], out: Path, seconds: float) -> None:
     lines = ["# End-to-end audit report", "", f"Run on the current code, {time.strftime('%Y-%m-%d %H:%M')}, {len(a.rows)} calls in {seconds / 60:.1f} min.", ""]
     lines += ["| Case | Part type | Tools | RM INR | Tool CAPEX INR | Part cost INR | Findings |", "|---|---|---|---|---|---|---|"]
-    types = {c[0]: c[5] for c in CASES}
+    types = {c[0]: c[5] for c in CASES} | {c[0]: "family" for c in FAMILY_CASES}
     for r in results:
         case = (r["case"], 0, 0, 0, 0, types.get(r["case"], ""))
         f = [x for x in a.findings if x["case"] == r["case"]]
@@ -561,6 +637,18 @@ def main(argv=None) -> int:
         print(f"== {case[0]}", flush=True)
         try:
             results.append(run_fin_case(a, *case))
+        except Exception:                                       # noqa: BLE001
+            a._find(case[0], "(script)", "audit step crashed", traceback.format_exc().strip().splitlines()[-1])
+            results.append({"case": case[0]})
+        for x in a.findings:
+            if x["case"] == case[0]:
+                print(f"   FINDING {x['url']}: {x['what']} {x['detail'][:200]}", flush=True)
+    for case in ([] if args.robust else FAMILY_CASES):
+        if args.only and args.only not in case[0]:
+            continue
+        print(f"== {case[0]}", flush=True)
+        try:
+            results.append(run_family_case(a, *case))
         except Exception:                                       # noqa: BLE001
             a._find(case[0], "(script)", "audit step crashed", traceback.format_exc().strip().splitlines()[-1])
             results.append({"case": case[0]})

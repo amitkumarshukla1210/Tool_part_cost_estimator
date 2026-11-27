@@ -13,6 +13,11 @@
       const parts = ul.querySelector('a[href="/parts"]');
       if (parts) parts.parentElement.after(li); else ul.appendChild(li);
     }
+    if (!ul.querySelector('a[href="/family-tools"]')) {      // stage 68: the Family tools page, after Output packs
+      const li = document.createElement("li");
+      li.innerHTML = `<a href="/family-tools">Family tools</a>`;
+      ul.querySelector('a[href="/output-packs"]').parentElement.after(li);
+    }
     if (!ul.querySelector('a[href="/admin"]')) {
       const admin = document.createElement("li");
       admin.innerHTML = `<a href="/admin" ${location.pathname === "/admin" ? 'class="active" aria-current="page"' : ""}>Admin</a>`;

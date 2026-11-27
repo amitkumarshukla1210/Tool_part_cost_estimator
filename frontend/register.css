@@ -174,3 +174,6 @@ label.check.small { font-size: .75rem; display: inline-flex; gap: 4px; align-ite
 
 /* cost change report (stage 55): a change of ±cost_change_flag_pct or more */
 .cost-table tr.over td:first-child { box-shadow: inset 4px 0 0 var(--danger); }
+/* stage 68: inline choice (radio / checkbox) labels, e.g. family tool / own tool */
+label.choice { display: inline-flex; align-items: center; gap: 4px; margin: 0 12px 0 0; text-transform: none; letter-spacing: 0;
+  font-weight: 400; font-size: 12px; white-space: nowrap; }
