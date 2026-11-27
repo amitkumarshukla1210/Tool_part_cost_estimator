@@ -1,6 +1,6 @@
 # End-to-end audit report
 
-Run on the current code, 2026-11-26 11:25, 1273 calls in 28.8 min.
+Run on the current code, 2026-11-27 03:34, 1273 calls in 27.9 min.
 
 | Case | Part type | Tools | RM INR | Tool CAPEX INR | Part cost INR | Findings |
 |---|---|---|---|---|---|---|
@@ -29,17 +29,18 @@ None.
 
 ## Slowest calls
 
-- 32 s fin_one_row_high `/api/parts/21/fin-design/all.zip`
+- 33 s fin_one_row_high `/api/parts/21/fin-design/all.zip`
 - 30 s fin_louver `/api/parts/20/fin-design/all.zip`
 - 22 s global `/api/examples/export.xlsx`
-- 21 s fin_7mm_plain `/api/parts/22/fin-design/all.zip`
-- 16 s plastic_high `/api/parts/2/vs-country/export.xlsx`
+- 22 s fin_7mm_plain `/api/parts/22/fin-design/all.zip`
 - 15 s global `/api/admin/backups`
-- 12 s plastic_large `/api/parts/3/simulation`
+- 14 s plastic_high `/api/parts/2/vs-country/export.xlsx`
+- 13 s plastic_large `/api/parts/3/simulation`
 - 12 s robustness `/api/parts/23/drawing-data`
-- 11 s diecast_high `/api/parts/10/country-comparison`
-- 11 s plastic_large `/api/parts/3/tool-design`
-- 11 s sheet_multistage `/api/parts/12/tool-design.zip`
-- 11 s sheet_drawn_large `/api/parts/14/tool-design.zip`
-- 10 s sheet_channel_large `/api/parts/15/tool-design.zip`
-- 10 s plastic_large `/api/parts/3/fea`
+- 11 s plastic_large `/api/parts/3/fea`
+- 11 s plastic_high `/api/parts/2/tool-design.zip`
+- 11 s sheet_channel_large `/api/parts/15/tool-design.zip`
+- 10 s sheet_multistage `/api/parts/12/tool-design.zip`
+- 10 s plastic_large `/api/parts/3/tool-design`
+- 10 s plastic_high `/api/parts/2/tool-design`
+- 10 s plastic_high `/api/parts/2/fea`

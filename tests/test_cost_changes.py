@@ -77,7 +77,7 @@ def test_threshold_and_default_date_come_from_master_data():
 def test_excel_and_pdf_downloads():
     """Stage 56: the same report as Excel (Summary, Parts, Cost lines) and PDF."""
     import io
-    from openpyxl import load_workbook
+    from tests.xl import load_workbook          # stage 67: without the brand rows
     p = project()
     pid = costed_part(p, "CC-6")
     backdate(pid, 1, datetime(2026, 1, 10, 9, 0))

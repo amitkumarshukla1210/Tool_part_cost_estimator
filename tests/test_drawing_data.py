@@ -5,7 +5,7 @@ import zipfile
 
 import ezdxf
 from fastapi.testclient import TestClient
-from openpyxl import load_workbook
+from tests.xl import load_workbook          # stage 67: without the brand rows
 from pypdf import PdfReader
 
 from backend.app import drawing_data, mould_db, register_setup
