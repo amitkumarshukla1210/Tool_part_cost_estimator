@@ -207,7 +207,9 @@ What the later stages added (details in README):
   `piece_cost._family`: share of tool cost / CAPEX, same shot also family machine, longest cycle, MHR and labour × share %
   (nodes fam:pct / fam:mhr / fam:lab); key gets family [id, version, pct]. Page `/family-tools` (menu via auth.js), part panel
   `#famOut` switch. Outputs: layout.pdf (blocks on the base + split), export.pdf (layout + tool cost sheet), export.xlsx (sheet
-  "Family split" first), pack.zip. Audit: FAMILY_CASES (5), 0 findings. One part = one family at most.
+  "Family split" first), pack.zip. Audit: FAMILY_CASES (5), 1,424 calls, 0 findings. One part = one family at most.
+  Suite 588 passed (FEA tests need Gmsh + CalculiX: in a fresh cloud container pip install -r requirements-fea.txt,
+  apt-get install calculix-ccx libglu1-mesa libxcursor1 libxft2 libxinerama1).
 - To open a STEP: his CAD, eDrawings Viewer (SOLIDWORKS free downloads; not "3DEXPERIENCE Exchange", that is a SOLIDWORKS add-in),
   CAD Assistant, FreeCAD, or the app's own 3D viewer. Windows 3D Viewer opens the STL, not STEP.
 - Amit's PC: kit at `D:\Project\DTC Tool and mould`, app on port 8100, CalculiX 2.22 `ccx_static.exe` in

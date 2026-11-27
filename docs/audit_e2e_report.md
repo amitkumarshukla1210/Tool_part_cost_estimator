@@ -1,6 +1,6 @@
 # End-to-end audit report
 
-Run on the current code, 2026-11-27 03:34, 1273 calls in 27.9 min.
+Run on the current code, 2026-11-27 16:51, 1424 calls in 29.4 min.
 
 | Case | Part type | Tools | RM INR | Tool CAPEX INR | Part cost INR | Findings |
 |---|---|---|---|---|---|---|
@@ -22,6 +22,11 @@ Run on the current code, 2026-11-27 03:34, 1273 calls in 27.9 min.
 | fin_louver | - | - | 430.57 | 7,679,003.76 | 543.55 | none |
 | fin_one_row_high | - | - | 269.49 | 7,679,003.76 | 333.80 | none |
 | fin_7mm_plain | - | - | 410.61 | 6,481,355.67 | 567.82 | none |
+| family_plastic | family | 1 | - | 14,924,855.38 | 15.66 | none |
+| family_eps | family | 1 | - | 630,176.78 | 4.88 | none |
+| family_diecast | family | 1 | - | 12,401,704.31 | 68.52 | none |
+| family_sheet_stroke | family | 3 | - | 855,647.15 | 9.01 | none |
+| family_sheet_swap | family | 1 | - | 230,744.44 | 8.46 | none |
 
 ## Findings (0)
 
@@ -29,18 +34,16 @@ None.
 
 ## Slowest calls
 
-- 33 s fin_one_row_high `/api/parts/21/fin-design/all.zip`
-- 30 s fin_louver `/api/parts/20/fin-design/all.zip`
-- 22 s global `/api/examples/export.xlsx`
-- 22 s fin_7mm_plain `/api/parts/22/fin-design/all.zip`
-- 15 s global `/api/admin/backups`
+- 29 s fin_one_row_high `/api/parts/21/fin-design/all.zip`
+- 29 s fin_louver `/api/parts/20/fin-design/all.zip`
+- 21 s global `/api/examples/export.xlsx`
+- 20 s family_eps `/api/parts/25/piece-cost`
+- 20 s fin_7mm_plain `/api/parts/22/fin-design/all.zip`
+- 17 s family_plastic `/api/parts/23/piece-cost`
+- 14 s global `/api/admin/backups`
 - 14 s plastic_high `/api/parts/2/vs-country/export.xlsx`
-- 13 s plastic_large `/api/parts/3/simulation`
-- 12 s robustness `/api/parts/23/drawing-data`
+- 13 s family_diecast `/api/parts/28/piece-cost`
+- 12 s robustness `/api/parts/34/drawing-data`
+- 11 s sheet_multistage `/api/parts/12/tool-design.zip`
 - 11 s plastic_large `/api/parts/3/fea`
-- 11 s plastic_high `/api/parts/2/tool-design.zip`
-- 11 s sheet_channel_large `/api/parts/15/tool-design.zip`
-- 10 s sheet_multistage `/api/parts/12/tool-design.zip`
-- 10 s plastic_large `/api/parts/3/tool-design`
-- 10 s plastic_high `/api/parts/2/tool-design`
-- 10 s plastic_high `/api/parts/2/fea`
+- 10 s sheet_channel_large `/api/parts/15/tool-design.zip`
