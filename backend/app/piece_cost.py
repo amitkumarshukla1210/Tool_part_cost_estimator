@@ -125,6 +125,28 @@ def graft(t: Trace, sub: dict, prefix: str) -> str:
     return prefix + sub["root"]
 
 
+def _family(part_id: int, country: str | None, rev_id) -> dict | None:
+    """Stage 68: the family tool the part uses (switch "family tool" and a calculated version), with its share;
+    in a country comparison the family is worked out live in that country."""
+    from . import families
+    f = families.uses_family(part_id)
+    if not f:
+        return None
+    if country:
+        try:
+            tr = families.live(f["family_id"], country)
+        except Exception as exc:   # noqa: BLE001 - shown as the part-cost problem
+            raise PieceError(f"Family tool {f['code']} in {country}: {exc}") from None
+        share = next(s for s in tr["shares"] if s["part_id"] == part_id)
+        f = f | {"share": share, "version": "live"}
+    else:
+        tr = families.trace(f["family_id"], f["version"])
+        if f["share"].get("revision_id") not in (None, rev_id):
+            raise PieceError(f"Family tool {f['code']} version {f['version']} was calculated with another revision of this part: "
+                             "recalculate the family tool.")
+    return f | {"trace": tr, "same_shot": f["mode"] == "same_shot"}
+
+
 def master_hash(part_type: str) -> str:
     """Fingerprint of the master data the part cost uses (piece / MHR / labour formulas and inputs, machines, labour grades,
     Parameters of the part type, Insert moulding rules): a change marks the stored part cost outdated and lets it be recalculated."""
@@ -168,6 +190,7 @@ def run(part_id: int, country: str | None = None) -> dict:
         raise PieceError("Calculate the RM cost of the current revision first.")
     if not tool:
         raise PieceError("Calculate the tool cost of the current revision first (it selects the machine).")
+    fam = _family(part_id, country, rev_id)       # stage 68: the part's share of its family tool (switch "family tool")
     country, as_of, cur = rm["country"], rm["as_of"], rm["currency"]
     setup = costing_setup.tables()
     t = Trace(cur, (d.get("trace_overrides") or {}).get("piece"))
@@ -177,6 +200,8 @@ def run(part_id: int, country: str | None = None) -> dict:
     params = master_data.parameters(part_type)
     tool_tr = tool["trace"] if "trace" in tool else register.tool_trace(part_id, tool["version"])
     machine = (tool_tr.get("trial") or {}).get("machine")
+    if fam and fam["same_shot"]:                  # all parts every shot: the family's moulding / press machine
+        machine = (fam["trace"].get("trial") or {}).get("machine") or machine
     if not machine:
         raise PieceError("The tool cost has no moulding / casting machine (clamp force). Check Master data → Machines.")
     grade = params.get("operator_grade")
@@ -210,8 +235,24 @@ def run(part_id: int, country: str | None = None) -> dict:
             fx = f_in / f_out
         ins_cost += i["quantity"] * x["unit_price"] * fx
         notes.append(f"{i['quantity']:g} × {x['part_code']} {x['unit_price']:g} {x['price_currency']}")
+    if fam and fam["same_shot"]:                  # the machine hour and the crew are shared by the parts of every shot
+        pct = fam["share"]["pct"]
+        t.add_input("fam:pct", f"Share of family tool {fam['code']} (machine hour shared by the parts of a shot)", pct, "%",
+                    {"type": "register", "note": f"Family tool {fam['code']} version {fam['version']}: "
+                                                 + ("your %" if fam["share"]["typed"] else "by weight × cavities")})
+        mhr = t.compute("fam:mhr", "MHR share of this part", "mhr * pct / 100", t.nodes[mhr]["unit"], money=True,
+                        names={"mhr": mhr, "pct": "fam:pct"}) and "fam:mhr"
+        lab = t.compute("fam:lab", "Labour rate share of this part", "lab * pct / 100", t.nodes[lab]["unit"], money=True,
+                        names={"lab": lab, "pct": "fam:pct"}) and "fam:lab"
     rules = register_setup.insert_rules()
     capex_inr = tool["tool_capex_inr"] or tool["tool_cost_inr"]
+    tool_cost_inr, tool_note = tool["tool_cost_inr"], f"One tool of tool cost version {tool['version']}"
+    capex_note = f"Tool CAPEX of tool cost version {tool['version']}"
+    if fam:
+        sh = fam["share"]
+        capex_inr = sh["capex_inr"] if sh["capex_inr"] is not None else sh["cost_inr"]
+        tool_cost_inr = sh["cost_inr"]
+        tool_note = capex_note = f"Share {sh['pct']:.2f} % of family tool {fam['code']} version {fam['version']}"
     fx_cur = 1.0 if cur == "INR" else rates.lookup("forex", cur, "", as_of)["value"]
     stage_c = tool_tr.get("stage_c") or {}
     if stage_c.get("tools_for_capacity"):
@@ -225,6 +266,12 @@ def run(part_id: int, country: str | None = None) -> dict:
         cycle = (typed["cycle_s"], "s", you, False)
     else:
         calc, why, cycle_example = calculated_cycle(part_id, part_type)
+        if calc and fam and fam["same_shot"]:      # one shot makes every part: the longest cycle of the family
+            for s_ in fam["trace"]["shares"]:
+                if s_["part_id"] != part_id:
+                    c2, w2, e2 = calculated_cycle(s_["part_id"], part_type)
+                    if c2 and c2 > calc:
+                        calc, why, cycle_example = c2, f"longest cycle of family tool {fam['code']}: {s_['part_code']} · {w2}", e2
         if not calc:   # always the calculated cycle: the target of Parameters is not used for the part cost
             raise PieceError(f"Cycle time: it cannot be calculated ({why}). Type a cycle time on the part to cost it.")
         cycle = (round(calc, 3), "s", reg(why) | ({"is_example": True} if cycle_example else {}), False)
@@ -232,15 +279,16 @@ def run(part_id: int, country: str | None = None) -> dict:
     items = {
         "rm_cost": (rm["net_rm_cost"], cur, reg(f"RM cost version {rm['version']} (rev {rm['rev']})"), True),
         "cycle_s": cycle,
-        "cavities": (typed.get("cavities", tool["cavities"]), "pcs", you if "cavities" in typed else reg(f"Tool cost version {tool['version']}"), False),
+        "cavities": (typed.get("cavities", fam["share"]["cavities"] if fam else tool["cavities"]), "pcs",
+                     you if "cavities" in typed else reg(f"Family tool {fam['code']} version {fam['version']}" if fam
+                                                         else f"Tool cost version {tool['version']}"), False),
         "mhr": mhr, "labour_rate": lab,
         "secondary_ops_pct": (typed.get("secondary_ops_pct", params.get("secondary_ops_pct")), "%",
                               you if "secondary_ops_pct" in typed else {"type": "master", "sheet": "Parameters", "row": f"{part_type} / secondary_ops_pct"}, False),
         "insert_cost": (ins_cost, cur, reg(" + ".join(notes) or "no moulded-in inserts"), True),
         "inserts_per_part": (float(d["insert_count"]), "pcs", reg("Inserts linked to the part"), False),
-        "tool_capex": (capex_inr / fx_cur, cur, reg(f"Tool CAPEX of tool cost version {tool['version']}: INR {capex_inr:,.0f} at the {as_of} forex rate"), True),
-        "tool_cost": (tool["tool_cost_inr"] / fx_cur, cur,
-                      reg(f"One tool of tool cost version {tool['version']}: INR {tool['tool_cost_inr']:,.0f} at the {as_of} forex rate"), True),
+        "tool_capex": (capex_inr / fx_cur, cur, reg(f"{capex_note}: INR {capex_inr:,.0f} at the {as_of} forex rate"), True),
+        "tool_cost": (tool_cost_inr / fx_cur, cur, reg(f"{tool_note}: INR {tool_cost_inr:,.0f} at the {as_of} forex rate"), True),
         "tools_for_capacity": (tools_cap, "tools", reg(cap_note), False),
         "lifetime_volume": ((volume or 0) * (years or 0), "pcs", reg(f"{vnote} × {years} programme years"), False),
         "total_weight_kg": (weight_g / 1000, "kg", reg("Body + inserts weight from the 3D model"), False),
@@ -300,7 +348,11 @@ def run(part_id: int, country: str | None = None) -> dict:
     out["tool_summary"] = {"value": tool_tr["value"], "value_inr": tool_tr["value_inr"], "capex_inr": tool_tr.get("capex_inr"),
                            "currency": tool_tr["currency"], "weight_kg": tool_tr["nodes"]["tool_weight"]["value"]
                            if "tool_weight" in tool_tr["nodes"] else 0.0}
+    if fam:
+        out["family"] = {"id": fam["family_id"], "code": fam["code"], "version": fam["version"], "pct": fam["share"]["pct"],
+                         "mode": fam["mode"]}
     out["key"] = {"revision_id": rev_id, "rm": rm["version"], "tool": tool["version"], "inputs": typed,
+                  **({"family": [fam["family_id"], fam["version"], round(fam["share"]["pct"], 6)]} if fam else {}),
                   "cycle_s": t.value(names["cycle_s"]) if "cycle_s" in names else None,
                   "overrides": (d.get("trace_overrides") or {}).get("piece") or {},
                   "rates": sorted(x["id"] for x in out["rates_used"]), "as_of": as_of, "master": master_hash(part_type)}

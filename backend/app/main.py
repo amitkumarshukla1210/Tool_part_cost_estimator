@@ -23,7 +23,7 @@ from .geometry import PART_TYPES, analyze, blank_estimate, load_step, sheet_thic
 from . import bom_extract as bom_extract_mod
 from . import (capacity, costing_setup, country_rates, file_store, gross_weight, master_data, mould, mould_db, rate_engine, rates,
                register, register_setup, rm_cost, tool_cost, example_values)
-from . import price_master, projects_db
+from . import family_tool, price_master, projects_db
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 THEME_DIR = Path(__file__).resolve().parents[2] / "theme"
@@ -1961,6 +1961,101 @@ def parts_tool_pdf(part_id: int, version: Optional[int] = None, die: Optional[st
                     headers={"Content-Disposition": f'attachment; filename="tool_cost_part_{part_id}{"_" + die if die else ""}.pdf"'})
 
 
+# ---------- family tools (stage 68): one mould / die for 2-4 parts ----------
+
+@app.get("/api/families")
+def families_list():
+    from . import families
+    return families.list_families()
+
+
+@app.get("/api/families/candidates")
+def families_candidates(part_type: str = "", q: str = ""):
+    from . import families
+    return families.candidates(part_type, q)
+
+
+@app.post("/api/families")
+def families_create(data: dict):
+    from . import families
+    return families.save(data)
+
+
+@app.get("/api/families/{fid}")
+def families_get(fid: int):
+    from . import families
+    return families.get(fid)
+
+
+@app.put("/api/families/{fid}")
+def families_update(fid: int, data: dict):
+    from . import families
+    return families.save(data, fid)
+
+
+@app.delete("/api/families/{fid}")
+def families_delete(fid: int):
+    from . import families
+    return families.delete(fid)
+
+
+@app.get("/api/families/{fid}/status")
+def families_status(fid: int):
+    from . import families
+    return families.status(fid)
+
+
+@app.post("/api/families/{fid}/calculate")
+def families_calculate(fid: int, data: Optional[dict] = None):
+    from . import families
+    return families.compute(fid, str((data or {}).get("reason") or "calculated by you").strip()) | {"family": families.get(fid)}
+
+
+@app.get("/api/families/{fid}/trace")
+def families_trace(fid: int, version: Optional[int] = None):
+    from . import families
+    return families.trace(fid, version)
+
+
+@app.put("/api/families/{fid}/parts/{part_id}/use")
+def families_use(fid: int, part_id: int, data: dict):
+    from . import families
+    return families.set_use(fid, part_id, bool(data.get("use_family", True)))
+
+
+@app.get("/api/parts/{part_id}/family")
+def parts_family(part_id: int):
+    from . import families
+    return families.for_part(part_id) or {}
+
+
+@app.get("/api/families/{fid}/export.xlsx")
+def families_excel(fid: int, version: Optional[int] = None):
+    from . import families
+    return _xlsx(families.excel(fid, version), f"family_tool_{fid}.xlsx")
+
+
+@app.get("/api/families/{fid}/export.pdf")
+def families_pdf(fid: int, version: Optional[int] = None):
+    from . import families
+    return Response(families.pdf(fid, version), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="family_tool_{fid}.pdf"'})
+
+
+@app.get("/api/families/{fid}/layout.pdf")
+def families_layout(fid: int, version: Optional[int] = None):
+    from . import families
+    return Response(families.layout_pdf(fid, version), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="family_tool_{fid}_layout.pdf"'})
+
+
+@app.get("/api/families/{fid}/pack.zip")
+def families_pack(fid: int, version: Optional[int] = None):
+    from . import families
+    return Response(families.pack(fid, version), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="family_tool_{fid}_pack.zip"'})
+
+
 @app.post("/api/projects/{project_id}/tool-cost/recalculate")
 def projects_tool_recalculate(project_id: int):
     return register.recalculate_project_tools(project_id)
@@ -2041,6 +2136,7 @@ def _require_xlsx(file: UploadFile) -> None:
         raise HTTPException(400, "Please upload an Excel .xlsx file.")
 
 
+@app.exception_handler(family_tool.FamilyError)
 @app.exception_handler(price_master.PriceError)
 @app.exception_handler(rm_cost.RMError)
 @app.exception_handler(tool_cost.ToolCostError)
@@ -2094,6 +2190,11 @@ def parts_page():
 @app.get("/output-packs")
 def output_packs_page():
     return FileResponse(FRONTEND_DIR / "output-packs.html")
+
+
+@app.get("/family-tools")
+def family_tools_page():
+    return FileResponse(FRONTEND_DIR / "family-tools.html")
 
 
 # ---------------------------------------------------------------- output packs (stage 66) ----------

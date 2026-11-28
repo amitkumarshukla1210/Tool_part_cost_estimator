@@ -9,7 +9,7 @@ Project: **Design to Cost — Part Cost Estimator**, repository `amitkumarshukla
 I am Amit, Head of Operations / costing at an OEM (supply chain, production, strategic sourcing, projects; RM, part and tool cost,
 BOM cost and CAPEX, EBITDA, digital transformation). Answer simply, **INR first**.
 
-**State (27 Nov 2026):** stages 1–67 are built (67 = header + copyright footer on every PDF / Excel, PR 95; fin fixes PR 94; 66 = output packs, PR 92; 66b = faster packs: first ZIP ~1 min, reuse unchanged simulation / FEA, PR 93; 65 = fin die set made to size 2400 × 1600 × 650 mm, ~4700 kg, PR 91; 63 = search on long dropdowns, 64 = fin parts in the country comparison and landed cost, both PR 90; PR 89 = foil width follows typed die rows + fin cases in the audit) (57-62 = heat-exchanger fin dies: cost PR 83, design PR 84, FEA PR 85, fin parts in Parts PR 86, fin simulation PR 87, oil & air system), plus the audit fixes PR 78 (FEA iterative solver, `fea_max_elements`), PR 80 (FEA `fea_mesh_per_circle`, core insert pins) and PR 81 (plastic cooling rod or plate, coring saving) (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
+**State (27 Nov 2026):** stages 1–68 are built (68 = family tools: one mould / die for 2–4 parts, PR 96; 67 = header + copyright footer on every PDF / Excel, PR 95; fin fixes PR 94; 66 = output packs, PR 92; 66b = faster packs: first ZIP ~1 min, reuse unchanged simulation / FEA, PR 93; 65 = fin die set made to size 2400 × 1600 × 650 mm, ~4700 kg, PR 91; 63 = search on long dropdowns, 64 = fin parts in the country comparison and landed cost, both PR 90; PR 89 = foil width follows typed die rows + fin cases in the audit) (57-62 = heat-exchanger fin dies: cost PR 83, design PR 84, FEA PR 85, fin parts in Parts PR 86, fin simulation PR 87, oil & air system), plus the audit fixes PR 78 (FEA iterative solver, `fea_max_elements`), PR 80 (FEA `fea_mesh_per_circle`, core insert pins) and PR 81 (plastic cooling rod or plate, coring saving) (41 = progressive vs stage dies and tool life, PR 51; 42 = part-cost cycle time = the calculated
 cycle, PR 53; 43 = toolmaker review, 44 = design skills, both PR 55; 45 = tool internals, production data, FEA, 3D outputs, PR 57; fixes PR 59, 61, 62;
 46 = cavities, gate, overflow, ejection, cooling of the mould, PR 64; 47 = saved files with revisions, 48 = India vs China per cost line,
 49 = scrap reuse and scrap rate % of RM, all PR 66; 50 = several countries per part, traces for admin, tool life per part,
@@ -197,6 +197,21 @@ What the later stages added (details in README):
   in A1, copyright line under the data, printed header / footer; charts → cells stay; marker `dtc-branded` in keywords.
   UPLOAD (/download, template, price master, drawing-data, drawing_data.xlsx in ZIPs) = printed header / footer only.
   Tests reading downloaded Excel use `tests/xl.py` load_workbook (drops brand rows). Suite 580 passed; audit 0.
+- 68 (PR 96): family tools. `family_tool.py`: `_FamilyMould` / `_FamilyDie` = the single-tool engines (`tool_cost._Run`,
+  `die_cost._DieRun`) with `elements()` = [] (only the family base / die set is built) + the members' lines from their own runs
+  (`register._tool_compute(pid, country, cavities=, capture=)`, embedded with prefix m1: …); vars cavities = Σ, part_weight_g /
+  projected_area_cm2 = Σ n·x ÷ Σ n. Mould base: `arrangements()` (row / column, each block turned or not) → smallest base. Sheet:
+  dies matched by position (F1, F2 …), same stroke = work areas packed with Sizing rule sheet_metal / `family_gap_mm` (EXAMPLE 25, seed),
+  force Σ; swap = largest work area, force max. Lines: `common` ticks {element or "F1|element": bool}; default swap = common,
+  same shot = per part; common = counted once at the largest part's line. Shares: typed % or rest × weight·cav ÷ Σ; own-tool CAPEX
+  for the saving. `families.py`: tables `tool_families` (members [{part_id, cavities, share_pct, use_family}], common, bom) and
+  `family_costs` (versions); `sync_part` keeps parts.tool_cost_inr / tool_capex_inr on the share (also after `compute_tool`);
+  `piece_cost._family`: share of tool cost / CAPEX, same shot also family machine, longest cycle, MHR and labour × share %
+  (nodes fam:pct / fam:mhr / fam:lab); key gets family [id, version, pct]. Page `/family-tools` (menu via auth.js), part panel
+  `#famOut` switch. Outputs: layout.pdf (blocks on the base + split), export.pdf (layout + tool cost sheet), export.xlsx (sheet
+  "Family split" first), pack.zip. Audit: FAMILY_CASES (5), 1,424 calls, 0 findings. One part = one family at most.
+  Suite 588 passed (FEA tests need Gmsh + CalculiX: in a fresh cloud container pip install -r requirements-fea.txt,
+  apt-get install calculix-ccx libglu1-mesa libxcursor1 libxft2 libxinerama1).
 - To open a STEP: his CAD, eDrawings Viewer (SOLIDWORKS free downloads; not "3DEXPERIENCE Exchange", that is a SOLIDWORKS add-in),
   CAD Assistant, FreeCAD, or the app's own 3D viewer. Windows 3D Viewer opens the STL, not STEP.
 - Amit's PC: kit at `D:\Project\DTC Tool and mould`, app on port 8100, CalculiX 2.22 `ccx_static.exe` in

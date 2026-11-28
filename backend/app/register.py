@@ -1928,8 +1928,9 @@ def _tool_master_hash(part_type: str) -> str:
     return hashlib.sha1(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()[:12]
 
 
-def _tool_compute(part_id: int, country: str | None = None) -> dict:
-    """Dry run: the traced tool cost of the part's current revision. Raises ToolNotApplicable / ToolCostError."""
+def _tool_compute(part_id: int, country: str | None = None, cavities: int | None = None, capture: dict | None = None) -> dict:
+    """Dry run: the traced tool cost of the part's current revision. Raises ToolNotApplicable / ToolCostError.
+    `cavities` replaces the part's cavities (family tool, stage 68); `capture` receives the engine inputs used."""
     d = part_detail(part_id, with_rm=False)
     why = tool_eligibility(d)
     if why:
@@ -1972,11 +1973,11 @@ def _tool_compute(part_id: int, country: str | None = None) -> dict:
     as_of = d["costing_month"] or rates.current_month()
     learned = _learned_for(part_id, part_type, d["material"])
     if part_type == "sheet_metal":
-        return _die_compute(part_id, d, rev, t, g, cap, volume, volume_note, typed, country, as_of, learned)
+        return _die_compute(part_id, d, rev, t, g, cap, volume, volume_note, typed, country, as_of, learned, capture)
     inp = tool_cost.ToolInput(
         annual_volume=cap["inputs"]["annual_volume"], programme_years=cap["inputs"]["programme_years"],
         bom=typed.get("bom") or {}, learned=learned, overrides=(d.get("trace_overrides") or {}).get("tool") or {},
-        part_type=part_type, cavities=typed.get("cavities") or cap["cavities_per_tool"],
+        part_type=part_type, cavities=cavities or typed.get("cavities") or cap["cavities_per_tool"],
         part_length_mm=across[0], part_width_mm=across[1], part_height_mm=g["bbox_axes_mm"][pull],
         projected_area_cm2=g["projected_area_mm2"][pull] / 100, part_weight_g=t.value("weight"),
         part_volume_cm3=g["volume_cm3"], part_surface_cm2=g["surface_area_mm2"] / 100,
@@ -1996,13 +1997,16 @@ def _tool_compute(part_id: int, country: str | None = None) -> dict:
         ("projected_area_cm2", f"Shadow area along {pull.upper()}, through-holes removed"),
         ("part_volume_cm3", "Measured from the STEP file"), ("part_surface_cm2", "Measured from the STEP file"))}
     sources["part_weight_g"] = {"type": "register", "note": "Net (body) weight = CAD volume × material density (Materials)"}
-    sources["cavities"] = you if typed.get("cavities") else {
+    sources["cavities"] = {"type": "user", "note": "Cavities of this part in its family tool (stage 68)"} if cavities else \
+        you if typed.get("cavities") else {
         "type": "register", "note": f"{stage_c}: {cap['cavities_needed']:g} needed → {cap['cavities_per_tool']} per tool"}
     sources["tools_count"] = {"type": "register", "note": f"{stage_c}: max(tools for capacity {cap['tools_for_capacity']}, "
                                                           f"tools for tool life {cap['tools_for_life']})"}
     for k in ("hot_runner", "slides_per_cavity", "lifters_per_cavity", "inserts_per_cavity"):
         sources[k] = you if k in typed else {"type": "register", "note": "Default (none); set it under Tool features"}
     sources["warranty_on"] = you if "warranty" in typed else {"type": "register", "note": "Default: included"}
+    if capture is not None:
+        capture |= {"inp": inp, "sources": sources, "part": d, "rev": rev}
     r = tool_cost.run(inp, sources)
     r["key"] = {"revision_id": rev["id"], "part_type": part_type, "material": d["material"], "country": country,
                 "as_of": as_of, "inputs": typed, "cavities": inp.cavities, "tools_count": inp.tools_count,
@@ -2039,7 +2043,7 @@ def _machining_compute(part_id: int, d: dict, country: str | None) -> dict:
     return r
 
 
-def _die_compute(part_id, d, rev, t, g, cap, volume, volume_note, typed, country, as_of, learned) -> dict:
+def _die_compute(part_id, d, rev, t, g, cap, volume, volume_note, typed, country, as_of, learned, capture=None) -> dict:
     """Sheet-metal dies, stage-wise (roadmap stage 23): the dies of the operations in order, each with its BOM and cost."""
     from . import die_cost
     try:
@@ -2068,6 +2072,8 @@ def _die_compute(part_id, d, rev, t, g, cap, volume, volume_note, typed, country
                                                           f"tools for tool life {cap['tools_for_life']})"}
     sources["annual_volume"] = sources["programme_years"] = {"type": "register", "note": stage_c}
     sources["warranty_on"] = {"type": "user", "note": "Tool features"} if "warranty" in typed else {"type": "register", "note": "Default: included"}
+    if capture is not None:
+        capture |= {"inp": inp, "sources": sources, "part": d, "rev": rev, "sheet": sheet, "layout": layout}
     try:
         r = die_cost.run(inp, sheet, layout, sources)
     except ValueError as exc:
@@ -2487,6 +2493,9 @@ def compute_tool(part_id: int, reason: str = "calculated") -> dict:
             created_by=user())).inserted_primary_key[0]
         conn.execute(db.parts.update().where(db.parts.c.id == part_id).values(
             tool_cost_id=tid, tool_cost_inr=r["value_inr"], tool_capex_inr=r["capex_inr"]))
+        from . import families
+        if families.uses_family(part_id, conn):      # stage 68: the part's register values stay its family share
+            families.sync_part(conn, part_id)
         _log(conn, "part", part_id, "tool_cost_calculated", {
             "version": version, "tool cost per tool (INR)": round(r["value_inr"], 2),
             "tool CAPEX (INR)": round(r["capex_inr"], 2) if r["capex_inr"] is not None else None,

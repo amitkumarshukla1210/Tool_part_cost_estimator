@@ -2015,6 +2015,40 @@ When the rows move, everything that points at the cells moves with them: formula
 frozen panes, filters, validations, conditional formats and pictures. A workbook with charts keeps its cells (its picture and
 footer are still added). Nothing is recalculated: ₹0 effect. File: `branding.py` (`FOOTER`, `UPLOAD`).
 
+## Family tools: one mould / die for 2–4 parts (stage 68)
+
+Menu **Family tools** (`/family-tools`). Each part is uploaded and costed as usual (own RM, drawings, simulation, outputs stay as they are);
+then you group 2–4 parts of one tool type into a family tool.
+
+| Tool type | Mode | What the tool is | How it is costed |
+|---|---|---|---|
+| Plastic, EPS, die casting, blow, foundry moulds | **Same shot** | every shot makes all parts; one mould base takes the cavity blocks of every part | each part's own cavity / core lines (its own engine, with its family cavities) + **one** base: every side-by-side arrangement (each block straight or turned) is tried, the smallest standard base wins; clamp force and try-out machine from Σ cavities × area |
+| Sheet metal (stage or progressive) | **Same stroke** | every stroke makes all parts; one die plate per stage takes the work areas of every part | per stage: work areas side by side with `family_gap_mm` (new Sizing rule, EXAMPLE 25 mm) → die set; press force = Σ |
+| Sheet metal (stage or progressive) | **Swap inserts** | one common die set; parts run one after another, only inserts / changed stations are swapped | every BOM line starts **common** (counted once at the largest part's value); you tick the lines each part needs of its own (e.g. 1–2 changed stations, or all inserts) |
+
+Then the same tool formulas as a single tool (try-out, overhead, profit, packing, transport, warranty); tools over the programme =
+the most any part needs. Every value is traced (family nodes + each part's embedded trace).
+
+**Split back to the parts:** share % per part = your % or, when blank, part weight × cavities ÷ Σ (the rest of 100 % after the parts
+you typed; all typed must add to 100 %). Share of tool cost and CAPEX = family value × share %.
+
+| Example (sample parts, EXAMPLE rates) | Family tool CAPEX | Own tools Σ | ₹ effect |
+|---|---|---|---|
+| 2 brackets, swap inserts, all lines common | ₹1.85 lakh | ₹3.70 lakh | **₹1.85 lakh saved** |
+| 2 brackets, same stroke | ₹4.08 lakh | ₹3.70 lakh | ₹0.38 lakh more (bigger die set + press) |
+| 2 covers 2 + 1 cavities, same shot | ₹5.54 lakh | ₹3.34 lakh (1 cavity each) | ₹2.21 lakh more, but 3 cavities instead of 2 |
+
+**Switch per part** (Family tools page and the part panel): *family tool* (default) or *own tool*. With *family tool* the part register,
+Dashboard, CAPEX and part cost use its share; in **same shot** the part cost also uses the family's machine, the longest cycle of the
+family and the machine hour × share % (each part carries its part of every shot). Swap inserts: own machine time, only the tool is shared.
+A part is in one family at most; deleting the family gives every part its own tool back.
+
+**Versions:** *Calculate & store version* stores a numbered version (unchanged inputs → no new version); a changed part, rate, tick,
+share or master data shows "changed since version n". **Outputs:** Layout & split PDF (cavity blocks / work areas on the base, the split
+table, saving), tool cost PDF and Excel (sheet *Family split* + the usual tool cost sheets), family pack ZIP (both PDFs, Excel, BOM CSV,
+read-me). Header and copyright footer as on every file. API: `/api/families…`. Files: `family_tool.py` (engine), `families.py`
+(storage, switch, outputs), `frontend/family-tools.*`.
+
 ## User guide
 
 **Help → User guide (PDF)** (`frontend/docs/DTC_User_Guide.pdf`): every page of the tool (dashboard, cost changes, import, parts and the

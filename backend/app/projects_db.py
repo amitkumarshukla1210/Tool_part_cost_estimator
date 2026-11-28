@@ -220,6 +220,46 @@ tool_costs = Table(
     Index("ix_tool_costs_part", "part_id"),
 )
 
+# Family tools (stage 68): one mould / die for 2-4 parts; members = [{part_id, cavities, share_pct, use_family}]
+tool_families = Table(
+    "tool_families", meta,
+    Column("id", Integer, primary_key=True),
+    Column("code", String(80), nullable=False, unique=True),
+    Column("name", String(300), default=""),
+    Column("part_type", String(30), nullable=False),
+    Column("mode", String(30), nullable=False),        # same_shot, swap_inserts
+    Column("country", String(10), default=""),         # tool country (blank = the parts' tool country)
+    Column("members", JSON),
+    Column("common", JSON),                            # your ticks: {line key: true = common, false = per part}
+    Column("bom", JSON),                               # your changes of the family base / die set lines
+    Column("notes", Text, default=""),
+    Column("created_by", String(100), default=""),
+    Column("created_at", DateTime, default=now),
+    Column("updated_at", DateTime, default=now, onupdate=now),
+)
+
+family_costs = Table(
+    "family_costs", meta,
+    Column("id", Integer, primary_key=True),
+    Column("family_id", ForeignKey("tool_families.id", ondelete="CASCADE"), nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("country", String(10), nullable=False),
+    Column("currency", String(10), nullable=False),
+    Column("as_of", String(7), nullable=False),
+    Column("key", JSON),
+    Column("tool_cost", Float),
+    Column("tool_cost_inr", Float),
+    Column("tool_capex_inr", Float),
+    Column("shares", JSON),                            # per part: pct, cost_inr, capex_inr, own tool
+    Column("example", JSON),
+    Column("trace", JSON),
+    Column("reason", String(300), default=""),
+    Column("created_by", String(100), default=""),
+    Column("created_at", DateTime, default=now),
+    UniqueConstraint("family_id", "version"),
+    Index("ix_family_costs_family", "family_id"),
+)
+
 piece_costs = Table(
     "piece_costs", meta,
     Column("id", Integer, primary_key=True),
